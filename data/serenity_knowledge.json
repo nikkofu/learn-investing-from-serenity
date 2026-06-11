@@ -1,0 +1,148 @@
+{
+  "profile": {
+    "handle": "@aleabitoreddit",
+    "alias": "Serenity / 白毛股神",
+    "reddit": "u/AleaBito",
+    "bio": "AI/Semi Supply Chain Analyst. ex-RISC-V FDN, AI research scientist; now trading unknown bottlenecks.",
+    "selfReportedReturns": "自称 1 年回报 600%+，年内一度 3840%+（未经第三方审计，仅供参考）",
+    "coreIdea": "不直接买英伟达等终端巨头，而是沿确定性趋势（AI/半导体）拆解供应链，押注被忽视但不可替代、供给受限、尚未被充分定价的上游“瓶颈点(chokepoint)”环节。"
+  },
+  "method": {
+    "name": "瓶颈点投资法 (Chokepoint / Bottleneck Investing)",
+    "summary": "先确认确定性大趋势 → 拆解产业链 → 找到最难替代、供给最受限的上游环节 → 在市场未充分定价前布局。",
+    "factors": [
+      { "key": "demand", "zh": "确定需求", "en": "Confirmed Demand", "weight": 0.2, "desc": "下游趋势被验证、需求明确且持续。" },
+      { "key": "supply", "zh": "受限供给", "en": "Constrained Supply", "weight": 0.3, "desc": "“没它不行”，短期难复制/替代（技术壁垒、产能、寡头）。瓶颈核心。" },
+      { "key": "attention", "zh": "低关注度", "en": "Low Attention", "weight": 0.15, "desc": "市场认知滞后、估值未充分反映。" },
+      { "key": "valueCapture", "zh": "价值捕获", "en": "Value Capture", "weight": 0.2, "desc": "定价权、毛利率、客户锁定、供应份额。" },
+      { "key": "catalyst", "zh": "催化剂", "en": "Catalyst", "weight": 0.15, "desc": "财报、客户量产、政策、指数纳入、大单、并购等。" }
+    ],
+    "workflow": [
+      "找大趋势：确认确定性强、可持续的宏观叙事（AI 算力扩张、半导体自主可控）。",
+      "画产业链地图：从下游终端逐层拆到上游材料/设备/零部件。",
+      "识别真瓶颈：找供给最受限、最不可替代的“卡脖子”环节。",
+      "找证据链：用财务、订单、产能、客户、技术壁垒验证瓶颈真实性。",
+      "做好风控：警惕过拟合、追随者反身性、幸存者偏差；逻辑被证伪即退出。",
+      "匹配仓位：仓位与研究深度、确定性匹配，而非情绪。"
+    ]
+  },
+  "principles": [
+    "押上游瓶颈而非下游终端：终端（如 GPU 巨头）已被充分定价，超额收益在供给受限的上游环节。",
+    "确定性优先：先要有被验证的需求/趋势，再谈弹性。",
+    "冷门 + 不可替代 = 重估空间：低关注度的隐形冠军一旦被发现，估值重估最猛。",
+    "用证据链而非情绪：关注订单、产能、客户验证、毛利率，而非口号式‘长期持有’。",
+    "催化剂驱动节奏：财报、量产、政策、指数纳入是价值兑现的触发点。",
+    "风控与反身性：当一只票因‘跟风者’暴涨偏离基本面时，警惕反身性回撤；分批与对冲。"
+  ],
+  "themes": [
+    {
+      "name": "AI 算力 / Neocloud 基础设施",
+      "usExamples": ["NBIS", "IREN", "CRWV", "CIFR", "WULF", "APLD"],
+      "thesis": "Mag7 资本开支军备竞赛 + 英伟达产能配给制，使算力供给端成为瓶颈。Serenity 重仓 neocloud（算力租赁）与上游连接/光通信。A 股对应的瓶颈点集中在光模块/光芯片、液冷温控、高速 PCB、IDC。",
+      "aShareMapping": [
+        { "segment": "光模块（chokepoint：高速光模块全球寡头）", "companies": [
+          { "code": "300308", "name": "中际旭创", "note": "全球光模块龙头，800G/1.6T 放量直接受益 AI 算力" },
+          { "code": "300502", "name": "新易盛", "note": "高速光模块，高毛利、海外大客户" },
+          { "code": "300394", "name": "天孚通信", "note": "光器件/光引擎，配套光模块上游" }
+        ]},
+        { "segment": "光芯片（chokepoint：国产替代+技术壁垒）", "companies": [
+          { "code": "688498", "name": "源杰科技", "note": "国产高速激光器光芯片稀缺标的" },
+          { "code": "688313", "name": "仕佳光子", "note": "光芯片/光器件，国产化逻辑" },
+          { "code": "002281", "name": "光迅科技", "note": "光通信器件与模块一体化" }
+        ]},
+        { "segment": "液冷/温控（chokepoint：高功率密度散热）", "companies": [
+          { "code": "002837", "name": "英维克", "note": "数据中心液冷温控龙头" },
+          { "code": "301018", "name": "申菱环境", "note": "数据中心专用空调/液冷" }
+        ]},
+        { "segment": "高速 PCB / 覆铜板", "companies": [
+          { "code": "002463", "name": "沪电股份", "note": "AI 服务器高速 PCB 核心供应商" },
+          { "code": "600183", "name": "生益科技", "note": "高速覆铜板材料" }
+        ]},
+        { "segment": "IDC / 算力租赁", "companies": [
+          { "code": "300442", "name": "润泽科技", "note": "第三方 IDC，算力租赁 A 股映射" }
+        ]}
+      ]
+    },
+    {
+      "name": "高速连接 / 互连",
+      "usExamples": ["ALAB", "CRDO", "CLS"],
+      "thesis": "AI 集群内部 scale-up/scale-out 互连成为新瓶颈（PCIe retimer、AEC 高速铜缆、光电共封）。A 股对应高速铜缆、连接器、线束。",
+      "aShareMapping": [
+        { "segment": "高速铜缆 / 线材", "companies": [
+          { "code": "002130", "name": "沃尔核材", "note": "高速铜缆/AEC 受益互连瓶颈" },
+          { "code": "300913", "name": "兆龙互连", "note": "高速数据线缆/连接" }
+        ]},
+        { "segment": "连接器 / 精密制造", "companies": [
+          { "code": "002475", "name": "立讯精密", "note": "连接器与精密制造平台" }
+        ]}
+      ]
+    },
+    {
+      "name": "半导体自主可控 / 国产替代",
+      "usExamples": ["TSM", "AMD", "SMCI"],
+      "thesis": "A 股最强的‘确定需求+催化剂’来源。制裁与大基金推动设备、材料、存储国产替代。瓶颈点在设备零部件、关键材料、先进封装。",
+      "aShareMapping": [
+        { "segment": "半导体设备（chokepoint）", "companies": [
+          { "code": "002371", "name": "北方华创", "note": "平台型半导体设备龙头" },
+          { "code": "688012", "name": "中微公司", "note": "刻蚀设备国产替代" },
+          { "code": "688072", "name": "拓荆科技", "note": "薄膜沉积设备" },
+          { "code": "688120", "name": "华海清科", "note": "CMP 抛光设备稀缺" }
+        ]},
+        { "segment": "关键材料（chokepoint：高壁垒）", "companies": [
+          { "code": "688126", "name": "沪硅产业", "note": "大硅片国产化" },
+          { "code": "300054", "name": "鼎龙股份", "note": "CMP 抛光垫/材料" },
+          { "code": "688019", "name": "安集科技", "note": "CMP 抛光液/电镀液" }
+        ]},
+        { "segment": "存储 / 算力芯片", "companies": [
+          { "code": "603986", "name": "兆易创新", "note": "存储+MCU 国产龙头" },
+          { "code": "300223", "name": "北京君正", "note": "车规存储/计算" },
+          { "code": "688256", "name": "寒武纪", "note": "国产 AI 算力芯片，国产替代弹性" }
+        ]}
+      ]
+    },
+    {
+      "name": "机器人 / 减速器",
+      "usExamples": ["RR", "KRKNF", "ONDS"],
+      "thesis": "人形机器人是新趋势，核心部件谐波减速器、丝杠是供给受限的瓶颈环节（少数厂商掌握精度/良率）。",
+      "aShareMapping": [
+        { "segment": "谐波减速器（chokepoint）", "companies": [
+          { "code": "688017", "name": "绿的谐波", "note": "国产谐波减速器龙头（被点名后涨停）" },
+          { "code": "002472", "name": "双环传动", "note": "齿轮/减速器精密传动" }
+        ]},
+        { "segment": "丝杠 / 精密部件", "companies": [
+          { "code": "300580", "name": "贝斯特", "note": "精密零部件，丝杠布局" }
+        ]}
+      ]
+    },
+    {
+      "name": "稀土 / 国防安全",
+      "usExamples": ["MP", "RKLB", "KTOS"],
+      "thesis": "稀土永磁是机器人/新能源/国防的上游瓶颈，资源+磁材双重稀缺，政策催化强。",
+      "aShareMapping": [
+        { "segment": "稀土资源 / 永磁（chokepoint）", "companies": [
+          { "code": "600111", "name": "北方稀土", "note": "稀土资源龙头" },
+          { "code": "300748", "name": "金力永磁", "note": "高性能钕铁硼磁材" },
+          { "code": "000970", "name": "中科三环", "note": "稀土永磁材料" }
+        ]}
+      ]
+    },
+    {
+      "name": "储能 / 电源",
+      "usExamples": ["FLNC", "EOSE", "TE", "SEI"],
+      "thesis": "AI 数据中心用电激增，储能与电源是配套瓶颈。",
+      "aShareMapping": [
+        { "segment": "储能 / 电源", "companies": [
+          { "code": "300274", "name": "阳光电源", "note": "储能/逆变器龙头" },
+          { "code": "002851", "name": "麦格米特", "note": "电源/数据中心供电" }
+        ]}
+      ]
+    }
+  ],
+  "risks": [
+    "自报收益未经审计，存在幸存者偏差与‘拉高出货’质疑。",
+    "追随者反身性：被点名标的常 20CM 涨停后回落，跟风高位接盘风险大。",
+    "美股逻辑映射 A 股并非一一对应，需结合 A 股基本面与估值重新验证。",
+    "瓶颈推断易过拟合；早期估值难锚定。",
+    "本工具与知识库仅供研究学习，不构成任何投资建议（NFA）。"
+  ]
+}
