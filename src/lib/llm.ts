@@ -32,6 +32,52 @@ export async function chat(
   return completion.choices[0]?.message?.content ?? "";
 }
 
+/** A streamed delta: model "thinking" (reasoning) or visible answer (content). */
+export interface StreamDelta {
+  kind: "reasoning" | "content";
+  text: string;
+}
+
+/** OpenRouter/DeepSeek-style reasoning fields are not in the base SDK delta type. */
+interface DeltaWithReasoning {
+  content?: string | null;
+  reasoning?: string | null;
+  reasoning_content?: string | null;
+}
+
+/**
+ * Stream an OpenAI-compatible chat completion, yielding reasoning + content
+ * deltas as they arrive so the UI can show progress live.
+ */
+export async function* chatStream(
+  system: string,
+  user: string,
+  opts: { temperature?: number } = {}
+): AsyncGenerator<StreamDelta, void, unknown> {
+  const config = await loadConfig();
+  if (!config) throw new LLMNotConfiguredError();
+
+  const client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL });
+
+  const stream = await client.chat.completions.create({
+    model: config.model,
+    temperature: opts.temperature ?? 0.4,
+    stream: true,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+  });
+
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta as DeltaWithReasoning | undefined;
+    if (!delta) continue;
+    const reasoning = delta.reasoning ?? delta.reasoning_content;
+    if (reasoning) yield { kind: "reasoning", text: reasoning };
+    if (delta.content) yield { kind: "content", text: delta.content };
+  }
+}
+
 /** Extract a JSON object from model output, tolerating code fences / stray text. */
 export function parseJsonObject<T>(text: string): T {
   let s = text.trim();

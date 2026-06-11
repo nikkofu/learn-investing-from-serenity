@@ -3,14 +3,24 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { SupplyChainMap } from "@/lib/types";
+import { ProgressTrace, applyStageEvent, type Stage } from "@/components/ProgressTrace";
+import { readNdjson } from "@/lib/stream-client";
 
 const SUGGESTIONS = ["AI 算力 / 光模块", "人形机器人", "半导体国产替代", "CPO / 硅光", "稀土永磁", "液冷数据中心"];
+
+const MAP_STAGES: { key: string; label: string }[] = [
+  { key: "reason", label: "AI 拆解产业链与瓶颈点" },
+  { key: "summary", label: "整理产业链节点" },
+];
 
 export default function MapPage() {
   const [trend, setTrend] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [map, setMap] = useState<SupplyChainMap | null>(null);
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [reasoning, setReasoning] = useState("");
+  const [content, setContent] = useState("");
 
   async function run(t?: string) {
     const q = (t ?? trend).trim();
@@ -19,15 +29,36 @@ export default function MapPage() {
     setLoading(true);
     setError("");
     setMap(null);
+    setStages(MAP_STAGES.map((s) => ({ ...s, status: "pending" })));
+    setReasoning("");
+    setContent("");
     try {
       const res = await fetch("/api/map", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ trend: q }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "拆解失败");
-      setMap(data.map);
+      if (!(res.headers.get("content-type") || "").includes("ndjson")) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "拆解失败");
+      }
+      await readNdjson(res, (ev) => {
+        switch (ev.type as string) {
+          case "stage":
+            setStages((prev) => applyStageEvent(prev, ev.key as string, ev.status as "start" | "done"));
+            break;
+          case "token":
+            if (ev.kind === "reasoning") setReasoning((r) => r + (ev.text as string));
+            else setContent((c) => c + (ev.text as string));
+            break;
+          case "result":
+            setMap(ev.map as SupplyChainMap);
+            break;
+          case "error":
+            setError(ev.message as string);
+            break;
+        }
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "拆解失败");
     } finally {
@@ -68,7 +99,18 @@ export default function MapPage() {
         ))}
       </div>
 
-      {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
+      {error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+          <p>{error}</p>
+          {error.includes("未配置") && (
+            <a href="/settings" className="mt-1 inline-block text-emerald-300 underline">前往「设置」配置 LLM →</a>
+          )}
+        </div>
+      )}
+
+      {(loading || content || reasoning || stages.some((s) => s.status !== "pending")) && (
+        <ProgressTrace stages={stages} reasoning={reasoning} content={content} running={loading} />
+      )}
 
       {map && (
         <div className="space-y-4">
