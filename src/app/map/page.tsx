@@ -21,6 +21,7 @@ export default function MapPage() {
   const [stages, setStages] = useState<Stage[]>([]);
   const [reasoning, setReasoning] = useState("");
   const [content, setContent] = useState("");
+  const [structured, setStructured] = useState("");
 
   async function run(t?: string) {
     const q = (t ?? trend).trim();
@@ -32,6 +33,7 @@ export default function MapPage() {
     setStages(MAP_STAGES.map((s) => ({ ...s, status: "pending" })));
     setReasoning("");
     setContent("");
+    setStructured("");
     try {
       const res = await fetch("/api/map", {
         method: "POST",
@@ -49,6 +51,7 @@ export default function MapPage() {
             break;
           case "token":
             if (ev.kind === "reasoning") setReasoning((r) => r + (ev.text as string));
+            else if (ev.kind === "structured") setStructured((s) => s + (ev.text as string));
             else setContent((c) => c + (ev.text as string));
             break;
           case "result":
@@ -108,8 +111,8 @@ export default function MapPage() {
         </div>
       )}
 
-      {(loading || content || reasoning || stages.some((s) => s.status !== "pending")) && (
-        <ProgressTrace stages={stages} reasoning={reasoning} content={content} running={loading} />
+      {(loading || content || reasoning || structured || stages.some((s) => s.status !== "pending")) && (
+        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} />
       )}
 
       {map && (

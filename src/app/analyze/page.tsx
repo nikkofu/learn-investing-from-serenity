@@ -51,6 +51,7 @@ function AnalyzeInner() {
   const [stages, setStages] = useState<Stage[]>([]);
   const [reasoning, setReasoning] = useState("");
   const [content, setContent] = useState("");
+  const [structured, setStructured] = useState("");
   const [preview, setPreview] = useState<{ quote: StockQuote; stats: Stats } | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -62,6 +63,7 @@ function AnalyzeInner() {
     setStages(ANALYZE_STAGES.map((s) => ({ ...s, status: "pending" })));
     setReasoning("");
     setContent("");
+    setStructured("");
     setPreview(null);
     try {
       const res = await fetch("/api/analyze", {
@@ -80,6 +82,7 @@ function AnalyzeInner() {
             break;
           case "token":
             if (ev.kind === "reasoning") setReasoning((r) => r + (ev.text as string));
+            else if (ev.kind === "structured") setStructured((s) => s + (ev.text as string));
             else setContent((c) => c + (ev.text as string));
             break;
           case "quote":
@@ -194,8 +197,8 @@ function AnalyzeInner() {
         </div>
       )}
 
-      {(loading || content || reasoning || stages.some((s) => s.status !== "pending")) && (
-        <ProgressTrace stages={stages} reasoning={reasoning} content={content} running={loading} />
+      {(loading || content || reasoning || structured || stages.some((s) => s.status !== "pending")) && (
+        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} />
       )}
 
       {preview && !data && <PreviewCard quote={preview.quote} stats={preview.stats} />}
