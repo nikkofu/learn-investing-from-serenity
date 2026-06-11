@@ -35,9 +35,12 @@ export async function POST(req: Request) {
           send({ type: "token", kind: "reasoning", text: delta.text });
           continue;
         }
-        // Stream the natural-language reasoning; hold back the trailing JSON.
-        const narrative = splitter.push(delta.text);
+        // Stream readable reasoning (content) and the raw JSON phase
+        // (structured) on separate channels, so the structured phase still
+        // shows live progress without polluting the readable console.
+        const { narrative, structured } = splitter.push(delta.text);
         if (narrative) send({ type: "token", kind: "content", text: narrative });
+        if (structured) send({ type: "token", kind: "structured", text: structured });
         if (splitter.inJsonPhase) advanceToSummary();
       }
       const tail = splitter.end();
