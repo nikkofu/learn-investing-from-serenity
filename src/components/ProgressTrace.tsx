@@ -66,10 +66,10 @@ export function ProgressTrace({
           )}
           <div className="rounded-lg border border-[var(--border)] bg-[var(--inset)]">
             <div className="px-3 py-1.5 text-xs text-[var(--muted)]">
-              实时输出 · streaming
+              AI 实时分析推理 · live
               {running && <span className="ml-1 animate-pulse text-[var(--accent)]">▍</span>}
             </div>
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-[var(--text)]">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 text-[12px] leading-6 text-[var(--text)]">
               {content || (running ? "等待模型返回首个 token…" : "")}
             </pre>
           </div>

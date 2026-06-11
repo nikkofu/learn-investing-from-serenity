@@ -76,8 +76,21 @@ export const CHINA_CONTEXT = `本工具聚焦中国 A 股市场。应用 Serenit
 - 关注“专精特新”、隐形冠军、单项冠军；这些往往是 A 股版本的 chokepoint。
 - 催化剂还包括：政策(大基金、补贴)、龙头扩产招标、客户验证导入、北向资金、指数纳入。`;
 
-const JSON_GUARD =
-  "你必须只输出一个合法的 JSON 对象，不要包含 markdown 代码块标记、解释性文字或多余内容。";
+/**
+ * Two-phase output instruction: the model first reasons out loud in natural
+ * language (streamed live to the user), then emits the final result inside a
+ * ```json fence. `NarrativeJsonSplitter` shows the reasoning and hides the JSON.
+ */
+function twoPhaseGuard(schema: string): string {
+  return `请分两步完成，并严格按顺序输出：
+
+【第一步 · 实时推理】用中文自然语言把你的分析过程写出来（这部分会逐字实时展示给用户阅读，请像投研笔记一样有条理、简洁，不要冗长，禁止在这一步输出 JSON 或代码块）。
+
+【第二步 · 结构化结果】推理结束后另起一行，仅用一个 \`\`\`json 代码块输出最终结果（代码块内必须是合法 JSON，且代码块外不要再写任何内容）：
+\`\`\`json
+${schema}
+\`\`\``;
+}
 
 /** Build messages for analyzing a single A-share through the chokepoint lens. */
 export function buildAnalyzePrompt(args: {
@@ -98,17 +111,15 @@ ${CHINA_CONTEXT}
 你要对给定的 A 股标的，按照下面五个因子各打 0-5 分（0=完全不符合，5=极强符合），并给出一句中文理由（理由要尽量结合公司在产业链中的位置与给定行情数据，不要编造不存在的财务数字）：
 ${factorsDoc}
 
-然后给出：verdict（用「隐形冠军 / 值得跟踪 / 一般 / 回避」之一并附半句话），thesis（120字内的 Serenity 风格瓶颈点论述），risks（2-4条风险），catalysts（2-4条潜在催化剂）。
+在第一步的实时推理里，请逐个因子说明大致打几分及理由，并给出整体瓶颈点判断、主要风险与潜在催化；第二步再汇总成结构化 JSON。verdict 用「隐形冠军 / 值得跟踪 / 一般 / 回避」之一并附半句话，thesis 为120字内的 Serenity 风格瓶颈点论述，risks/catalysts 各 2-4 条，score 为 0-5 整数。
 
-${JSON_GUARD}
-输出 JSON 结构：
-{
+${twoPhaseGuard(`{
   "factors": [{"key": "demand|supply|attention|valueCapture|catalyst", "score": 0-5, "rationale": "..."}],
   "verdict": "...",
   "thesis": "...",
   "risks": ["..."],
   "catalysts": ["..."]
-}`;
+}`)}`;
 
   const dataBlock = {
     名称: quote.name,
@@ -127,7 +138,7 @@ ${JSON_GUARD}
   const user = `请分析以下 A 股标的（行情快照，仅供定位，不代表完整基本面）：
 ${JSON.stringify(dataBlock, null, 2)}
 ${extraContext ? `\n补充背景：${extraContext}\n` : ""}
-请严格按照瓶颈点五因子打分并输出 JSON。`;
+请先实时写出五因子推理，再用 \`\`\`json 代码块输出结构化打分。`;
 
   return { system, user };
 }
@@ -141,9 +152,9 @@ ${CHINA_CONTEXT}
 
 用户会给你一个趋势/主题。请按 Serenity 的方法把它拆成产业链分层（从下游终端到上游材料/设备），标注哪些层是“瓶颈点(chokepoint)”（供给受限、不可替代），并为每层给出有代表性的 A 股上市公司（用真实存在的公司名与6位代码；若不确定代码可留空字符串，但公司必须是真实的 A 股公司，绝不编造代码）。
 
-${JSON_GUARD}
-输出 JSON 结构：
-{
+在第一步的实时推理里，请按层级口语化地讲清楚“为什么这样拆、哪一层才是真瓶颈、代表公司是谁”；第二步再汇总成结构化 JSON。
+
+${twoPhaseGuard(`{
   "summary": "一段话总结该趋势下最值得关注的瓶颈环节",
   "nodes": [
     {
@@ -154,7 +165,7 @@ ${JSON_GUARD}
       "tickers": [{"code": "6位代码或空串", "name": "公司名", "note": "为何相关"}]
     }
   ]
-}`;
-  const user = `趋势/主题：${trend}\n请输出该主题在 A 股的产业链瓶颈点地图 JSON。`;
+}`)}`;
+  const user = `趋势/主题：${trend}\n请先实时写出产业链拆解推理，再用 \`\`\`json 代码块输出瓶颈点地图。`;
   return { system, user };
 }
