@@ -67,13 +67,13 @@ export default function SettingsPage() {
     }
   }
 
-  const field = "w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none focus:border-emerald-500/60";
+  const field = "w-full rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]";
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">设置 · LLM 接入</h1>
-        <p className="mt-1 text-sm text-zinc-400">
+        <p className="mt-1 text-sm text-[var(--muted)]">
           填写任意 OpenAI 兼容的服务。配置保存在服务端 <code className="font-mono text-xs">.data/llm-config.json</code>（已 gitignore）。
         </p>
       </div>
@@ -84,27 +84,27 @@ export default function SettingsPage() {
             key={name}
             type="button"
             onClick={() => applyPreset(name)}
-            className="rounded-md border border-white/15 px-3 py-1 text-xs text-zinc-300 hover:bg-white/5"
+            className="rounded-md border border-[var(--border)] px-3 py-1 text-xs text-[var(--text)] hover:bg-[var(--hover)]"
           >
             {name}
           </button>
         ))}
       </div>
 
-      <form onSubmit={save} className="space-y-4 rounded-xl border border-white/10 bg-white/[0.03] p-5">
+      <form onSubmit={save} className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
         <div>
-          <label className="mb-1 block text-sm text-zinc-300">Provider（标签）</label>
+          <label className="mb-1 block text-sm text-[var(--text)]">Provider（标签）</label>
           <input className={field} value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="deepseek / openai ..." />
         </div>
         <div>
-          <label className="mb-1 block text-sm text-zinc-300">Base URL</label>
+          <label className="mb-1 block text-sm text-[var(--text)]">Base URL</label>
           <input className={field} value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder="https://api.deepseek.com/v1" />
         </div>
         <div>
-          <label className="mb-1 block text-sm text-zinc-300">Model</label>
+          <label className="mb-1 block text-sm text-[var(--text)]">Model</label>
           <input className={field} value={model} onChange={(e) => setModel(e.target.value)} placeholder="deepseek-chat" />
           {baseURL.includes("openrouter.ai") && (
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-[var(--faint)]">
               OpenRouter 免费模型需带 <code className="font-mono">:free</code> 后缀，例如{" "}
               <code className="font-mono">deepseek/deepseek-chat-v3-0324:free</code>、
               <code className="font-mono">meta-llama/llama-3.3-70b-instruct:free</code>。
@@ -112,7 +112,7 @@ export default function SettingsPage() {
           )}
         </div>
         <div>
-          <label className="mb-1 block text-sm text-zinc-300">
+          <label className="mb-1 block text-sm text-[var(--text)]">
             API Key {hasApiKey && <span className="ml-1 text-xs text-emerald-400">（已配置，留空则保持不变）</span>}
           </label>
           <input
@@ -126,12 +126,12 @@ export default function SettingsPage() {
         <button
           type="submit"
           disabled={saving}
-          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-black hover:bg-emerald-400 disabled:opacity-50"
+          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-50"
         >
           {saving ? "保存中…" : "保存配置"}
         </button>
         {status && (
-          <p className={`text-sm ${status.kind === "ok" ? "text-emerald-400" : status.kind === "err" ? "text-red-400" : "text-zinc-400"}`}>
+          <p className={`text-sm ${status.kind === "ok" ? "text-emerald-400" : status.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
             {status.msg}
           </p>
         )}
