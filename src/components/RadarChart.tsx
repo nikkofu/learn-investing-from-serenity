@@ -19,6 +19,7 @@ export default function RadarChart({
   size?: number;
 }) {
   const n = factors.length;
+  if (n === 0) return null;
   const cx = size / 2;
   const cy = size / 2;
   const R = size * 0.32; // data radius; leaves room for labels
