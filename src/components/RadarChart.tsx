@@ -6,6 +6,8 @@ interface RadarFactor {
 /**
  * Lightweight dependency-free SVG radar (polygon) chart for the
  * Chokepoint five factors. Colours follow the active theme via CSS vars.
+ * Note: SVG presentation attributes do not resolve var(), so colours are
+ * applied via inline `style` (CSS) instead of fill/stroke attributes.
  */
 export default function RadarChart({
   factors,
@@ -41,21 +43,22 @@ export default function RadarChart({
         <polygon
           key={k}
           points={poly((R * (k + 1)) / rings)}
-          fill="none"
-          stroke="var(--border)"
-          strokeWidth={1}
+          style={{ fill: "none", stroke: "var(--border)", strokeWidth: 1 }}
         />
       ))}
       {/* axes */}
       {factors.map((_, i) => {
         const [x, y] = point(i, R);
-        return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="var(--border)" strokeWidth={1} />;
+        return <line key={i} x1={cx} y1={cy} x2={x} y2={y} style={{ stroke: "var(--border)", strokeWidth: 1 }} />;
       })}
       {/* data polygon */}
-      <polygon points={dataPoly} fill="var(--accent-soft)" stroke="var(--accent)" strokeWidth={2} strokeLinejoin="round" />
+      <polygon
+        points={dataPoly}
+        style={{ fill: "var(--accent-soft)", stroke: "var(--accent)", strokeWidth: 2, strokeLinejoin: "round" }}
+      />
       {/* data vertices */}
       {dataPoints.map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r={3} fill="var(--accent)" />
+        <circle key={i} cx={x} cy={y} r={3} style={{ fill: "var(--accent)" }} />
       ))}
       {/* labels */}
       {factors.map((f, i) => {
@@ -69,11 +72,11 @@ export default function RadarChart({
             y={ly}
             textAnchor={anchor}
             dominantBaseline="middle"
-            className="fill-[var(--text)]"
             fontSize={12}
+            style={{ fill: "var(--text)" }}
           >
             <tspan fontWeight={500}>{f.label}</tspan>
-            <tspan className="fill-[var(--accent)]" fontWeight={700} dx={5}>
+            <tspan dx={5} fontWeight={700} style={{ fill: "var(--accent)" }}>
               {f.score}
             </tspan>
           </text>
