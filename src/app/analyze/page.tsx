@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { ChokepointAssessment, StockQuote, StockSearchResult } from "@/lib/types";
+import { ProgressTrace, applyStageEvent, type Stage } from "@/components/ProgressTrace";
+import { readNdjson } from "@/lib/stream-client";
 
 const FACTOR_LABELS: Record<string, string> = {
   demand: "确定需求",
@@ -25,6 +27,14 @@ interface AnalyzeResponse {
   assessment: ChokepointAssessment;
 }
 
+type Stats = AnalyzeResponse["stats"];
+
+const ANALYZE_STAGES: { key: string; label: string }[] = [
+  { key: "quote", label: "获取行情数据（接口调用）" },
+  { key: "reason", label: "AI 瓶颈点五因子推理" },
+  { key: "summary", label: "结构化汇总与打分" },
+];
+
 function yi(n: number): string {
   if (!n) return "-";
   return (n / 1e8).toFixed(1) + " 亿";
@@ -37,6 +47,10 @@ function AnalyzeInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<AnalyzeResponse | null>(null);
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [reasoning, setReasoning] = useState("");
+  const [content, setContent] = useState("");
+  const [preview, setPreview] = useState<{ quote: StockQuote; stats: Stats } | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function analyze(code: string) {
@@ -44,15 +58,44 @@ function AnalyzeInner() {
     setError("");
     setData(null);
     setResults([]);
+    setStages(ANALYZE_STAGES.map((s) => ({ ...s, status: "pending" })));
+    setReasoning("");
+    setContent("");
+    setPreview(null);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "分析失败");
-      setData(json);
+      if (!(res.headers.get("content-type") || "").includes("ndjson")) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || "分析失败");
+      }
+      await readNdjson(res, (ev) => {
+        switch (ev.type as string) {
+          case "stage":
+            setStages((prev) => applyStageEvent(prev, ev.key as string, ev.status as "start" | "done"));
+            break;
+          case "token":
+            if (ev.kind === "reasoning") setReasoning((r) => r + (ev.text as string));
+            else setContent((c) => c + (ev.text as string));
+            break;
+          case "quote":
+            setPreview({ quote: ev.quote as StockQuote, stats: ev.stats as Stats });
+            break;
+          case "result":
+            setData({
+              quote: ev.quote as StockQuote,
+              stats: ev.stats as Stats,
+              assessment: ev.assessment as ChokepointAssessment,
+            });
+            break;
+          case "error":
+            setError(ev.message as string);
+            break;
+        }
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "分析失败");
     } finally {
@@ -141,9 +184,52 @@ function AnalyzeInner() {
         )}
       </div>
 
-      {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
+      {error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+          <p>{error}</p>
+          {error.includes("未配置") && (
+            <a href="/settings" className="mt-1 inline-block text-emerald-300 underline">前往「设置」配置 LLM →</a>
+          )}
+        </div>
+      )}
+
+      {(loading || content || reasoning || stages.some((s) => s.status !== "pending")) && (
+        <ProgressTrace stages={stages} reasoning={reasoning} content={content} running={loading} />
+      )}
+
+      {preview && !data && <PreviewCard quote={preview.quote} stats={preview.stats} />}
 
       {data && <Result data={data} />}
+    </div>
+  );
+}
+
+function PreviewCard({ quote, stats }: { quote: StockQuote; stats: Stats }) {
+  const up = quote.changePct >= 0;
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">
+            {quote.name} <span className="font-mono text-sm text-zinc-500">{quote.code}.{quote.market}</span>
+          </h2>
+          <div className="mt-1 flex items-baseline gap-3">
+            <span className="text-2xl font-semibold">{quote.price.toFixed(2)}</span>
+            <span className={up ? "text-red-400" : "text-emerald-400"}>
+              {up ? "+" : ""}{quote.change.toFixed(2)} ({up ? "+" : ""}{quote.changePct.toFixed(2)}%)
+            </span>
+          </div>
+        </div>
+        <span className="text-xs text-zinc-500">行情已获取，AI 评分生成中…</span>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+        <Stat label="市盈率 TTM" value={quote.pe != null ? quote.pe.toFixed(1) : "-"} />
+        <Stat label="市净率" value={quote.pb != null ? quote.pb.toFixed(2) : "-"} />
+        <Stat label="总市值" value={yi(quote.totalMarketCap)} />
+        <Stat label="换手率" value={quote.turnoverPct.toFixed(2) + "%"} />
+        {stats && <Stat label={`近${stats.windowDays}日涨跌`} value={stats.periodReturnPct + "%"} />}
+        {stats && <Stat label="区间位置" value={(stats.rangePosition * 100).toFixed(0) + "%"} />}
+      </div>
     </div>
   );
 }

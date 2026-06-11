@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { deriveStats, getKlineSafe, getQuote } from "@/lib/market";
 import { buildAnalyzePrompt } from "@/lib/serenity";
-import { chatJson, LLMNotConfiguredError } from "@/lib/llm";
+import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
 import { finalizeAssessment } from "@/lib/chokepoint";
+import { ndjsonStream } from "@/lib/stream";
 import type { ChokepointAssessment } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const body = (await req.json()) as { code?: string; context?: string };
@@ -12,35 +15,57 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "请提供 6 位股票代码" }, { status: 400 });
   }
 
-  let quote, candles, stats;
-  try {
-    [quote, candles] = await Promise.all([getQuote(code), getKlineSafe(code, 120)]);
-    stats = deriveStats(candles);
-  } catch (e) {
-    return NextResponse.json(
-      { error: `行情获取失败：${e instanceof Error ? e.message : e}` },
-      { status: 502 }
-    );
-  }
-
-  const { system, user } = buildAnalyzePrompt({
-    quote,
-    candles,
-    stats,
-    extraContext: body.context,
-  });
-
-  try {
-    const raw = await chatJson<Partial<ChokepointAssessment>>(system, user);
-    const assessment = finalizeAssessment(raw);
-    return NextResponse.json({ quote, candles, stats, assessment });
-  } catch (e) {
-    if (e instanceof LLMNotConfiguredError) {
-      return NextResponse.json({ error: e.message }, { status: 412 });
+  return ndjsonStream(async (send) => {
+    // Stage 1: fetch market data (the "tool call").
+    send({ type: "stage", key: "quote", status: "start" });
+    let quote, candles, stats;
+    try {
+      [quote, candles] = await Promise.all([getQuote(code), getKlineSafe(code, 120)]);
+      stats = deriveStats(candles);
+    } catch (e) {
+      send({ type: "error", message: `行情获取失败：${e instanceof Error ? e.message : e}` });
+      return;
     }
-    return NextResponse.json(
-      { error: `AI 分析失败：${e instanceof Error ? e.message : e}` },
-      { status: 502 }
-    );
-  }
+    send({ type: "quote", quote, stats });
+    send({ type: "stage", key: "quote", status: "done" });
+
+    // Stage 2: stream the LLM's chokepoint reasoning token-by-token.
+    const { system, user } = buildAnalyzePrompt({
+      quote,
+      candles,
+      stats,
+      extraContext: body.context,
+    });
+    send({ type: "stage", key: "reason", status: "start" });
+    let acc = "";
+    try {
+      for await (const delta of chatStream(system, user)) {
+        if (delta.kind === "content") acc += delta.text;
+        send({ type: "token", kind: delta.kind, text: delta.text });
+      }
+    } catch (e) {
+      if (e instanceof LLMNotConfiguredError) {
+        send({ type: "error", status: 412, message: e.message });
+      } else {
+        send({ type: "error", message: `AI 分析失败：${e instanceof Error ? e.message : e}` });
+      }
+      return;
+    }
+    send({ type: "stage", key: "reason", status: "done" });
+
+    // Stage 3: parse + normalize into the structured assessment.
+    send({ type: "stage", key: "summary", status: "start" });
+    try {
+      const raw = parseJsonObject<Partial<ChokepointAssessment>>(acc);
+      const assessment = finalizeAssessment(raw);
+      send({ type: "result", quote, stats, assessment });
+      send({ type: "stage", key: "summary", status: "done" });
+      send({ type: "done" });
+    } catch {
+      send({
+        type: "error",
+        message: "AI 输出解析失败（模型未返回有效 JSON），可重试或换一个能力更强的模型。",
+      });
+    }
+  });
 }
