@@ -31,7 +31,7 @@ export function ProgressTrace({
 }) {
   const showLive = running || Boolean(reasoning) || Boolean(content);
   return (
-    <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+    <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
       <ol className="space-y-2">
         {stages.map((s) => (
           <li key={s.key} className="flex items-center gap-2.5 text-sm">
@@ -39,15 +39,15 @@ export function ProgressTrace({
             <span
               className={
                 s.status === "pending"
-                  ? "text-zinc-500"
+                  ? "text-[var(--faint)]"
                   : s.status === "active"
-                    ? "font-medium text-emerald-300"
-                    : "text-zinc-300"
+                    ? "font-medium text-[var(--accent)]"
+                    : "text-[var(--text)]"
               }
             >
               {s.label}
             </span>
-            {s.status === "active" && <span className="text-xs text-emerald-400/70">进行中…</span>}
+            {s.status === "active" && <span className="text-xs text-[var(--accent)]">进行中…</span>}
           </li>
         ))}
       </ol>
@@ -55,21 +55,21 @@ export function ProgressTrace({
       {showLive && (
         <div className="space-y-2 pt-1">
           {reasoning && (
-            <details open className="rounded-lg border border-white/10 bg-black/30">
-              <summary className="cursor-pointer px-3 py-1.5 text-xs text-zinc-400">
+            <details open className="rounded-lg border border-[var(--border)] bg-[var(--inset)]">
+              <summary className="cursor-pointer px-3 py-1.5 text-xs text-[var(--muted)]">
                 模型思考过程 · reasoning
               </summary>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-zinc-500">
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-[var(--faint)]">
                 {reasoning}
               </pre>
             </details>
           )}
-          <div className="rounded-lg border border-white/10 bg-black/30">
-            <div className="px-3 py-1.5 text-xs text-zinc-400">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--inset)]">
+            <div className="px-3 py-1.5 text-xs text-[var(--muted)]">
               实时输出 · streaming
-              {running && <span className="ml-1 animate-pulse text-emerald-400">▍</span>}
+              {running && <span className="ml-1 animate-pulse text-[var(--accent)]">▍</span>}
             </div>
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-zinc-300">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-[var(--text)]">
               {content || (running ? "等待模型返回首个 token…" : "")}
             </pre>
           </div>
@@ -82,11 +82,11 @@ export function ProgressTrace({
 function StageDot({ status }: { status: StageStatus }) {
   if (status === "active") {
     return (
-      <span className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-emerald-400/30 border-t-emerald-400" />
+      <span className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[var(--accent-line)] border-t-[var(--accent)]" />
     );
   }
   if (status === "done") {
-    return <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-full bg-emerald-500" />;
+    return <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-full bg-[var(--accent)]" />;
   }
-  return <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border border-white/25" />;
+  return <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border border-[var(--faint)]" />;
 }
