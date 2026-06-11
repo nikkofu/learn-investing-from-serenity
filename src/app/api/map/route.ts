@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildMapPrompt } from "@/lib/serenity";
 import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
 import { ndjsonStream } from "@/lib/stream";
+import { NarrativeJsonSplitter } from "@/lib/split";
 import type { SupplyChainMap, SupplyChainNode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -18,12 +19,29 @@ export async function POST(req: Request) {
   return ndjsonStream(async (send) => {
     // Stage 1: stream the LLM's supply-chain reasoning token-by-token.
     send({ type: "stage", key: "reason", status: "start" });
-    let acc = "";
+    const splitter = new NarrativeJsonSplitter();
+    // Advance reason -> summary as soon as the (hidden) JSON phase begins, so the
+    // UI never looks stuck while the model silently writes the structured result.
+    let advanced = false;
+    const advanceToSummary = () => {
+      if (advanced) return;
+      advanced = true;
+      send({ type: "stage", key: "reason", status: "done" });
+      send({ type: "stage", key: "summary", status: "start" });
+    };
     try {
       for await (const delta of chatStream(system, user)) {
-        if (delta.kind === "content") acc += delta.text;
-        send({ type: "token", kind: delta.kind, text: delta.text });
+        if (delta.kind === "reasoning") {
+          send({ type: "token", kind: "reasoning", text: delta.text });
+          continue;
+        }
+        // Stream the natural-language reasoning; hold back the trailing JSON.
+        const narrative = splitter.push(delta.text);
+        if (narrative) send({ type: "token", kind: "content", text: narrative });
+        if (splitter.inJsonPhase) advanceToSummary();
       }
+      const tail = splitter.end();
+      if (tail) send({ type: "token", kind: "content", text: tail });
     } catch (e) {
       if (e instanceof LLMNotConfiguredError) {
         send({ type: "error", status: 412, message: e.message });
@@ -32,12 +50,11 @@ export async function POST(req: Request) {
       }
       return;
     }
-    send({ type: "stage", key: "reason", status: "done" });
+    advanceToSummary();
 
     // Stage 2: parse + normalize into the supply-chain map.
-    send({ type: "stage", key: "summary", status: "start" });
     try {
-      const raw = parseJsonObject<{ summary?: string; nodes?: SupplyChainNode[] }>(acc);
+      const raw = parseJsonObject<{ summary?: string; nodes?: SupplyChainNode[] }>(splitter.jsonText);
       const map: SupplyChainMap = {
         trend,
         summary: raw.summary || "",
