@@ -1,21 +1,130 @@
 @import "tailwindcss";
 
-:root {
-  --background: #0b0f17;
-  --foreground: #e7ecf3;
+/* ============================================================
+   Theme palettes — driven by [data-theme] on <html>.
+   Each palette defines a full set of semantic tokens so the
+   whole UI re-skins by switching one attribute.
+   Market colours (red=涨 / green=跌) are intentionally NOT
+   themed — they stay fixed per A-share convention.
+   ============================================================ */
+
+:root,
+[data-theme="emerald"] {
+  --bg: #0b0f17;
+  --surface: #11161f;
+  --nav-bg: rgb(11 15 23 / 0.85);
+  --panel: rgb(255 255 255 / 0.03);
+  --inset: rgb(0 0 0 / 0.22);
+  --border: rgb(255 255 255 / 0.10);
+  --hover: rgb(255 255 255 / 0.06);
+  --text: #e7ecf3;
+  --muted: #9aa6b2;
+  --faint: #6b7682;
+  --accent: #10b981;
+  --accent-strong: #34d399;
+  --accent-soft: rgb(16 185 129 / 0.15);
+  --accent-line: rgb(16 185 129 / 0.40);
+  --accent-fg: #03130c;
+  --warn: #f59e0b;
+  --warn-soft: rgb(245 158 11 / 0.14);
+  --warn-line: rgb(245 158 11 / 0.30);
+}
+
+[data-theme="azure"] {
+  --bg: #0a0f1e;
+  --surface: #101a32;
+  --nav-bg: rgb(10 15 30 / 0.85);
+  --panel: rgb(255 255 255 / 0.035);
+  --inset: rgb(0 0 0 / 0.25);
+  --border: rgb(255 255 255 / 0.10);
+  --hover: rgb(255 255 255 / 0.06);
+  --text: #e9eefc;
+  --muted: #97a6c4;
+  --faint: #65728c;
+  --accent: #4f9cff;
+  --accent-strong: #7bb6ff;
+  --accent-soft: rgb(79 156 255 / 0.16);
+  --accent-line: rgb(79 156 255 / 0.42);
+  --accent-fg: #04101f;
+  --warn: #f0b429;
+  --warn-soft: rgb(240 180 41 / 0.14);
+  --warn-line: rgb(240 180 41 / 0.30);
+}
+
+[data-theme="violet"] {
+  --bg: #120c1f;
+  --surface: #1b1330;
+  --nav-bg: rgb(18 12 31 / 0.85);
+  --panel: rgb(255 255 255 / 0.04);
+  --inset: rgb(0 0 0 / 0.26);
+  --border: rgb(255 255 255 / 0.10);
+  --hover: rgb(255 255 255 / 0.06);
+  --text: #efe9fb;
+  --muted: #ab9fc6;
+  --faint: #786c93;
+  --accent: #a78bfa;
+  --accent-strong: #c4b5fd;
+  --accent-soft: rgb(167 139 250 / 0.16);
+  --accent-line: rgb(167 139 250 / 0.42);
+  --accent-fg: #160b29;
+  --warn: #fbbf24;
+  --warn-soft: rgb(251 191 36 / 0.14);
+  --warn-line: rgb(251 191 36 / 0.32);
+}
+
+[data-theme="teal"] {
+  --bg: #0e1316;
+  --surface: #141c20;
+  --nav-bg: rgb(14 19 22 / 0.85);
+  --panel: rgb(255 255 255 / 0.035);
+  --inset: rgb(0 0 0 / 0.24);
+  --border: rgb(255 255 255 / 0.10);
+  --hover: rgb(255 255 255 / 0.06);
+  --text: #e6eef0;
+  --muted: #93a4a8;
+  --faint: #66767a;
+  --accent: #2dd4bf;
+  --accent-strong: #5eead4;
+  --accent-soft: rgb(45 212 191 / 0.15);
+  --accent-line: rgb(45 212 191 / 0.40);
+  --accent-fg: #03140f;
+  --warn: #fb923c;
+  --warn-soft: rgb(251 146 60 / 0.14);
+  --warn-line: rgb(251 146 60 / 0.32);
+}
+
+[data-theme="cream"] {
+  --bg: #f6f4ee;
+  --surface: #ffffff;
+  --nav-bg: rgb(246 244 238 / 0.85);
+  --panel: rgb(0 0 0 / 0.025);
+  --inset: rgb(0 0 0 / 0.04);
+  --border: rgb(20 30 40 / 0.12);
+  --hover: rgb(0 0 0 / 0.05);
+  --text: #1f2733;
+  --muted: #5c6675;
+  --faint: #8a93a1;
+  --accent: #047857;
+  --accent-strong: #059669;
+  --accent-soft: rgb(4 120 87 / 0.12);
+  --accent-line: rgb(4 120 87 / 0.35);
+  --accent-fg: #ffffff;
+  --warn: #b45309;
+  --warn-soft: rgb(180 83 9 / 0.12);
+  --warn-line: rgb(180 83 9 / 0.30);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 html,
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg);
+  color: var(--text);
 }
 
 body {
