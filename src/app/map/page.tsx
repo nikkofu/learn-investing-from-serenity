@@ -1,0 +1,125 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import type { SupplyChainMap } from "@/lib/types";
+
+const SUGGESTIONS = ["AI 算力 / 光模块", "人形机器人", "半导体国产替代", "CPO / 硅光", "稀土永磁", "液冷数据中心"];
+
+export default function MapPage() {
+  const [trend, setTrend] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [map, setMap] = useState<SupplyChainMap | null>(null);
+
+  async function run(t?: string) {
+    const q = (t ?? trend).trim();
+    if (!q) return;
+    setTrend(q);
+    setLoading(true);
+    setError("");
+    setMap(null);
+    try {
+      const res = await fetch("/api/map", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trend: q }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "拆解失败");
+      setMap(data.map);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "拆解失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">趋势 → 产业链瓶颈点拆解</h1>
+        <p className="mt-1 text-sm text-zinc-400">
+          输入一个确定性趋势，AI 按 Serenity 瓶颈点方法拆出产业链分层，并标注 A 股“卡脖子”环节。
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <input
+          value={trend}
+          onChange={(e) => setTrend(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && run()}
+          placeholder="如：AI 算力 / 光模块"
+          className="flex-1 rounded-lg border border-white/15 bg-black/30 px-4 py-2.5 text-sm outline-none focus:border-emerald-500/60"
+        />
+        <button
+          onClick={() => run()}
+          disabled={loading}
+          className="rounded-lg bg-emerald-500 px-5 py-2.5 text-sm font-medium text-black hover:bg-emerald-400 disabled:opacity-50"
+        >
+          {loading ? "拆解中…" : "拆解"}
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {SUGGESTIONS.map((s) => (
+          <button key={s} onClick={() => run(s)} className="rounded-full border border-white/15 px-3 py-1 text-xs text-zinc-300 hover:bg-white/5">
+            {s}
+          </button>
+        ))}
+      </div>
+
+      {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
+
+      {map && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05] p-4">
+            <p className="text-sm font-medium text-emerald-300">瓶颈点总结</p>
+            <p className="mt-1 text-sm leading-6 text-zinc-200">{map.summary}</p>
+          </div>
+          <div className="space-y-3">
+            {map.nodes.map((n, i) => (
+              <div
+                key={i}
+                className={`rounded-xl border p-4 ${
+                  n.isChokepoint ? "border-emerald-500/40 bg-emerald-500/[0.05]" : "border-white/10 bg-white/[0.03]"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold">{n.layer}</h3>
+                  {n.isChokepoint && (
+                    <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-medium text-emerald-300">瓶颈点</span>
+                  )}
+                </div>
+                <p className="mt-1 text-sm text-zinc-300">{n.role}</p>
+                {n.isChokepoint && n.chokepointReason && (
+                  <p className="mt-1 text-xs leading-5 text-emerald-300/80">为何卡脖子：{n.chokepointReason}</p>
+                )}
+                {n.tickers.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {n.tickers.map((t, j) => {
+                      const inner = (
+                        <>
+                          <span className="font-medium text-zinc-100">{t.name}</span>
+                          {t.code && <span className="ml-1 font-mono text-xs text-zinc-500">{t.code}</span>}
+                          {t.note && <p className="mt-0.5 max-w-[15rem] text-[11px] leading-4 text-zinc-400">{t.note}</p>}
+                        </>
+                      );
+                      return /^\d{6}$/.test(t.code) ? (
+                        <Link key={j} href={`/analyze?code=${t.code}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-1.5 text-xs transition hover:border-emerald-500/40">
+                          {inner}
+                        </Link>
+                      ) : (
+                        <div key={j} className="rounded-lg border border-white/10 bg-black/20 px-3 py-1.5 text-xs">{inner}</div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-zinc-500">{map.disclaimer}</p>
+        </div>
+      )}
+    </div>
+  );
+}
