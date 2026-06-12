@@ -98,20 +98,45 @@ export function buildAnalyzePrompt(args: {
   candles: Candle[];
   stats: ReturnType<typeof import("./market").deriveStats>;
   extraContext?: string;
+  matchedKnowledge?: {
+    themeName: string;
+    themeThesis: string;
+    tweets: { date: string; text: string }[];
+  } | null;
 }) {
-  const { quote, stats, extraContext } = args;
+  const { quote, stats, extraContext, matchedKnowledge } = args;
   const factorsDoc = CHOKEPOINT_FACTORS.map(
     (f) => `- ${f.key} (${f.zh} ${f.en}, 权重 ${f.weight}): ${f.description}`
   ).join("\n");
 
+  const knowledgeDoc = matchedKnowledge ? `
+【Serenity 一手知识库关联笔记】
+已为您从本地知识库中匹配到与该股及细分环节最相关的 Serenity 一手研报与推文观点：
+- 关联主题板块：${matchedKnowledge.themeName}
+- 主题核心论述：${matchedKnowledge.themeThesis}
+- Serenity 一手推文要点参考：
+${matchedKnowledge.tweets.map((t, idx) => `  [推文 ${idx + 1}] (${t.date}): ${t.text}`).join("\n")}
+请你在对该标的进行深度分析和各因子评分时，**高度参考并融入以上 Serenity 的一手研报观点**，确保推导结论具有一贯性。
+` : "";
+
   const system = `你是 Serenity（白毛股神）投资方法论的 AI 分析助手。Serenity 的核心方法是“瓶颈点投资法(Chokepoint)”：${SERENITY_PROFILE.coreIdea}
 
 ${CHINA_CONTEXT}
+${knowledgeDoc}
 
 你要对给定的 A 股标的，按照下面五个因子各打 0-5 分（0=完全不符合，5=极强符合），并给出一句中文理由（理由要尽量结合公司在产业链中的位置与给定行情数据，不要编造不存在的财务数字）：
 ${factorsDoc}
 
-在第一步的实时推理里，请逐个因子说明大致打几分及理由，并给出整体瓶颈点判断、主要风险与潜在催化。特别地，请结合近 120 日的价格区间位置（如 rangePosition 接近 0 代表超跌，接近 1 代表高位）、最新价格、估值与行业地位，判断该股是否属于“刚刚从底部启动”或“处于极佳突破/买入位置”。第二步再汇总成结构化 JSON。verdict 用「隐形冠军 / 值得跟踪 / 一般 / 回避」之一并附半句话，thesis 为120字内的 Serenity 风格瓶颈点论述，risks/catalysts 各 2-4 条，score 为 0-5 整数。
+【重要推理指令：严格执行六步工作流】
+在第一步的实时推理里，请像投研日记一样有条理、简洁，并且**必须严格按照以下“六步工作流”的六个步骤顺序展开你的深度分析**：
+1. 【找大趋势】：确认个股受益的宏观大趋势（如 AI 算力扩张、半导体国产替代等）。
+2. 【画产业链地图】：拆解个股所处细分板块在整个产业链分层中的位置与作用。
+3. 【识别真瓶颈】：深入剖析其主营产品是否具有高壁垒、低可替代性以及供给是否严重受限，即是否为真“卡脖子”环节。
+4. 【找证据链】：用最新的基本面和财务快照、近 120 日价格区间位置（rangePosition）、换手率等证据，验证该瓶颈的真实性与估值合理性。
+5. 【做好风控】：识别个股面临的主要风险点（警惕反身性回撤、竞争者挤出、逻辑证伪等）。
+6. 【匹配仓位】：结合上述分析与价格区间位置（如底部刚刚启动、高位追高或逻辑证伪），给出明确的仓位配比与买卖建议（如“建议建底仓”、“等待突破加仓”、“回避观望”等）。
+
+请在自然语言推理中写明这六个步骤名称，并在此基础上逐个说明五个因子的打分与理由。第二步再汇总成结构化 JSON。verdict 用「隐形冠军 / 值得跟踪 / 一般 / 回避」之一并附半句话，thesis 为120字内的 Serenity 风格瓶颈点论述，risks/catalysts 各 2-4 条，score 为 0-5 整数。
 
 ${twoPhaseGuard(`{
   "factors": [{"key": "demand|supply|attention|valueCapture|catalyst", "score": 0-5, "rationale": "..."}],
@@ -121,7 +146,44 @@ ${twoPhaseGuard(`{
   "catalysts": ["..."],
   "recommendedBuy": true|false,
   "buyPriceRange": "建议买入价区间，如 xx.x-xx.x 元，若不符合可填空字串",
-  "sellPriceRange": "建议卖出/止盈价区间，如 xx.x-xx.x 元，若不符合可填空字串"
+  "sellPriceRange": "建议卖出/止盈价区间，如 xx.x-xx.x 元，若不符合可填空字串",
+  "bomPosition": {
+    "nodeName": "该股票对应的 BOM 节点名称，例如：高速光模块 或 谐波减速器",
+    "bomRatio": "该节点在对应终端 BOM 中的成本占比估算，例如：约 8% 或 25%-30%，若无法估算则填空字串",
+    "role": "具体 BOM 作用描述"
+  },
+  "workflowSteps": [
+    {
+      "step": 1,
+      "title": "找大趋势",
+      "content": "具体的分析与论述..."
+    },
+    {
+      "step": 2,
+      "title": "画产业链地图",
+      "content": "具体的分析与论述..."
+    },
+    {
+      "step": 3,
+      "title": "识别真瓶颈",
+      "content": "具体的分析与论述..."
+    },
+    {
+      "step": 4,
+      "title": "找证据链",
+      "content": "具体的分析与论述..."
+    },
+    {
+      "step": 5,
+      "title": "做好风控",
+      "content": "具体的分析与论述..."
+    },
+    {
+      "step": 6,
+      "title": "匹配仓位",
+      "content": "具体的分析与论述..."
+    }
+  ]
 }`)}`;
 
   const dataBlock = {
@@ -141,7 +203,7 @@ ${twoPhaseGuard(`{
   const user = `请分析以下 A 股标的（行情快照，仅供定位，不代表完整基本面）：
 ${JSON.stringify(dataBlock, null, 2)}
 ${extraContext ? `\n补充背景：${extraContext}\n` : ""}
-请先实时写出五因子推理，再用 \`\`\`json 代码块输出结构化打分。`;
+请先实时写出五因子与六步工作流推理，再用 \`\`\`json 代码块输出结构化打分。`;
 
   return { system, user };
 }
@@ -154,8 +216,11 @@ ${SERENITY_PROFILE.coreIdea}
 ${CHINA_CONTEXT}
 
 用户会给你一个趋势/主题。请按 Serenity 的方法把它拆成产业链分层（从下游终端到上游材料/设备），标注哪些层是“瓶颈点(chokepoint)”（供给受限、不可替代），并为每层给出有代表性的 A 股上市公司（用真实存在的公司名与6位代码；若不确定代码可留空字符串，但公司必须是真实的 A 股公司，绝不编造代码）。
+同时，请应用 Serenity 标志性的 BOM（物料清单）拆解技巧：
+1. 对每个产业链分层节点，估算其在最终终端产品中所占的 BOM 成本占比百分比（BOM Ratio，例如“15% - 20%”或“约 8%”等）；
+2. 详细列出该环节包含的子物料构成（BOM Detail，例如：“包含光探测器芯片（12%）、DSP电芯片（45%）、光路组件（15%）等”）。
 
-在第一步的实时推理里，请按层级口语化地讲清楚“为什么这样拆、哪一层才是真瓶颈、代表公司是谁”；第二步再汇总成结构化 JSON。
+在第一步的实时推理里，请按层级口语化地讲清楚“为什么这样拆、BOM 成本解构如何、哪一层才是真瓶颈、代表公司是谁”；第二步再汇总成结构化 JSON。
 
 ${twoPhaseGuard(`{
   "summary": "一段话总结该趋势下最值得关注的瓶颈环节",
@@ -165,10 +230,12 @@ ${twoPhaseGuard(`{
       "role": "该层在产业链中的作用",
       "isChokepoint": true|false,
       "chokepointReason": "若是瓶颈，说明为何不可替代/供给受限",
-      "tickers": [{"code": "6位代码或空串", "name": "公司名", "note": "为何相关"}]
+      "bomRatio": "该环节在终端产品中的 BOM 成本占比估算，例如 15%-20% 或 约 8%，若不适用可填空字串",
+      "bomDetail": "精细化 BOM 拆解与子部件成本估算，如：激光器芯片(35%)、外壳组件(10%)、PCB(15%)、DSP/电驱动芯片(40%)，若不适用可填空字串",
+      "tickers": [{"code": "6位代码或空串", "name": "公司名", "note": "访问原因"}]
     }
   ]
 }`)}`;
-  const user = `趋势/主题：${trend}\n请先实时写出产业链拆解推理，再用 \`\`\`json 代码块输出瓶颈点地图。`;
+  const user = `趋势/主题：${trend}\n请先实时写出产业链拆解与 BOM 推理，再用 \`\`\`json 代码块输出瓶颈点地图。`;
   return { system, user };
 }

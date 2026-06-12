@@ -27,6 +27,11 @@ interface AnalyzeResponse {
     windowLow: number;
   } | null;
   assessment: ChokepointAssessment;
+  matchedKnowledge?: {
+    themeName: string;
+    themeThesis: string;
+    tweets: { date: string; text: string }[];
+  } | null;
 }
 
 type Stats = AnalyzeResponse["stats"];
@@ -264,7 +269,7 @@ function PreviewCard({ quote, stats }: { quote: StockQuote; stats: Stats }) {
 }
 
 function Result({ data }: { data: AnalyzeResponse }) {
-  const { quote, stats, assessment } = data;
+  const { quote, stats, assessment, matchedKnowledge } = data;
   const up = quote.changePct >= 0;
   const [showPoster, setShowPoster] = useState(false);
   return (
@@ -344,6 +349,100 @@ function Result({ data }: { data: AnalyzeResponse }) {
         <h3 className="mb-2 font-bold tracking-wider">Serenity 风格论述</h3>
         <p className="text-sm leading-7 text-[var(--text)] text-justify">{assessment.thesis}</p>
       </div>
+
+      {/* ============================================================== */}
+      {/* 新增：Serenity 投研实战与 BOM 解构面板 */}
+      {/* ============================================================== */}
+      {((assessment.workflowSteps && assessment.workflowSteps.length > 0) || assessment.bomPosition || (matchedKnowledge && matchedKnowledge.tweets.length > 0)) && (
+        <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5 space-y-6">
+          <h3 className="font-bold tracking-wider border-b border-[var(--border)] pb-2">
+            Serenity 投研实战与 BOM 解构
+          </h3>
+          
+          <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+            {/* 左侧：六步工作流 */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold tracking-wider text-[var(--accent)] uppercase">
+                六步工作流实战解剖 (Workflow Analysis)
+              </h4>
+              {assessment.workflowSteps && assessment.workflowSteps.length > 0 ? (
+                <div className="relative border-l border-[var(--border)] pl-4 ml-2.5 space-y-5">
+                  {assessment.workflowSteps.map((s) => {
+                    const isWind = s.step === 5;
+                    const isPos = s.step === 6;
+                    const numColor = isWind 
+                      ? "bg-amber-500/10 border-amber-500/30 text-amber-500" 
+                      : isPos 
+                        ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent)]" 
+                        : "bg-[var(--hover)] border-[var(--border)] text-[var(--text)]";
+                    
+                    return (
+                      <div key={s.step} className="relative">
+                        <span className={`absolute -left-[27px] top-0.5 flex h-5 w-5 shrink-0 place-items-center justify-center rounded-full border text-[10px] font-mono font-bold ${numColor}`}>
+                          0{s.step}
+                        </span>
+                        <div className="space-y-1">
+                          <h5 className="text-xs font-bold tracking-wide text-[var(--text)]">
+                            {s.title}
+                          </h5>
+                          <p className="text-xs leading-relaxed text-[var(--muted)] text-justify">
+                            {s.content}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-[var(--faint)]">暂无工作流解构数据</p>
+              )}
+            </div>
+
+            {/* 右侧：BOM 拆解与一手推文 */}
+            <div className="space-y-5">
+              {/* BOM 拆解卡片 */}
+              {assessment.bomPosition && (
+                <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] p-4 space-y-2.5">
+                  <h4 className="text-xs font-bold tracking-wider text-[var(--text)] uppercase border-b border-[var(--border)] pb-1.5 flex items-center justify-between">
+                    <span>BOM 成本链定位</span>
+                    <span className="rounded-full bg-[var(--accent-soft)] border border-[var(--accent-line)] px-2 py-0.5 text-[9px] font-mono text-[var(--accent)]">
+                      BOM 占比: {assessment.bomPosition.bomRatio || "暂无估算"}
+                    </span>
+                  </h4>
+                  <div className="space-y-1.5 text-xs">
+                    <p className="text-[11px] text-[var(--faint)] font-semibold">BOM 节点：</p>
+                    <p className="font-mono text-[var(--text)] font-semibold">{assessment.bomPosition.nodeName}</p>
+                    <p className="text-[11px] text-[var(--faint)] font-semibold mt-2">物料作用与卡脖子判定：</p>
+                    <p className="text-[var(--muted)] leading-relaxed text-justify">{assessment.bomPosition.role}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Serenity 一手推文参考 */}
+              {matchedKnowledge && matchedKnowledge.tweets && matchedKnowledge.tweets.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-xs font-bold tracking-wider text-[var(--faint)] uppercase tracking-widest text-[10px] border-b border-[var(--border)] pb-1">
+                    Serenity 一手笔记参考 ({matchedKnowledge.tweets.length} 条)
+                  </h4>
+                  <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                    {matchedKnowledge.tweets.map((t, idx) => (
+                      <div key={idx} className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-3 text-xs space-y-1.5 glass-card">
+                        <div className="flex items-center justify-between text-[10px] text-[var(--faint)] font-mono">
+                          <span>@aleabitoreddit 原文</span>
+                          <span>{t.date}</span>
+                        </div>
+                        <p className="font-mono text-[var(--muted)] leading-relaxed whitespace-pre-line text-justify scale-[0.95] origin-top-left">
+                          {t.text}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <ListCard title="潜在催化剂" items={assessment.catalysts} tone="emerald" />

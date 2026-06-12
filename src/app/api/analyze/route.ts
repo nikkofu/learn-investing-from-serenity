@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { promises as fs } from "fs";
+import path from "path";
 import { deriveStats, getKlineSafe, getQuote } from "@/lib/market";
 import { buildAnalyzePrompt } from "@/lib/serenity";
 import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
@@ -8,6 +10,111 @@ import { NarrativeJsonSplitter } from "@/lib/split";
 import type { ChokepointAssessment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+// 基于股票代码/名称，从本地知识库中动态匹配 Serenity 关联主题与一手推文
+async function findSerenityKnowledge(code: string, name: string) {
+  try {
+    const knowledgePath = path.join(process.cwd(), "data", "serenity_knowledge.json");
+    const postsPath = path.join(process.cwd(), ".data", "x-posts.json");
+    
+    const curatedRaw = await fs.readFile(knowledgePath, "utf8");
+    const curated = JSON.parse(curatedRaw);
+    
+    let matchedTheme = null;
+    let matchedSegment = "";
+    
+    // 1. 在 curated 知识库中寻找 A 股映射匹配
+    if (curated && curated.themes) {
+      for (const theme of curated.themes) {
+        if (theme.aShareMapping) {
+          for (const mapItem of theme.aShareMapping) {
+            const hasCompany = mapItem.companies.some(
+              (c: any) => c.code === code || name.includes(c.name) || c.name.includes(name)
+            );
+            if (hasCompany) {
+              matchedTheme = theme;
+              matchedSegment = mapItem.segment;
+              break;
+            }
+          }
+        }
+        if (matchedTheme) break;
+      }
+    }
+    
+    if (!matchedTheme) return null;
+    
+    // 2. 匹配最相关的 X 推文
+    let matchedTweets: { date: string; text: string }[] = [];
+    try {
+      const postsRaw = await fs.readFile(postsPath, "utf8");
+      const postsData = JSON.parse(postsRaw);
+      const posts = postsData.posts ?? [];
+      
+      const usTickers = new Set<string>(matchedTheme.usExamples ?? []);
+      
+      // 提取针对该细分环节可能对应的检索词
+      const keywords: string[] = [];
+      const segLower = matchedSegment.toLowerCase();
+      if (segLower.includes("光模块") || segLower.includes("光组件") || segLower.includes("光通信")) {
+        keywords.push("optical", "transceiver", "cpo", "laser", "sive", "lite");
+      } else if (segLower.includes("芯片") || segLower.includes("半导体") || segLower.includes("材料")) {
+        keywords.push("chip", "semi", "substrate", "inp", "axti", "wafer", "iqe");
+      } else if (segLower.includes("减速器") || segLower.includes("丝杠") || segLower.includes("机器人")) {
+        keywords.push("robot", "harmonic", "gear", "actuator", "sanhua");
+      } else if (segLower.includes("铜缆") || segLower.includes("连接器")) {
+        keywords.push("cable", "copper", "connector", "aec", "foci");
+      } else if (segLower.includes("存储")) {
+        keywords.push("hbm", "memory", "dram", "towa");
+      } else if (segLower.includes("液冷") || segLower.includes("温控")) {
+        keywords.push("cool", "thermal", "liquid");
+      }
+      
+      for (const post of posts) {
+        const textLower = post.text.toLowerCase();
+        let matches = false;
+        
+        // 匹配美股 ticker 关联
+        if (post.tickers && post.tickers.some((t: string) => usTickers.has(t))) {
+          matches = true;
+        }
+        
+        // 匹配行业细分关键字
+        if (!matches && keywords.some(k => textLower.includes(k))) {
+          matches = true;
+        }
+        
+        if (matches) {
+          // 裁剪掉 show more 之后的推文残留以保持 Prompt 整洁
+          const cleanText = post.text.replace(/\nShow more\nQuote[\s\S]*/i, "").trim();
+          matchedTweets.push({
+            date: post.date,
+            text: cleanText
+          });
+        }
+      }
+      
+      // 优先级：BOM 或 chokepoint 硬核分析词汇排在最前
+      matchedTweets.sort((a, b) => {
+        const aScore = /bom|chokepoint|bottleneck|margin|capacity/i.test(a.text) ? 1 : 0;
+        const bScore = /bom|chokepoint|bottleneck|margin|capacity/i.test(b.text) ? 1 : 0;
+        return bScore - aScore;
+      });
+      
+      matchedTweets = matchedTweets.slice(0, 3);
+    } catch {
+      // 忽略 x-posts.json 报错以防运行中断
+    }
+    
+    return {
+      themeName: matchedTheme.name,
+      themeThesis: matchedTheme.thesis,
+      tweets: matchedTweets
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: Request) {
   const body = (await req.json()) as { code?: string; context?: string };
@@ -30,12 +137,16 @@ export async function POST(req: Request) {
     send({ type: "quote", quote, stats });
     send({ type: "stage", key: "quote", status: "done" });
 
+    // Stage 1.5: 检索匹配 Serenity 本地知识库
+    const matchedKnowledge = await findSerenityKnowledge(code, quote.name);
+
     // Stage 2: stream the LLM's chokepoint reasoning token-by-token.
     const { system, user } = buildAnalyzePrompt({
       quote,
       candles,
       stats,
       extraContext: body.context,
+      matchedKnowledge,
     });
     send({ type: "stage", key: "reason", status: "start" });
     const splitter = new NarrativeJsonSplitter();
@@ -78,7 +189,29 @@ export async function POST(req: Request) {
     try {
       const raw = parseJsonObject<Partial<ChokepointAssessment>>(splitter.jsonText);
       const assessment = finalizeAssessment(raw);
-      send({ type: "result", quote, stats, assessment });
+      
+      // 解析 BOM 和六步工作流额外数据
+      if (raw.bomPosition) {
+        assessment.bomPosition = {
+          nodeName: raw.bomPosition.nodeName || "",
+          bomRatio: raw.bomPosition.bomRatio || "",
+          role: raw.bomPosition.role || "",
+        };
+      } else {
+        assessment.bomPosition = null;
+      }
+      
+      if (raw.workflowSteps) {
+        assessment.workflowSteps = raw.workflowSteps.map((s) => ({
+          step: Number(s.step),
+          title: s.title || "",
+          content: s.content || "",
+        }));
+      } else {
+        assessment.workflowSteps = [];
+      }
+      
+      send({ type: "result", quote, stats, assessment, matchedKnowledge });
       send({ type: "stage", key: "summary", status: "done" });
       send({ type: "done" });
     } catch {
