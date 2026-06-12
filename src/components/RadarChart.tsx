@@ -29,13 +29,11 @@ export default function RadarChart({
   const n = factors.length;
   if (n === 0) return null;
 
-  // 四周留白 padding，防止标签溢出被裁切（黄金比例 0.35）
-  const pad = size * 0.35;
-  const vbSize = size + pad * 2;
-  const cx = vbSize / 2;
-  const cy = vbSize / 2;
-  // 雷达图数据半径 R（黄金比例 0.28）
-  const R = size * 0.28; 
+  // 精密调优核心图形占比，使蛛网多边形占整个 SVG 视口区域的 80% 以上（直径占比 80%）
+  const vbSize = size;
+  const cx = size / 2;
+  const cy = size / 2;
+  const R = size * 0.40; // 半径设为 40%，使图形直径刚好达到 80% 占比 
   const rings = max;
 
   // 从顶部开始顺时针的角度
@@ -51,7 +49,13 @@ export default function RadarChart({
   const dataPoly = dataPoints.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
 
   return (
-    <svg viewBox={`0 0 ${vbSize} ${vbSize}`} className="mx-auto w-full max-w-[320px]" role="img" aria-label="五因子雷达图">
+    <svg 
+      viewBox={`0 0 ${vbSize} ${vbSize}`} 
+      className="mx-auto w-full max-w-[320px]" 
+      style={{ overflow: "visible" }}
+      role="img" 
+      aria-label="五因子雷达图"
+    >
       {/* 网格环 */}
       {Array.from({ length: rings }, (_, k) => (
         <polygon
@@ -79,23 +83,23 @@ export default function RadarChart({
         const cos = Math.cos(angle(i));
         const anchor = Math.abs(cos) < 0.3 ? "middle" : cos > 0 ? "start" : "end";
 
-        // 字号：兼顾网页展示和海报导出的可读性（在 300px 尺寸下更清晰易读）
-        const computedFontSize = Math.max(10, Math.round(size * 0.075));
-        const baseOffset = size * 0.12; // 文字离雷达图边缘的合理距离 (0.12)
+        // 字号：兼顾网页展示和海报导出的可读性，适当调小以保证 80% 占比下排版合理（4汉字不带数值）
+        const computedFontSize = Math.max(10, Math.round(size * 0.065));
+        const baseOffset = size * 0.05; // 紧凑的文字离雷达图边缘的合理距离 (5%)
 
         // dy 微调：替代 dominantBaseline，防止 html-to-image 序列化翻转 Bug
         let dy = "0.35em";
         let offsetR = baseOffset;
         if (i === 0) {
-          dy = "-0.3em";   // 最上方：文字往上顶
-          offsetR = baseOffset * 0.75;
+          dy = "-0.4em";   // 最上方：文字往上顶
+          offsetR = baseOffset * 0.4;
         } else if (i === 2 || i === 3) {
           dy = "0.9em";    // 下方：文字往下沉
-          offsetR = baseOffset * 0.75;
+          offsetR = baseOffset * 0.4;
         }
 
         const [lx, ly] = point(i, R + offsetR);
-        const labelText = `${f.label} ${f.score}`;
+        const labelText = f.label; // 去掉打分数值的显示，直接显示名字
         return (
           <text
             key={i}
