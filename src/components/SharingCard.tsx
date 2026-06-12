@@ -37,186 +37,148 @@ interface PosterContentProps {
 function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentProps) {
   const dateStr = new Date().toISOString().split("T")[0];
 
-  // 投行专业版式：直角/微小圆角 (2px)，半透明毛玻璃底板，精细实线分割，无大阴影
-  const cardStyle = {
+  // 投行专业版式：直角/微小圆角，半透明毛玻璃底板，精细实线分割
+  const cardStyle: React.CSSProperties = {
     background: "var(--surface)",
     backdropFilter: "var(--card-blur, none)",
     WebkitBackdropFilter: "var(--card-blur, none)",
-    border: "1.5px solid var(--border)",
-    borderRadius: "2px",
+    border: "2px solid var(--border)",
+    borderRadius: "4px",
   };
 
+  // ===================== 3:4 手机竖版 (880×1160) =====================
   if (ratio === "3-4") {
     return (
       <div
-        className="relative overflow-hidden p-10 flex flex-col justify-between select-none"
+        className="relative overflow-hidden flex flex-col justify-between select-none"
         style={{
           width: "880px",
           height: "1160px",
+          padding: "40px 44px",
           background: "var(--bg-gradient, var(--bg))",
           color: "var(--text)",
           fontFamily: "var(--font-sans), sans-serif",
           boxSizing: "border-box",
         }}
       >
-        {/* 背景光晕 (高度收敛，弱化发光) */}
+        {/* 背景光晕 */}
         <div className="absolute -top-40 -right-40 h-[400px] w-[400px] rounded-full bg-[var(--accent-soft)] blur-[100px] opacity-20 pointer-events-none" />
         <div className="absolute -bottom-40 -left-40 h-[400px] w-[400px] rounded-full bg-[var(--accent-soft)] blur-[100px] opacity-15 pointer-events-none" />
 
-        {/* 1. 顶部眉栏 - 研报风，等宽英汉双语 */}
-        <div className="relative z-10 flex items-center justify-between border-b-2 border-[var(--border)] pb-3 text-xs uppercase tracking-wider text-[var(--faint)] font-mono">
-          <span>SERENITY MOBILE REPORT · INDIVIDUAL STOCK REPORT</span>
-          <span>{dateStr} · PROPRIETARY</span>
+        {/* 1. 顶部眉栏 */}
+        <div className="relative z-10 flex items-center justify-between" style={{ borderBottom: "2px solid var(--border)", paddingBottom: "14px", fontSize: "20px", letterSpacing: "0.08em", color: "var(--faint)", fontFamily: "monospace", textTransform: "uppercase" }}>
+          <span>SERENITY · STOCK REPORT</span>
+          <span>{dateStr}</span>
         </div>
 
-        {/* 2. 博主资质卡片 (Bloomberg Terminal 联名签名版式) */}
-        <div className="relative z-10 my-3 flex items-center gap-5 p-4" style={cardStyle}>
-          {/* 方形分析师证照头像 */}
-          <div className="relative h-16 w-16 shrink-0 overflow-hidden border border-[var(--border)] rounded-[2px] bg-[var(--hover)]">
-            <img src="/serenity-avatar.png" alt="Serenity" className="h-full w-full object-cover grayscale-[20%]" />
+        {/* 2. 博主资质卡片 */}
+        <div className="relative z-10 flex items-center" style={{ ...cardStyle, margin: "16px 0", padding: "18px 22px", gap: "20px" }}>
+          <div style={{ width: "76px", height: "76px", flexShrink: 0, overflow: "hidden", border: "2px solid var(--border)", borderRadius: "4px", background: "var(--hover)" }}>
+            <img src="/serenity-avatar.png" alt="Serenity" style={{ width: "100%", height: "100%", objectFit: "cover", filter: "grayscale(20%)" }} />
           </div>
-          {/* 姓名与专业资质 */}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-3">
-              <span className="font-mono font-bold text-lg text-[var(--text)] tracking-wider">@aleabitoreddit</span>
-              <span className="border-2 border-[var(--accent)] bg-transparent px-2 py-0.5 text-[10px] text-[var(--accent)] font-bold uppercase tracking-wider rounded-none">
-                ORIGINATOR
-              </span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              <span style={{ fontSize: "28px", fontWeight: 700, fontFamily: "monospace", color: "var(--text)", letterSpacing: "0.04em" }}>@aleabitoreddit</span>
+              <span style={{ fontSize: "16px", fontWeight: 700, border: "2px solid var(--accent)", color: "var(--accent)", padding: "2px 10px", letterSpacing: "0.1em", textTransform: "uppercase" }}>ORIGINATOR</span>
             </div>
-            <p className="text-xs text-[var(--muted)] mt-1.5 truncate tracking-wide font-sans">
-              前 AI 研究科学家 · 前 RISC-V 基金会成员
-            </p>
+            <p style={{ fontSize: "20px", color: "var(--muted)", marginTop: "6px", letterSpacing: "0.02em" }}>前 AI 研究科学家 · 前 RISC-V 基金会成员</p>
           </div>
-          {/* 彭博社风格收益格子 */}
-          <div className="text-right shrink-0 border-l border-[var(--border)] pl-5 flex flex-col justify-center h-12">
-            <span className="text-[10px] text-[var(--faint)] font-mono uppercase tracking-wider block">YTD RETURN</span>
-            <span className="text-lg font-mono font-black text-[var(--accent)] leading-none mt-1">≈ 45.0x</span>
+          <div style={{ textAlign: "right", flexShrink: 0, borderLeft: "2px solid var(--border)", paddingLeft: "22px", display: "flex", flexDirection: "column", justifyContent: "center", height: "56px" }}>
+            <span style={{ fontSize: "16px", color: "var(--faint)", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em" }}>YTD RETURN</span>
+            <span style={{ fontSize: "32px", fontFamily: "monospace", fontWeight: 900, color: "var(--accent)", lineHeight: 1, marginTop: "4px" }}>≈ 45.0x</span>
           </div>
         </div>
 
-        {/* 3. 股票基本行情与总分 */}
-        <div className="relative z-10 my-2 grid grid-cols-[1fr_210px] gap-5 items-stretch">
-          {/* 行情区块 */}
-          <div className="flex flex-col justify-center p-4 min-w-0" style={cardStyle}>
-            <div className="flex items-center justify-between gap-1">
-              <div className="flex items-baseline gap-2 min-w-0">
-                <h1 className="text-2xl font-black tracking-tight text-[var(--text)] leading-none truncate">{quote.name}</h1>
-                <span className="font-mono text-xs text-[var(--muted)] shrink-0">{quote.code}</span>
+        {/* 3. 股票行情与总分 */}
+        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: "16px", alignItems: "stretch", margin: "8px 0" }}>
+          <div style={{ ...cardStyle, display: "flex", flexDirection: "column", justifyContent: "center", padding: "18px 22px", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "12px", minWidth: 0 }}>
+                <span style={{ fontSize: "44px", fontWeight: 900, color: "var(--text)", lineHeight: 1, letterSpacing: "-0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.name}</span>
+                <span style={{ fontSize: "22px", fontFamily: "monospace", color: "var(--muted)", flexShrink: 0 }}>{quote.code}</span>
               </div>
               {assessment.recommendedBuy && (
-                <span className="border border-[var(--accent)] text-[var(--accent)] bg-transparent px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-none shrink-0 leading-none">
-                  BUY
-                </span>
+                <span style={{ fontSize: "18px", fontWeight: 700, border: "2px solid var(--accent)", color: "var(--accent)", padding: "4px 14px", letterSpacing: "0.08em", textTransform: "uppercase", flexShrink: 0 }}>BUY</span>
               )}
             </div>
-            <div className="mt-2.5 flex items-baseline justify-between gap-1 flex-wrap">
-              <div className="flex items-baseline gap-3 shrink-0">
-                <span className="font-mono text-xl font-bold text-[var(--text)] leading-none">{quote.price.toFixed(2)}</span>
-                <span className={`font-mono text-sm font-bold ${isUp ? "text-red-500" : "text-emerald-500"} leading-none`}>
+            <div style={{ marginTop: "14px", display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "14px", flexShrink: 0 }}>
+                <span style={{ fontSize: "38px", fontFamily: "monospace", fontWeight: 700, color: "var(--text)", lineHeight: 1 }}>{quote.price.toFixed(2)}</span>
+                <span style={{ fontSize: "26px", fontFamily: "monospace", fontWeight: 700, color: isUp ? "#ef4444" : "#10b981", lineHeight: 1 }}>
                   {isUp ? "+" : ""}{quote.changePct.toFixed(2)}%
                 </span>
               </div>
               {assessment.recommendedBuy && assessment.buyPriceRange && (
-                <span className="font-mono text-xs text-[var(--muted)] shrink-0 leading-none">
-                  建议买入价: {assessment.buyPriceRange}
-                </span>
+                <span style={{ fontSize: "20px", fontFamily: "monospace", color: "var(--muted)", flexShrink: 0 }}>建议买入: {assessment.buyPriceRange}</span>
               )}
             </div>
           </div>
-          {/* 总分 */}
-          <div className="text-center p-3 flex flex-col justify-between" style={cardStyle}>
-            <span className="text-[10px] text-[var(--faint)] font-mono uppercase tracking-wider block">SERENITY SCORE</span>
-            <span className="text-3xl font-mono font-black text-[var(--accent)] leading-none my-1">{assessment.totalScore}</span>
-            <span className="text-xs text-[var(--muted)] font-bold border-t border-[var(--border)] pt-1 block truncate">
-              {assessment.verdict}
-            </span>
+          <div style={{ ...cardStyle, textAlign: "center", padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <span style={{ fontSize: "18px", color: "var(--faint)", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>SERENITY SCORE</span>
+            <span style={{ fontSize: "60px", fontFamily: "monospace", fontWeight: 900, color: "var(--accent)", lineHeight: 1, margin: "6px 0" }}>{assessment.totalScore}</span>
+            <span style={{ fontSize: "22px", color: "var(--muted)", fontWeight: 700, borderTop: "2px solid var(--border)", paddingTop: "8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assessment.verdict}</span>
           </div>
         </div>
 
-        {/* 4. 中间分析区 (极细直角进度条 + 雷达图) */}
-        <div className="relative z-10 grid grid-cols-[300px_1fr] gap-5 items-center p-4" style={cardStyle}>
-          {/* 左侧雷达图 */}
-          <div className="scale-95 origin-center shrink-0 w-[280px] h-[280px] flex items-center justify-center">
-            <RadarChart
-              factors={assessment.factors.map((f) => ({
-                label: FACTOR_LABELS[f.key] || f.key,
-                score: f.score,
-              }))}
-              size={220}
-            />
+        {/* 4. 分析区 (雷达图 + 五因子) */}
+        <div className="relative z-10" style={{ ...cardStyle, display: "grid", gridTemplateColumns: "270px 1fr", gap: "20px", alignItems: "center", padding: "18px 22px" }}>
+          <div style={{ width: "250px", height: "250px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <RadarChart factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))} size={240} />
           </div>
-          {/* 右侧五因子进度线 */}
-          <div className="space-y-4 min-w-0 pr-2">
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px", minWidth: 0, paddingRight: "8px" }}>
             {assessment.factors.map((f) => (
-              <div key={f.key} className="min-w-0">
-                <div className="flex items-center justify-between text-sm font-mono">
-                  <span className="text-[var(--text)] font-semibold">{FACTOR_LABELS[f.key] || f.key}</span>
-                  <span className="font-bold text-[var(--accent)]">{f.score} / 5</span>
+              <div key={f.key} style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "monospace" }}>
+                  <span style={{ fontSize: "24px", color: "var(--text)", fontWeight: 600 }}>{FACTOR_LABELS[f.key] || f.key}</span>
+                  <span style={{ fontSize: "24px", fontWeight: 700, color: "var(--accent)" }}>{f.score} / 5</span>
                 </div>
-                {/* 直角刻度进度线 */}
-                <div className="mt-1.5 h-[4px] bg-[var(--border)] rounded-none overflow-hidden">
-                  <div
-                    className="h-full rounded-none"
-                    style={{
-                      width: `${(f.score / 5) * 100}%`,
-                      background: "var(--accent)",
-                    }}
-                  />
+                <div style={{ marginTop: "8px", height: "8px", background: "var(--border)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(f.score / 5) * 100}%`, background: "var(--accent)" }} />
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* 5. 投资逻辑主线 (EXECUTIVE SUMMARY 风格) */}
-        <div className="relative z-10 my-3 border-l-4 border-l-[var(--accent)] p-4" style={cardStyle}>
-          <div className="flex items-center justify-between border-b border-[var(--border)] pb-1 mb-2 text-[10px] font-mono text-[var(--accent)] uppercase tracking-wider font-bold">
-            <span>INVESTMENT THESIS / 瓶颈核心论述</span>
-            <span className="text-[var(--faint)] font-normal font-sans">EXECUTIVE SUMMARY</span>
+        {/* 5. 投资逻辑 */}
+        <div className="relative z-10" style={{ ...cardStyle, borderLeft: "6px solid var(--accent)", padding: "18px 22px", margin: "12px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)", paddingBottom: "8px", marginBottom: "12px" }}>
+            <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>INVESTMENT THESIS / 瓶颈核心论述</span>
+            <span style={{ fontSize: "16px", color: "var(--faint)" }}>EXECUTIVE SUMMARY</span>
           </div>
-          <p className="text-sm leading-6 text-[var(--text)] font-normal font-sans text-justify">
-            {assessment.thesis.length > 110 ? assessment.thesis.slice(0, 107) + "..." : assessment.thesis}
+          <p style={{ fontSize: "24px", lineHeight: 1.6, color: "var(--text)", textAlign: "justify" }}>
+            {assessment.thesis.length > 80 ? assessment.thesis.slice(0, 77) + "..." : assessment.thesis}
           </p>
         </div>
 
-        {/* 6. 催化剂与风险点对比 */}
-        <div className="relative z-10 grid grid-cols-2 gap-4 flex-1 min-h-[140px]">
-          {/* 潜在催化剂 */}
-          <div className="p-4 flex flex-col justify-between min-w-0" style={{ ...cardStyle, borderLeft: "3px solid var(--accent-line)" }}>
-            <div>
-              <span className="text-[10px] font-mono font-bold text-[var(--accent)] uppercase tracking-wider block mb-2 border-b border-[var(--border)] pb-1">
-                CATALYSTS / 催化剂
-              </span>
-              <div className="space-y-1.5 min-w-0">
-                {assessment.catalysts.slice(0, 2).map((item, idx) => (
-                  <div key={idx} className="flex gap-2 items-start min-w-0 text-xs leading-4 text-[var(--muted)]">
-                    <span className="font-mono text-[var(--accent)] font-semibold shrink-0">[0{idx + 1}]</span>
-                    <span className="truncate flex-1 min-w-0 block">{item}</span>
-                  </div>
-                ))}
-              </div>
+        {/* 6. 催化剂与风险点 */}
+        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", flex: 1, minHeight: "120px" }}>
+          <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "18px 20px", display: "flex", flexDirection: "column" }}>
+            <span style={{ fontSize: "18px", fontFamily: "monospace", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "10px", paddingBottom: "8px", borderBottom: "1px solid var(--border)" }}>CATALYSTS / 催化剂</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {assessment.catalysts.slice(0, 2).map((item, idx) => (
+                <div key={idx} style={{ display: "flex", gap: "10px", alignItems: "flex-start", minWidth: 0 }}>
+                  <span style={{ fontSize: "20px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600, flexShrink: 0 }}>[0{idx + 1}]</span>
+                  <span style={{ fontSize: "20px", color: "var(--muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{item}</span>
+                </div>
+              ))}
             </div>
           </div>
-          {/* 关键风险点 */}
-          <div className="p-4 flex flex-col justify-between min-w-0" style={{ ...cardStyle, borderLeft: "3px solid var(--warn-line)" }}>
-            <div>
-              <span className="text-[10px] font-mono font-bold text-[var(--warn)] uppercase tracking-wider block mb-2 border-b border-[var(--border)] pb-1">
-                KEY RISKS / 关键风险点
-              </span>
-              <div className="space-y-1.5 min-w-0">
-                {assessment.risks.slice(0, 2).map((item, idx) => (
-                  <div key={idx} className="flex gap-2 items-start min-w-0 text-xs leading-4 text-[var(--muted)]">
-                    <span className="font-mono text-[var(--warn)] font-semibold shrink-0">[0{idx + 1}]</span>
-                    <span className="truncate flex-1 min-w-0 block">{item}</span>
-                  </div>
-                ))}
-              </div>
+          <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "18px 20px", display: "flex", flexDirection: "column" }}>
+            <span style={{ fontSize: "18px", fontFamily: "monospace", fontWeight: 700, color: "var(--warn)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "10px", paddingBottom: "8px", borderBottom: "1px solid var(--border)" }}>KEY RISKS / 关键风险点</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {assessment.risks.slice(0, 2).map((item, idx) => (
+                <div key={idx} style={{ display: "flex", gap: "10px", alignItems: "flex-start", minWidth: 0 }}>
+                  <span style={{ fontSize: "20px", fontFamily: "monospace", color: "var(--warn)", fontWeight: 600, flexShrink: 0 }}>[0{idx + 1}]</span>
+                  <span style={{ fontSize: "20px", color: "var(--muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{item}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
 
         {/* 7. 页脚 */}
-        <div className="relative z-10 mt-3 pt-3 border-t border-[var(--border)] flex items-center justify-between text-[10px] text-[var(--faint)] font-mono">
+        <div className="relative z-10" style={{ marginTop: "14px", paddingTop: "14px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
           <span>SERENITY AUTOMATION ENGINE</span>
           <span>VALUATION CHOKEPOINT MODEL</span>
         </div>
@@ -224,339 +186,277 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
     );
   }
 
+  // ===================== 9:16 故事版 (880×1560) =====================
   if (ratio === "9-16") {
     return (
       <div
-        className="relative overflow-hidden p-10 flex flex-col justify-between select-none"
+        className="relative overflow-hidden flex flex-col justify-between select-none"
         style={{
           width: "880px",
           height: "1560px",
+          padding: "44px 48px",
           background: "var(--bg-gradient, var(--bg))",
           color: "var(--text)",
           fontFamily: "var(--font-sans), sans-serif",
           boxSizing: "border-box",
         }}
       >
-        {/* 背景光晕 (高度收敛，弱化发光) */}
+        {/* 背景光晕 */}
         <div className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-[var(--accent-soft)] blur-[100px] opacity-20 pointer-events-none" />
         <div className="absolute -bottom-40 -left-40 h-[500px] w-[500px] rounded-full bg-[var(--accent-soft)] blur-[100px] opacity-15 pointer-events-none" />
 
-        {/* 1. 顶部眉栏 - 研报风，等宽英汉双语 */}
-        <div className="relative z-10 flex items-center justify-between border-b-2 border-[var(--border)] pb-3 text-xs uppercase tracking-wider text-[var(--faint)] font-mono">
-          <span>SERENITY RESEARCH · INDIVIDUAL STOCK REPORT</span>
-          <span>{dateStr} · PROPRIETARY</span>
+        {/* 1. 顶部眉栏 */}
+        <div className="relative z-10 flex items-center justify-between" style={{ borderBottom: "2px solid var(--border)", paddingBottom: "16px", fontSize: "22px", letterSpacing: "0.08em", color: "var(--faint)", fontFamily: "monospace", textTransform: "uppercase" }}>
+          <span>SERENITY RESEARCH · STOCK REPORT</span>
+          <span>{dateStr}</span>
         </div>
 
-        {/* 2. 博主资质卡片 (Bloomberg Terminal 联名签名版式) */}
-        <div className="relative z-10 my-4 flex items-center gap-5 p-4" style={cardStyle}>
-          {/* 方形分析师证照头像 */}
-          <div className="relative h-18 w-18 shrink-0 overflow-hidden border border-[var(--border)] rounded-[2px] bg-[var(--hover)]">
-            <img src="/serenity-avatar.png" alt="Serenity" className="h-full w-full object-cover grayscale-[20%]" />
+        {/* 2. 博主资质卡片 */}
+        <div className="relative z-10 flex items-center" style={{ ...cardStyle, margin: "20px 0", padding: "22px 26px", gap: "22px" }}>
+          <div style={{ width: "84px", height: "84px", flexShrink: 0, overflow: "hidden", border: "2px solid var(--border)", borderRadius: "4px", background: "var(--hover)" }}>
+            <img src="/serenity-avatar.png" alt="Serenity" style={{ width: "100%", height: "100%", objectFit: "cover", filter: "grayscale(20%)" }} />
           </div>
-          {/* 姓名与专业资质 */}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-3">
-              <span className="font-mono font-bold text-lg text-[var(--text)] tracking-wider">@aleabitoreddit</span>
-              <span className="border-2 border-[var(--accent)] bg-transparent px-2 py-0.5 text-[10px] text-[var(--accent)] font-bold uppercase tracking-wider rounded-none">
-                ORIGINATOR
-              </span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              <span style={{ fontSize: "30px", fontWeight: 700, fontFamily: "monospace", color: "var(--text)", letterSpacing: "0.04em" }}>@aleabitoreddit</span>
+              <span style={{ fontSize: "18px", fontWeight: 700, border: "2px solid var(--accent)", color: "var(--accent)", padding: "3px 12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>ORIGINATOR</span>
             </div>
-            <p className="text-xs text-[var(--muted)] mt-1.5 truncate tracking-wide font-sans">
-              前 AI 研究科学家 · 前 RISC-V 基金会成员
-            </p>
+            <p style={{ fontSize: "22px", color: "var(--muted)", marginTop: "8px", letterSpacing: "0.02em" }}>前 AI 研究科学家 · 前 RISC-V 基金会成员</p>
           </div>
-          {/* 彭博社风格收益格子 */}
-          <div className="text-right shrink-0 border-l border-[var(--border)] pl-5 flex flex-col justify-center h-12">
-            <span className="text-[10px] text-[var(--faint)] font-mono uppercase block text-[8px]">YTD RETURN</span>
-            <span className="text-2xl font-mono font-black text-[var(--accent)] leading-none mt-1">≈ 45.0x</span>
+          <div style={{ textAlign: "right", flexShrink: 0, borderLeft: "2px solid var(--border)", paddingLeft: "24px", display: "flex", flexDirection: "column", justifyContent: "center", height: "60px" }}>
+            <span style={{ fontSize: "18px", color: "var(--faint)", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.1em" }}>YTD RETURN</span>
+            <span style={{ fontSize: "36px", fontFamily: "monospace", fontWeight: 900, color: "var(--accent)", lineHeight: 1, marginTop: "6px" }}>≈ 45.0x</span>
           </div>
         </div>
 
-        {/* 3. 股票基本行情与晨星信用评级风格总分 */}
-        <div className="relative z-10 mb-4 grid grid-cols-[1fr_240px] gap-5 items-stretch">
-          {/* 行情区块 */}
-          <div className="flex flex-col justify-center p-4 min-w-0" style={cardStyle}>
-            <div className="flex items-center justify-between gap-1">
-              <div className="flex items-baseline gap-2 min-w-0">
-                <h1 className="text-2xl font-black tracking-tight text-[var(--text)] leading-none truncate">{quote.name}</h1>
-                <span className="font-mono text-xs text-[var(--muted)] shrink-0">{quote.code}</span>
+        {/* 3. 股票行情与总分 */}
+        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "1fr 240px", gap: "18px", alignItems: "stretch", marginBottom: "16px" }}>
+          <div style={{ ...cardStyle, display: "flex", flexDirection: "column", justifyContent: "center", padding: "20px 24px", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "12px", minWidth: 0 }}>
+                <span style={{ fontSize: "48px", fontWeight: 900, color: "var(--text)", lineHeight: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.name}</span>
+                <span style={{ fontSize: "24px", fontFamily: "monospace", color: "var(--muted)", flexShrink: 0 }}>{quote.code}</span>
               </div>
               {assessment.recommendedBuy && (
-                <span className="border border-[var(--accent)] text-[var(--accent)] bg-transparent px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-none shrink-0 leading-none">
-                  BUY
-                </span>
+                <span style={{ fontSize: "20px", fontWeight: 700, border: "2px solid var(--accent)", color: "var(--accent)", padding: "4px 16px", letterSpacing: "0.08em", textTransform: "uppercase", flexShrink: 0 }}>BUY</span>
               )}
             </div>
-            <div className="mt-2 flex items-baseline justify-between gap-1 flex-wrap">
-              <div className="flex items-baseline gap-3 shrink-0">
-                <span className="font-mono text-xl font-bold text-[var(--text)]">{quote.price.toFixed(2)}</span>
-                <span className={`font-mono text-sm font-bold ${isUp ? "text-red-500" : "text-emerald-500"}`}>
+            <div style={{ marginTop: "14px", display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "14px", flexShrink: 0 }}>
+                <span style={{ fontSize: "40px", fontFamily: "monospace", fontWeight: 700, color: "var(--text)", lineHeight: 1 }}>{quote.price.toFixed(2)}</span>
+                <span style={{ fontSize: "28px", fontFamily: "monospace", fontWeight: 700, color: isUp ? "#ef4444" : "#10b981", lineHeight: 1 }}>
                   {isUp ? "+" : ""}{quote.changePct.toFixed(2)}%
                 </span>
               </div>
               {assessment.recommendedBuy && assessment.buyPriceRange && (
-                <span className="font-mono text-xs text-[var(--muted)] shrink-0">
-                  买入价: {assessment.buyPriceRange}
-                </span>
+                <span style={{ fontSize: "22px", fontFamily: "monospace", color: "var(--muted)", flexShrink: 0 }}>买入价: {assessment.buyPriceRange}</span>
               )}
             </div>
           </div>
-          {/* 评分 */}
-          <div className="text-center p-3 flex flex-col justify-between" style={cardStyle}>
-            <span className="text-[10px] text-[var(--faint)] font-mono uppercase tracking-wider block">SERENITY SCORE</span>
-            <span className="text-3xl font-mono font-black text-[var(--accent)] leading-none my-1">{assessment.totalScore}</span>
-            <span className="text-xs text-[var(--muted)] font-bold border-t border-[var(--border)] pt-1 block truncate">
-              {assessment.verdict}
-            </span>
+          <div style={{ ...cardStyle, textAlign: "center", padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <span style={{ fontSize: "18px", color: "var(--faint)", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em" }}>SERENITY SCORE</span>
+            <span style={{ fontSize: "64px", fontFamily: "monospace", fontWeight: 900, color: "var(--accent)", lineHeight: 1, margin: "8px 0" }}>{assessment.totalScore}</span>
+            <span style={{ fontSize: "24px", color: "var(--muted)", fontWeight: 700, borderTop: "2px solid var(--border)", paddingTop: "8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assessment.verdict}</span>
           </div>
         </div>
 
-        {/* 4. 中间分析区 */}
-        <div className="relative z-10 grid grid-cols-[310px_1fr] gap-5 items-center p-4" style={cardStyle}>
-          {/* 左侧雷达图 */}
-          <div className="scale-95 origin-center shrink-0 w-[290px] h-[290px] flex items-center justify-center">
-            <RadarChart
-              factors={assessment.factors.map((f) => ({
-                label: FACTOR_LABELS[f.key] || f.key,
-                score: f.score,
-              }))}
-              size={240}
-            />
+        {/* 4. 分析区 */}
+        <div className="relative z-10" style={{ ...cardStyle, display: "grid", gridTemplateColumns: "300px 1fr", gap: "24px", alignItems: "center", padding: "22px 26px" }}>
+          <div style={{ width: "280px", height: "280px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <RadarChart factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))} size={260} />
           </div>
-          {/* 右侧五因子 */}
-          <div className="space-y-4 min-w-0 pr-2">
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px", minWidth: 0, paddingRight: "8px" }}>
             {assessment.factors.map((f) => (
-              <div key={f.key} className="min-w-0">
-                <div className="flex items-center justify-between text-sm font-mono">
-                  <span className="text-[var(--text)] font-semibold">{FACTOR_LABELS[f.key] || f.key}</span>
-                  <span className="font-bold text-[var(--accent)]">{f.score} / 5</span>
+              <div key={f.key} style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "monospace" }}>
+                  <span style={{ fontSize: "26px", color: "var(--text)", fontWeight: 600 }}>{FACTOR_LABELS[f.key] || f.key}</span>
+                  <span style={{ fontSize: "26px", fontWeight: 700, color: "var(--accent)" }}>{f.score} / 5</span>
                 </div>
-                {/* 进度线 */}
-                <div className="mt-1.5 h-[4px] bg-[var(--border)] rounded-none overflow-hidden">
-                  <div
-                    className="h-full rounded-none"
-                    style={{
-                      width: `${(f.score / 5) * 100}%`,
-                      background: "var(--accent)",
-                    }}
-                  />
+                <div style={{ marginTop: "8px", height: "8px", background: "var(--border)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(f.score / 5) * 100}%`, background: "var(--accent)" }} />
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* 5. 投资逻辑主线 */}
-        <div className="relative z-10 my-4 border-l-4 border-l-[var(--accent)] p-4" style={cardStyle}>
-          <div className="flex items-center justify-between border-b border-[var(--border)] pb-1 mb-2 text-[10px] font-mono text-[var(--accent)] uppercase tracking-wider font-bold">
-            <span>INVESTMENT THESIS / 瓶颈核心论述</span>
-            <span className="text-[var(--faint)] font-normal font-sans">EXECUTIVE SUMMARY</span>
+        {/* 5. 投资逻辑 */}
+        <div className="relative z-10" style={{ ...cardStyle, borderLeft: "6px solid var(--accent)", padding: "22px 26px", margin: "16px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)", paddingBottom: "10px", marginBottom: "14px" }}>
+            <span style={{ fontSize: "20px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>INVESTMENT THESIS / 瓶颈核心论述</span>
+            <span style={{ fontSize: "18px", color: "var(--faint)" }}>EXECUTIVE SUMMARY</span>
           </div>
-          <p className="text-base leading-7 text-[var(--text)] font-normal font-sans text-justify">
-            {assessment.thesis.length > 200 ? assessment.thesis.slice(0, 197) + "..." : assessment.thesis}
+          <p style={{ fontSize: "26px", lineHeight: 1.7, color: "var(--text)", textAlign: "justify" }}>
+            {assessment.thesis.length > 150 ? assessment.thesis.slice(0, 147) + "..." : assessment.thesis}
           </p>
         </div>
 
-        {/* 6. 催化剂与风险点对比 */}
-        <div className="relative z-10 grid grid-cols-2 gap-4 flex-1 min-h-[180px]">
-          {/* 潜在催化剂 */}
-          <div className="p-4 flex flex-col justify-between min-w-0" style={{ ...cardStyle, borderLeft: "3px solid var(--accent-line)" }}>
-            <div>
-              <span className="text-[10px] font-mono font-bold text-[var(--accent)] uppercase tracking-wider block mb-2 border-b border-[var(--border)] pb-1">
-                CATALYSTS / 催化剂
-              </span>
-              <div className="space-y-1.5 min-w-0">
-                {assessment.catalysts.slice(0, 3).map((item, idx) => (
-                  <div key={idx} className="flex gap-2 items-start min-w-0 text-sm leading-5 text-[var(--muted)]">
-                    <span className="font-mono text-[var(--accent)] font-semibold shrink-0">[0{idx + 1}]</span>
-                    <span className="truncate flex-1 min-w-0 block">{item}</span>
-                  </div>
-                ))}
-              </div>
+        {/* 6. 催化剂与风险点 */}
+        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", flex: 1, minHeight: "160px" }}>
+          <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "20px 22px", display: "flex", flexDirection: "column" }}>
+            <span style={{ fontSize: "20px", fontFamily: "monospace", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "12px", paddingBottom: "8px", borderBottom: "1px solid var(--border)" }}>CATALYSTS / 催化剂</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {assessment.catalysts.slice(0, 3).map((item, idx) => (
+                <div key={idx} style={{ display: "flex", gap: "10px", alignItems: "flex-start", minWidth: 0 }}>
+                  <span style={{ fontSize: "22px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600, flexShrink: 0 }}>[0{idx + 1}]</span>
+                  <span style={{ fontSize: "22px", color: "var(--muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{item}</span>
+                </div>
+              ))}
             </div>
           </div>
-          {/* 关键风险点 */}
-          <div className="p-4 flex flex-col justify-between min-w-0" style={{ ...cardStyle, borderLeft: "3px solid var(--warn-line)" }}>
-            <div>
-              <span className="text-[10px] font-mono font-bold text-[var(--warn)] uppercase tracking-wider block mb-2 border-b border-[var(--border)] pb-1">
-                KEY RISKS / 关键风险点
-              </span>
-              <div className="space-y-1.5 min-w-0">
-                {assessment.risks.slice(0, 3).map((item, idx) => (
-                  <div key={idx} className="flex gap-2 items-start min-w-0 text-sm leading-5 text-[var(--muted)]">
-                    <span className="font-mono text-[var(--warn)] font-semibold shrink-0">[0{idx + 1}]</span>
-                    <span className="truncate flex-1 min-w-0 block">{item}</span>
-                  </div>
-                ))}
-              </div>
+          <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "20px 22px", display: "flex", flexDirection: "column" }}>
+            <span style={{ fontSize: "20px", fontFamily: "monospace", fontWeight: 700, color: "var(--warn)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "12px", paddingBottom: "8px", borderBottom: "1px solid var(--border)" }}>KEY RISKS / 关键风险点</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {assessment.risks.slice(0, 3).map((item, idx) => (
+                <div key={idx} style={{ display: "flex", gap: "10px", alignItems: "flex-start", minWidth: 0 }}>
+                  <span style={{ fontSize: "22px", fontFamily: "monospace", color: "var(--warn)", fontWeight: 600, flexShrink: 0 }}>[0{idx + 1}]</span>
+                  <span style={{ fontSize: "22px", color: "var(--muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{item}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
 
         {/* 7. 页脚 */}
-        <div className="relative z-10 mt-3 pt-3 border-t border-[var(--border)] flex items-center justify-between text-[10px] text-[var(--faint)] font-mono">
+        <div className="relative z-10" style={{ marginTop: "16px", paddingTop: "14px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
           <span>SERENITY AUTOMATION ENGINE</span>
           <span>SYSTEM RUNTIME @ A-SHARES</span>
         </div>
       </div>
     );
   } else {
-    // 16:9 横版海报 (1440px * 810px)
+    // ===================== 16:9 横版 (1440×810) =====================
     return (
       <div
-        className="relative overflow-hidden p-10 flex flex-col justify-between select-none"
+        className="relative overflow-hidden flex flex-col justify-between select-none"
         style={{
           width: "1440px",
           height: "810px",
+          padding: "36px 44px",
           background: "var(--bg-gradient, var(--bg))",
           color: "var(--text)",
           fontFamily: "var(--font-sans), sans-serif",
           boxSizing: "border-box",
         }}
       >
-        {/* 背景光晕 (高度收敛，弱化发光) */}
+        {/* 背景光晕 */}
         <div className="absolute -top-32 -right-32 h-[500px] w-[500px] rounded-full bg-[var(--accent-soft)] blur-[100px] opacity-20 pointer-events-none" />
         <div className="absolute -bottom-32 -left-32 h-[500px] w-[500px] rounded-full bg-[var(--accent-soft)] blur-[100px] opacity-15 pointer-events-none" />
 
         {/* 顶部眉栏 */}
-        <div className="relative z-10 flex items-center justify-between border-b-2 border-[var(--border)] pb-3 text-xs uppercase tracking-wider text-[var(--faint)] font-mono">
-          <span>SERENITY RESEARCH · EQUITY DEEP DIVE REPORT</span>
+        <div className="relative z-10 flex items-center justify-between" style={{ borderBottom: "2px solid var(--border)", paddingBottom: "12px", fontSize: "20px", letterSpacing: "0.08em", color: "var(--faint)", fontFamily: "monospace", textTransform: "uppercase" }}>
+          <span>SERENITY RESEARCH · EQUITY DEEP DIVE</span>
           <span>{dateStr} · CONFIDENTIAL</span>
         </div>
 
         {/* 主分栏区域 */}
-        <div className="relative z-10 grid grid-cols-[480px_1fr] gap-8 my-auto items-stretch flex-1 py-4 min-h-[600px]">
-          
+        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "520px 1fr", gap: "28px", margin: "auto 0", alignItems: "stretch", flex: 1, paddingTop: "16px", paddingBottom: "16px", minHeight: "600px" }}>
+
           {/* 左栏 */}
-          <div className="flex flex-col justify-between space-y-4 w-[480px] shrink-0 min-w-0">
-            
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "14px", width: "520px", flexShrink: 0, minWidth: 0 }}>
+
             {/* 博主资质 */}
-            <div className="flex items-center gap-5 p-4 min-w-0" style={cardStyle}>
-              {/* 头像 */}
-              <div className="relative h-16 w-16 shrink-0 overflow-hidden border border-[var(--border)] rounded-[2px] bg-[var(--hover)]">
-                <img src="/serenity-avatar.png" alt="Serenity" className="h-full w-full object-cover grayscale-[20%]" />
+            <div style={{ ...cardStyle, display: "flex", alignItems: "center", gap: "18px", padding: "16px 20px", minWidth: 0 }}>
+              <div style={{ width: "64px", height: "64px", flexShrink: 0, overflow: "hidden", border: "2px solid var(--border)", borderRadius: "4px", background: "var(--hover)" }}>
+                <img src="/serenity-avatar.png" alt="Serenity" style={{ width: "100%", height: "100%", objectFit: "cover", filter: "grayscale(20%)" }} />
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-mono font-bold text-base text-[var(--text)] tracking-wider">@aleabitoreddit</div>
-                <p className="text-xs text-[var(--muted)] leading-none mt-1.5">年内收益 (YTD) ≈ 45.0x</p>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: "26px", fontFamily: "monospace", fontWeight: 700, color: "var(--text)", letterSpacing: "0.04em" }}>@aleabitoreddit</div>
+                <p style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1, marginTop: "8px" }}>年内收益 (YTD) ≈ 45.0x</p>
               </div>
             </div>
 
             {/* 行情与评分 */}
-            <div className="p-4 flex flex-col justify-center min-w-0" style={cardStyle}>
-              <div className="flex items-baseline justify-between gap-1">
-                <div className="flex items-baseline gap-2 min-w-0 truncate">
-                  <h2 className="font-black text-2xl text-[var(--text)] leading-none truncate">{quote.name}</h2>
-                  <span className="font-mono text-xs text-[var(--muted)] shrink-0">{quote.code}</span>
+            <div style={{ ...cardStyle, padding: "18px 20px", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "10px", minWidth: 0 }}>
+                  <span style={{ fontSize: "40px", fontWeight: 900, color: "var(--text)", lineHeight: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.name}</span>
+                  <span style={{ fontSize: "20px", fontFamily: "monospace", color: "var(--muted)", flexShrink: 0 }}>{quote.code}</span>
                 </div>
                 {assessment.recommendedBuy && (
-                  <span className="border border-[var(--accent)] text-[var(--accent)] bg-transparent px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded-none shrink-0 leading-none">
-                    BUY
-                  </span>
+                  <span style={{ fontSize: "16px", fontWeight: 700, border: "2px solid var(--accent)", color: "var(--accent)", padding: "3px 12px", letterSpacing: "0.08em", textTransform: "uppercase", flexShrink: 0 }}>BUY</span>
                 )}
               </div>
-              <div className="flex justify-between items-end mt-3 border-t border-[var(--border)] pt-3">
-                <div className="flex flex-col min-w-0">
-                  <span className="font-mono text-lg font-bold text-[var(--text)] leading-none">{quote.price.toFixed(2)}</span>
-                  <span className={`font-mono text-xs font-bold ${isUp ? "text-red-500" : "text-emerald-500"} mt-1.5`}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: "14px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <span style={{ fontSize: "34px", fontFamily: "monospace", fontWeight: 700, color: "var(--text)", lineHeight: 1 }}>{quote.price.toFixed(2)}</span>
+                  <span style={{ fontSize: "22px", fontFamily: "monospace", fontWeight: 700, color: isUp ? "#ef4444" : "#10b981", marginTop: "8px" }}>
                     {isUp ? "+" : ""}{quote.changePct.toFixed(2)}%
                   </span>
                   {assessment.recommendedBuy && assessment.buyPriceRange && (
-                    <span className="font-mono text-[10px] text-[var(--muted)] mt-1.5 truncate leading-none">
-                      建议买入: {assessment.buyPriceRange}
-                    </span>
+                    <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--muted)", marginTop: "8px" }}>建议买入: {assessment.buyPriceRange}</span>
                   )}
                 </div>
-                <div className="text-right flex flex-col justify-center shrink-0">
-                  <span className="text-xl font-mono font-black text-[var(--accent)] leading-none">{assessment.totalScore} 分</span>
-                  <span className="text-[10px] text-[var(--muted)] font-bold mt-1.5 tracking-tighter truncate max-w-[150px] block">{assessment.verdict}</span>
+                <div style={{ textAlign: "right", display: "flex", flexDirection: "column", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ fontSize: "40px", fontFamily: "monospace", fontWeight: 900, color: "var(--accent)", lineHeight: 1 }}>{assessment.totalScore} 分</span>
+                  <span style={{ fontSize: "18px", color: "var(--muted)", fontWeight: 700, marginTop: "8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "180px", display: "block" }}>{assessment.verdict}</span>
                 </div>
               </div>
             </div>
 
-            {/* 雷达图展示 */}
-            <div className="p-4 flex items-center justify-center flex-1 h-[230px]" style={cardStyle}>
-              <RadarChart
-                factors={assessment.factors.map((f) => ({
-                  label: FACTOR_LABELS[f.key] || f.key,
-                  score: f.score,
-                }))}
-                size={200}
-              />
+            {/* 雷达图 */}
+            <div style={{ ...cardStyle, padding: "16px", display: "flex", alignItems: "center", justifyContent: "center", flex: 1, minHeight: "220px" }}>
+              <RadarChart factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))} size={220} />
             </div>
           </div>
 
           {/* 右栏 */}
-          <div className="flex flex-col justify-between space-y-4 flex-1 min-w-0">
-            
-            {/* 五因子进度条网格 */}
-            <div className="grid grid-cols-2 gap-x-8 gap-y-3.5 p-4" style={cardStyle}>
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "14px", flex: 1, minWidth: 0 }}>
+
+            {/* 五因子 */}
+            <div style={{ ...cardStyle, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 28px", padding: "18px 22px" }}>
               {assessment.factors.map((f) => (
-                <div key={f.key} className="flex items-center gap-3 min-w-0">
-                  <span className="text-xs font-semibold text-[var(--text)] w-28 shrink-0 truncate">{FACTOR_LABELS[f.key] || f.key}</span>
-                  <div className="h-[4px] flex-1 bg-[var(--border)] rounded-none overflow-hidden">
-                    <div
-                      className="h-full rounded-none"
-                      style={{
-                        width: `${(f.score / 5) * 100}%`,
-                        background: "var(--accent)",
-                      }}
-                    />
+                <div key={f.key} style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                  <span style={{ fontSize: "20px", fontWeight: 600, color: "var(--text)", width: "110px", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{FACTOR_LABELS[f.key] || f.key}</span>
+                  <div style={{ height: "6px", flex: 1, background: "var(--border)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(f.score / 5) * 100}%`, background: "var(--accent)" }} />
                   </div>
-                  <span className="font-mono font-bold text-[var(--accent)] text-xs w-8 text-right shrink-0">{f.score}/5</span>
+                  <span style={{ fontSize: "20px", fontFamily: "monospace", fontWeight: 700, color: "var(--accent)", width: "48px", textAlign: "right", flexShrink: 0 }}>{f.score}/5</span>
                 </div>
               ))}
             </div>
 
-            {/* 论述逻辑 */}
-            <div className="border-l-4 border-l-[var(--accent)] p-4 flex flex-col justify-center" style={cardStyle}>
-              <div className="flex items-center justify-between border-b border-[var(--border)] pb-1 mb-2 text-[10px] font-mono text-[var(--accent)] uppercase tracking-wider font-bold">
-                <span>INVESTMENT THESIS / 评估论述</span>
-                <span className="text-[var(--faint)] font-normal font-sans">EXECUTIVE SUMMARY</span>
+            {/* 论述 */}
+            <div style={{ ...cardStyle, borderLeft: "6px solid var(--accent)", padding: "18px 22px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)", paddingBottom: "8px", marginBottom: "12px" }}>
+                <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>INVESTMENT THESIS / 评估论述</span>
+                <span style={{ fontSize: "16px", color: "var(--faint)" }}>EXECUTIVE SUMMARY</span>
               </div>
-              <p className="text-sm leading-6 text-[var(--text)] italic font-sans text-justify">
-                {assessment.thesis.length > 240 ? assessment.thesis.slice(0, 237) + "..." : assessment.thesis}
+              <p style={{ fontSize: "22px", lineHeight: 1.6, color: "var(--text)", fontStyle: "italic", textAlign: "justify" }}>
+                {assessment.thesis.length > 180 ? assessment.thesis.slice(0, 177) + "..." : assessment.thesis}
               </p>
             </div>
 
             {/* 催化剂与风险点 */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 flex flex-col justify-between min-w-0" style={{ ...cardStyle, borderLeft: "3px solid var(--accent-line)" }}>
-                <div>
-                  <span className="text-[10px] font-mono font-bold text-[var(--accent)] uppercase tracking-wider block mb-2 border-b border-[var(--border)] pb-1">
-                    CATALYSTS / 催化剂
-                  </span>
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex gap-2 items-start min-w-0 text-[11px] leading-4 text-[var(--muted)]">
-                      <span className="font-mono text-[var(--accent)] font-semibold shrink-0">[01]</span>
-                      <span className="truncate flex-1 min-w-0 block">{assessment.catalysts[0] || "无明显催化剂"}</span>
-                    </div>
-                    {assessment.catalysts[1] && (
-                      <div className="flex gap-2 items-start min-w-0 text-[11px] leading-4 text-[var(--muted)]">
-                        <span className="font-mono text-[var(--accent)] font-semibold shrink-0">[02]</span>
-                        <span className="truncate flex-1 min-w-0 block">{assessment.catalysts[1]}</span>
-                      </div>
-                    )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+              <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "16px 18px", display: "flex", flexDirection: "column" }}>
+                <span style={{ fontSize: "18px", fontFamily: "monospace", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "10px", paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>CATALYSTS / 催化剂</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", minWidth: 0 }}>
+                    <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600, flexShrink: 0 }}>[01]</span>
+                    <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{assessment.catalysts[0] || "无明显催化剂"}</span>
                   </div>
+                  {assessment.catalysts[1] && (
+                    <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", minWidth: 0 }}>
+                      <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600, flexShrink: 0 }}>[02]</span>
+                      <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{assessment.catalysts[1]}</span>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="p-4 flex flex-col justify-between min-w-0" style={{ ...cardStyle, borderLeft: "3px solid var(--warn-line)" }}>
-                <div>
-                  <span className="text-[10px] font-mono font-bold text-[var(--warn)] uppercase tracking-wider block mb-2 border-b border-[var(--border)] pb-1">
-                    KEY RISKS / 风险点
-                  </span>
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex gap-2 items-start min-w-0 text-[11px] leading-4 text-[var(--muted)]">
-                      <span className="font-mono text-[var(--warn)] font-semibold shrink-0">[01]</span>
-                      <span className="truncate flex-1 min-w-0 block">{assessment.risks[0] || "无明显风险点"}</span>
-                    </div>
-                    {assessment.risks[1] && (
-                      <div className="flex gap-2 items-start min-w-0 text-[11px] leading-4 text-[var(--muted)]">
-                        <span className="font-mono text-[var(--warn)] font-semibold shrink-0">[02]</span>
-                        <span className="truncate flex-1 min-w-0 block">{assessment.risks[1]}</span>
-                      </div>
-                    )}
+              <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "16px 18px", display: "flex", flexDirection: "column" }}>
+                <span style={{ fontSize: "18px", fontFamily: "monospace", fontWeight: 700, color: "var(--warn)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "10px", paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>KEY RISKS / 风险点</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", minWidth: 0 }}>
+                    <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--warn)", fontWeight: 600, flexShrink: 0 }}>[01]</span>
+                    <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{assessment.risks[0] || "无明显风险点"}</span>
                   </div>
+                  {assessment.risks[1] && (
+                    <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", minWidth: 0 }}>
+                      <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--warn)", fontWeight: 600, flexShrink: 0 }}>[02]</span>
+                      <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{assessment.risks[1]}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -565,7 +465,7 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
         </div>
 
         {/* 页脚 */}
-        <div className="relative z-10 pt-3 border-t border-[var(--border)] flex items-center justify-between text-[10px] text-[var(--faint)] font-mono">
+        <div className="relative z-10" style={{ paddingTop: "12px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
           <span>DATA METHODOLOGY: EASTMONEY API + SERENITY ENGINE</span>
           <span>VALUATION CHOKEPOINT MODEL</span>
         </div>
