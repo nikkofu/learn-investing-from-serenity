@@ -88,6 +88,16 @@ export interface ChokepointAssessment {
   recommendedBuy?: boolean;
   buyPriceRange?: string;
   sellPriceRange?: string;
+  bomPosition?: {
+    nodeName: string; // 对应产业链环节的名称，如“高速光模块”
+    bomRatio: string; // 对应 BOM 成本占比，如“约 8%”
+    role: string;     // 在 BOM 链条中的具体作用
+  } | null;
+  workflowSteps?: {
+    step: number;     // 1 到 6
+    title: string;    // 工作流步骤的简短标题
+    content: string;  // 针对该股票的具体分析论述
+  }[];
 }
 
 /** A node in a trend → supply-chain map. */
@@ -97,6 +107,8 @@ export interface SupplyChainNode {
   isChokepoint: boolean;
   chokepointReason?: string;
   tickers: { code: string; name: string; note: string }[];
+  bomRatio?: string; // 成本占比，例如 "15% - 20%"
+  bomDetail?: string; // 精细物料拆解描述，例如 "激光芯片占 35%，外壳占 10%"
 }
 
 export interface SupplyChainMap {

@@ -66,6 +66,8 @@ export async function POST(req: Request) {
           role: n.role || "",
           isChokepoint: Boolean(n.isChokepoint),
           chokepointReason: n.chokepointReason,
+          bomRatio: n.bomRatio || "",
+          bomDetail: n.bomDetail || "",
           tickers: (n.tickers ?? []).map((t) => ({
             code: t.code || "",
             name: t.name || "",

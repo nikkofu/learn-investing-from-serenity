@@ -81,7 +81,7 @@ export function ProgressTrace({
   // 估算已经生成的总 token 数量（字符数粗略折算）
   const totalTokens = reasoning.length + content.length + structured.length;
   // 估算实时生成速度 (tokens / sec)
-  const speed = elapsed > 0 ? Math.round(totalTokens / elapsed) : 0;
+  const speed = elapsed > 0 ? totalTokens / elapsed : 0;
 
   return (
     <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
@@ -113,23 +113,48 @@ export function ProgressTrace({
             </li>
           ))}
         </ol>
-        {(running || elapsed > 0) && (
-          <span className="ml-3 shrink-0 self-start font-mono text-xs text-[var(--muted)] flex items-center gap-1.5" aria-label="运行指标">
-            <span>{elapsed.toFixed(1)}s</span>
-            {totalTokens > 0 && (
-              <>
-                <span className="text-[var(--border)]">|</span>
-                <span className="text-[var(--accent)] font-semibold">{totalTokens} tokens</span>
-                <span className="text-[var(--border)]">|</span>
-                <span className="text-[var(--muted)]">{speed} t/s</span>
-              </>
-            )}
-          </span>
-        )}
       </div>
 
       {showLive && (
-        <div className="space-y-2 pt-1">
+        <div className="space-y-2.5 pt-1">
+          {/* Claude Code / Codex 风格终端指标状态条 */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-black/40 px-3.5 py-2 font-mono text-[11px] text-[var(--muted)] select-none">
+            <div className="flex items-center gap-2">
+              {running ? (
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--accent)] opacity-75"></span>
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--accent)]"></span>
+                </span>
+              ) : (
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500/60" />
+              )}
+              <span className="font-semibold text-[var(--text)] uppercase tracking-wider">
+                {running ? "AI 推理流传输中" : "AI 推理完成"}
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-3.5">
+              <div className="flex items-center gap-1">
+                <span className="text-[var(--faint)]">TIME:</span>
+                <span className="font-semibold text-[var(--accent)]">{elapsed.toFixed(1)}s</span>
+              </div>
+              {totalTokens > 0 && (
+                <>
+                  <span className="text-[var(--border)]">|</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[var(--faint)]">TOKENS:</span>
+                    <span className="font-semibold text-[var(--accent)]">{totalTokens.toLocaleString()}</span>
+                  </div>
+                  <span className="text-[var(--border)]">|</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[var(--faint)]">SPEED:</span>
+                    <span className="font-semibold text-[var(--accent)]">{speed.toFixed(1)} t/s</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
           {reasoning && (
             <details open className="rounded-lg border border-[var(--border)] bg-[var(--inset)]">
               <summary className="cursor-pointer px-3 py-1.5 text-xs text-[var(--muted)]">
@@ -140,22 +165,19 @@ export function ProgressTrace({
               </pre>
             </details>
           )}
+
           <div className="rounded-lg border border-[var(--border)] bg-[var(--inset)]">
-            <div className="px-3 py-1.5 text-xs text-[var(--muted)] flex items-center justify-between">
+            <div className="px-3 py-1.5 text-xs text-[var(--muted)] flex items-center justify-between border-b border-[var(--border)] bg-white/[0.01]">
               <span>
                 AI 实时分析推理 · live
                 {running && <span className="ml-1 animate-pulse text-[var(--accent)]">▍</span>}
               </span>
-              {totalTokens > 0 && (
-                <span className="font-mono text-[10px] text-[var(--faint)] select-none">
-                  {totalTokens} tokens · {speed} t/s
-                </span>
-              )}
             </div>
-            <pre ref={contentRef} className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 text-[12px] leading-6 text-[var(--text)]">
-              {content || (awaitingFirstToken ? `正在接入 AI 投研推理网络，正在调取系统知识库与市场数据… ${elapsed.toFixed(1)}s (若模型处于休眠状态可能需要数秒)` : "")}
+            <pre ref={contentRef} className="max-h-72 overflow-auto whitespace-pre-wrap p-3 text-[12px] leading-6 text-[var(--text)]">
+              {content || (awaitingFirstToken ? `💡 正在为您调取 Serenity 专属投研数据库，检索该个股在产业链中的上下游瓶颈关系及一手行业笔记数据...\n\n⏱️ 已等待：${elapsed.toFixed(1)}s (大模型推理启动中，可能需要几秒，请耐心等待)` : "")}
             </pre>
           </div>
+
           {structured && (
             <details className="rounded-lg border border-[var(--border)] bg-[var(--inset)]">
               <summary className="cursor-pointer px-3 py-1.5 text-xs text-[var(--muted)]">

@@ -154,10 +154,21 @@ export default function MapPage() {
                   {n.isChokepoint && (
                     <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">瓶颈点</span>
                   )}
+                  {n.bomRatio && (
+                    <span className="rounded-full bg-[var(--hover)] border border-[var(--border)] px-2 py-0.5 text-[11px] font-mono text-[var(--text)] font-semibold">
+                      BOM 占比: {n.bomRatio}
+                    </span>
+                  )}
                 </div>
                 <p className="mt-1 text-sm text-[var(--text)]">{n.role}</p>
                 {n.isChokepoint && n.chokepointReason && (
-                  <p className="mt-1 text-xs leading-5 text-[var(--accent)]">为何卡脖子：{n.chokepointReason}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--accent)] font-medium">为何卡脖子：{n.chokepointReason}</p>
+                )}
+                {n.bomDetail && (
+                  <div className="mt-2.5 rounded-[2px] border border-dashed border-[var(--border)] bg-[var(--inset)] p-2.5 text-xs">
+                    <span className="font-bold text-[var(--faint)] block mb-1 tracking-wider uppercase text-[10px]">物料清单细分拆解 (BOM Details)：</span>
+                    <p className="font-mono text-[var(--muted)] leading-relaxed">{n.bomDetail}</p>
+                  </div>
                 )}
                 {n.tickers.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">

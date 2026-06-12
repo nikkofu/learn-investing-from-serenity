@@ -167,25 +167,25 @@ function PosterContent({ ratio, quote, stats, assessment, isUp, innerRef, themeC
         </div>
 
         {/* 6. 催化剂与风险点 */}
-        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", flex: 1, minHeight: "120px" }}>
-          <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "18px 20px", display: "flex", flexDirection: "column" }}>
+        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "12px", marginBottom: "12px" }}>
+          <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "18px 20px 22px 20px", display: "flex", flexDirection: "column" }}>
             <span style={{ fontSize: "18px", fontFamily: "monospace", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "10px", paddingBottom: "8px", borderBottom: "1px solid var(--border)" }}>CATALYSTS / 催化剂</span>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               {assessment.catalysts.slice(0, 2).map((item, idx) => (
                 <div key={idx} style={{ display: "flex", gap: "10px", alignItems: "flex-start", minWidth: 0 }}>
                   <span style={{ fontSize: "20px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600, flexShrink: 0 }}>[0{idx + 1}]</span>
-                  <span style={{ fontSize: "20px", color: "var(--muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{item}</span>
+                  <span style={{ fontSize: "20px", color: "var(--muted)", lineHeight: 1.5, flex: 1, minWidth: 0, whiteSpace: "normal", wordBreak: "break-word" }}>{item}</span>
                 </div>
               ))}
             </div>
           </div>
-          <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "18px 20px", display: "flex", flexDirection: "column" }}>
+          <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "18px 20px 22px 20px", display: "flex", flexDirection: "column" }}>
             <span style={{ fontSize: "18px", fontFamily: "monospace", fontWeight: 700, color: "var(--warn)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "10px", paddingBottom: "8px", borderBottom: "1px solid var(--border)" }}>KEY RISKS / 关键风险点</span>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               {assessment.risks.slice(0, 2).map((item, idx) => (
                 <div key={idx} style={{ display: "flex", gap: "10px", alignItems: "flex-start", minWidth: 0 }}>
                   <span style={{ fontSize: "20px", fontFamily: "monospace", color: "var(--warn)", fontWeight: 600, flexShrink: 0 }}>[0{idx + 1}]</span>
-                  <span style={{ fontSize: "20px", color: "var(--muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{item}</span>
+                  <span style={{ fontSize: "20px", color: "var(--muted)", lineHeight: 1.5, flex: 1, minWidth: 0, whiteSpace: "normal", wordBreak: "break-word" }}>{item}</span>
                 </div>
               ))}
             </div>
@@ -193,7 +193,7 @@ function PosterContent({ ratio, quote, stats, assessment, isUp, innerRef, themeC
         </div>
 
         {/* 7. 页脚 */}
-        <div className="relative z-10" style={{ marginTop: "14px", paddingTop: "14px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
+        <div className="relative z-10" style={{ marginTop: "auto", paddingTop: "14px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
           <span>SERENITY AUTOMATION ENGINE</span>
           <span>VALUATION CHOKEPOINT MODEL</span>
         </div>
@@ -315,25 +315,25 @@ function PosterContent({ ratio, quote, stats, assessment, isUp, innerRef, themeC
         </div>
 
         {/* 6. 催化剂与风险点 */}
-        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", flex: 1, minHeight: "160px" }}>
-          <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "20px 22px", display: "flex", flexDirection: "column" }}>
+        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "16px", marginBottom: "16px" }}>
+          <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "20px 22px 24px 22px", display: "flex", flexDirection: "column" }}>
             <span style={{ fontSize: "20px", fontFamily: "monospace", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "12px", paddingBottom: "8px", borderBottom: "1px solid var(--border)" }}>CATALYSTS / 催化剂</span>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               {assessment.catalysts.slice(0, 3).map((item, idx) => (
                 <div key={idx} style={{ display: "flex", gap: "10px", alignItems: "flex-start", minWidth: 0 }}>
                   <span style={{ fontSize: "22px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600, flexShrink: 0 }}>[0{idx + 1}]</span>
-                  <span style={{ fontSize: "22px", color: "var(--muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{item}</span>
+                  <span style={{ fontSize: "22px", color: "var(--muted)", lineHeight: 1.5, flex: 1, minWidth: 0, whiteSpace: "normal", wordBreak: "break-word" }}>{item}</span>
                 </div>
               ))}
             </div>
           </div>
-          <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "20px 22px", display: "flex", flexDirection: "column" }}>
+          <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "20px 22px 24px 22px", display: "flex", flexDirection: "column" }}>
             <span style={{ fontSize: "20px", fontFamily: "monospace", fontWeight: 700, color: "var(--warn)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "12px", paddingBottom: "8px", borderBottom: "1px solid var(--border)" }}>KEY RISKS / 关键风险点</span>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               {assessment.risks.slice(0, 3).map((item, idx) => (
                 <div key={idx} style={{ display: "flex", gap: "10px", alignItems: "flex-start", minWidth: 0 }}>
                   <span style={{ fontSize: "22px", fontFamily: "monospace", color: "var(--warn)", fontWeight: 600, flexShrink: 0 }}>[0{idx + 1}]</span>
-                  <span style={{ fontSize: "22px", color: "var(--muted)", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{item}</span>
+                  <span style={{ fontSize: "22px", color: "var(--muted)", lineHeight: 1.5, flex: 1, minWidth: 0, whiteSpace: "normal", wordBreak: "break-word" }}>{item}</span>
                 </div>
               ))}
             </div>
@@ -341,7 +341,7 @@ function PosterContent({ ratio, quote, stats, assessment, isUp, innerRef, themeC
         </div>
 
         {/* 7. 页脚 */}
-        <div className="relative z-10" style={{ marginTop: "16px", paddingTop: "14px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
+        <div className="relative z-10" style={{ marginTop: "auto", paddingTop: "14px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
           <span>SERENITY AUTOMATION ENGINE</span>
           <span>SYSTEM RUNTIME @ A-SHARES</span>
         </div>
@@ -374,7 +374,7 @@ function PosterContent({ ratio, quote, stats, assessment, isUp, innerRef, themeC
         </div>
 
         {/* 主分栏区域 */}
-        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "520px 1fr", gap: "28px", margin: "auto 0", alignItems: "stretch", flex: 1, paddingTop: "16px", paddingBottom: "16px", minHeight: "600px" }}>
+        <div className="relative z-10" style={{ display: "grid", gridTemplateColumns: "520px 1fr", gap: "28px", marginTop: "20px", marginBottom: "20px", alignItems: "stretch", minHeight: "600px" }}>
 
           {/* 左栏 */}
           <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "14px", width: "520px", flexShrink: 0, minWidth: 0 }}>
@@ -460,32 +460,32 @@ function PosterContent({ ratio, quote, stats, assessment, isUp, innerRef, themeC
 
             {/* 催化剂与风险点 */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
-              <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "16px 18px", display: "flex", flexDirection: "column" }}>
+              <div style={{ ...cardStyle, borderLeft: "4px solid var(--accent-line)", padding: "16px 18px 20px 18px", display: "flex", flexDirection: "column" }}>
                 <span style={{ fontSize: "18px", fontFamily: "monospace", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "10px", paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>CATALYSTS / 催化剂</span>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", minWidth: 0 }}>
                     <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600, flexShrink: 0 }}>[01]</span>
-                    <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{assessment.catalysts[0] || "无明显催化剂"}</span>
+                    <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, flex: 1, minWidth: 0, whiteSpace: "normal", wordBreak: "break-word" }}>{assessment.catalysts[0] || "无明显催化剂"}</span>
                   </div>
                   {assessment.catalysts[1] && (
                     <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", minWidth: 0 }}>
                       <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--accent)", fontWeight: 600, flexShrink: 0 }}>[02]</span>
-                      <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{assessment.catalysts[1]}</span>
+                      <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, flex: 1, minWidth: 0, whiteSpace: "normal", wordBreak: "break-word" }}>{assessment.catalysts[1]}</span>
                     </div>
                   )}
                 </div>
               </div>
-              <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "16px 18px", display: "flex", flexDirection: "column" }}>
+              <div style={{ ...cardStyle, borderLeft: "4px solid var(--warn-line)", padding: "16px 18px 20px 18px", display: "flex", flexDirection: "column" }}>
                 <span style={{ fontSize: "18px", fontFamily: "monospace", fontWeight: 700, color: "var(--warn)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: "10px", paddingBottom: "6px", borderBottom: "1px solid var(--border)" }}>KEY RISKS / 风险点</span>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", minWidth: 0 }}>
                     <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--warn)", fontWeight: 600, flexShrink: 0 }}>[01]</span>
-                    <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{assessment.risks[0] || "无明显风险点"}</span>
+                    <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, flex: 1, minWidth: 0, whiteSpace: "normal", wordBreak: "break-word" }}>{assessment.risks[0] || "无明显风险点"}</span>
                   </div>
                   {assessment.risks[1] && (
                     <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", minWidth: 0 }}>
                       <span style={{ fontSize: "18px", fontFamily: "monospace", color: "var(--warn)", fontWeight: 600, flexShrink: 0 }}>[02]</span>
-                      <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{assessment.risks[1]}</span>
+                      <span style={{ fontSize: "18px", color: "var(--muted)", lineHeight: 1.4, flex: 1, minWidth: 0, whiteSpace: "normal", wordBreak: "break-word" }}>{assessment.risks[1]}</span>
                     </div>
                   )}
                 </div>
@@ -496,7 +496,7 @@ function PosterContent({ ratio, quote, stats, assessment, isUp, innerRef, themeC
         </div>
 
         {/* 页脚 */}
-        <div className="relative z-10" style={{ paddingTop: "12px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
+        <div className="relative z-10" style={{ marginTop: "auto", paddingTop: "12px", borderTop: "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "18px", color: "var(--faint)", fontFamily: "monospace" }}>
           <span>DATA METHODOLOGY: EASTMONEY API + SERENITY ENGINE</span>
           <span>VALUATION CHOKEPOINT MODEL</span>
         </div>
