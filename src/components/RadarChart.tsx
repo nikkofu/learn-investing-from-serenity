@@ -63,23 +63,36 @@ export default function RadarChart({
       ))}
       {/* labels */}
       {factors.map((f, i) => {
-        const [lx, ly] = point(i, R + 22);
         const cos = Math.cos(angle(i));
         const anchor = Math.abs(cos) < 0.3 ? "middle" : cos > 0 ? "start" : "end";
+        
+        // 传统 dy 高度微调：替代 dominantBaseline 防止 html-to-image 序列化翻转 Bug
+        let dy = "0.35em"; // 居中
+        let offsetR = 15;  // 顶点向外的偏移像素
+        if (i === 0) {
+          dy = "-0.2em";   // 最上方顶点：文字往上顶
+          offsetR = 12;
+        } else if (i === 2 || i === 3) {
+          dy = "0.85em";   // 下方顶点：文字往下沉
+          offsetR = 12;
+        }
+        
+        const [lx, ly] = point(i, R + offsetR);
         return (
           <text
             key={i}
             x={lx}
             y={ly}
             textAnchor={anchor}
-            dominantBaseline="middle"
-            fontSize={12}
-            style={{ fill: "var(--text)" }}
+            dy={dy}
+            fontSize={11}
+            style={{
+              fill: "var(--text)",
+              fontFamily: "var(--font-sans), system-ui, sans-serif",
+              fontWeight: 600,
+            }}
           >
-            <tspan fontWeight={500}>{f.label}</tspan>
-            <tspan dx={5} fontWeight={700} style={{ fill: "var(--accent)" }}>
-              {f.score}
-            </tspan>
+            {f.label} {f.score}
           </text>
         );
       })}
