@@ -8,6 +8,11 @@ export const THEMES = [
   { id: "violet", label: "午夜紫金", desc: "深色 · 紫 + 金", bg: "#120c1f", accent: "#a78bfa" },
   { id: "teal", label: "石墨青橙", desc: "石板灰 · 青 + 橙", bg: "#0e1316", accent: "#2dd4bf" },
   { id: "cream", label: "奶油浅色", desc: "浅色 · 森绿", bg: "#f6f4ee", accent: "#047857" },
+  { id: "aurora-frost", label: "极光冰川", desc: "渐变 · 冰川蓝 (毛玻璃)", bg: "linear-gradient(135deg, #090a0f, #131722)", accent: "#38bdf8" },
+  { id: "lava-gold", label: "熔岩赤金", desc: "渐变 · 熔岩金 (毛玻璃)", bg: "linear-gradient(135deg, #0a0807, #17120e)", accent: "#f59e0b" },
+  { id: "rainforest-mist", label: "雨林寒露", desc: "渐变 · 雨林绿 (毛玻璃)", bg: "linear-gradient(135deg, #f3f5f3, #e8efe9)", accent: "#059669" },
+  { id: "glacier-aurora", label: "冰川极光", desc: "渐变 · 冰川蓝 (投研风)", bg: "linear-gradient(135deg, #edf3f8, #e3edf5)", accent: "#0284c7" },
+  { id: "champagne-scroll", label: "香槟宣纸", desc: "渐变 · 香槟金 (书香风)", bg: "linear-gradient(135deg, #faf7f2, #eae3d2)", accent: "#c2410c" },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];
@@ -72,7 +77,7 @@ export default function ThemeSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-1.5 w-52 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
+        <div className="absolute right-0 z-30 mt-1.5 w-52 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--popover-bg,var(--surface))] p-1 shadow-xl">
           {THEMES.map((t) => {
             const sel = t.id === theme;
             return (
