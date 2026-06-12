@@ -268,8 +268,14 @@ function Result({ data }: { data: AnalyzeResponse }) {
       <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold tracking-wide">
-              {quote.name} <span className="font-mono text-sm text-[var(--faint)]">{quote.code}.{quote.market}</span>
+            <h2 className="text-xl font-bold tracking-wide flex items-center gap-2 flex-wrap">
+              <span>{quote.name}</span>
+              <span className="font-mono text-sm text-[var(--faint)]">{quote.code}.{quote.market}</span>
+              {assessment.recommendedBuy && (
+                <span className="border border-[var(--accent)] text-[var(--accent)] px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-wider rounded-none">
+                  策略买入推荐
+                </span>
+              )}
             </h2>
             <div className="mt-1.5 flex items-baseline gap-3">
               <span className="text-2xl font-mono font-bold">{quote.price.toFixed(2)}</span>
@@ -295,6 +301,8 @@ function Result({ data }: { data: AnalyzeResponse }) {
           <Stat label="换手率" value={quote.turnoverPct.toFixed(2) + "%"} />
           {stats && <Stat label={`近${stats.windowDays}日涨跌`} value={stats.periodReturnPct + "%"} />}
           {stats && <Stat label="区间位置" value={(stats.rangePosition * 100).toFixed(0) + "%"} />}
+          {assessment.buyPriceRange && <Stat label="建议买入区间" value={assessment.buyPriceRange} />}
+          {assessment.sellPriceRange && <Stat label="建议止盈区间" value={assessment.sellPriceRange} />}
           {stats && <Stat label="均换手" value={stats.avgTurnoverPct + "%"} />}
           <Stat label="更新时间" value={quote.time.slice(5)} />
         </div>

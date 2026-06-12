@@ -49,6 +49,9 @@ export function finalizeAssessment(
     thesis: raw.thesis || "",
     risks: raw.risks ?? [],
     catalysts: raw.catalysts ?? [],
+    recommendedBuy: raw.recommendedBuy ?? false,
+    buyPriceRange: raw.buyPriceRange || "",
+    sellPriceRange: raw.sellPriceRange || "",
   };
 }
 

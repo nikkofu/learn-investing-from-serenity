@@ -98,16 +98,30 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
         {/* 3. 股票基本行情与晨星信用评级风格总分 */}
         <div className="relative z-10 mb-2 grid grid-cols-[1fr_120px] gap-2.5 items-stretch">
           {/* 行情区块 */}
-          <div className="flex flex-col justify-center p-2.5" style={cardStyle}>
-            <div className="flex items-baseline gap-1.5">
-              <h1 className="text-base font-bold tracking-tight text-[var(--text)] leading-none">{quote.name}</h1>
-              <span className="font-mono text-[8px] text-[var(--muted)]">{quote.code}.{quote.market}</span>
+          <div className="flex flex-col justify-center p-2.5 min-w-0" style={cardStyle}>
+            <div className="flex items-center justify-between gap-1">
+              <div className="flex items-baseline gap-1 min-w-0">
+                <h1 className="text-base font-bold tracking-tight text-[var(--text)] leading-none truncate">{quote.name}</h1>
+                <span className="font-mono text-[8px] text-[var(--muted)] shrink-0">{quote.code}</span>
+              </div>
+              {assessment.recommendedBuy && (
+                <span className="border border-[var(--accent)] text-[var(--accent)] bg-transparent px-1 py-0.2 text-[6px] font-bold uppercase tracking-wider rounded-none shrink-0 leading-none">
+                  BUY
+                </span>
+              )}
             </div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className="font-mono text-xs font-bold text-[var(--text)]">{quote.price.toFixed(2)}</span>
-              <span className={`font-mono text-[9px] font-bold ${isUp ? "text-red-500" : "text-emerald-500"}`}>
-                {isUp ? "+" : ""}{quote.changePct.toFixed(2)}%
-              </span>
+            <div className="mt-1 flex items-baseline justify-between gap-1 flex-wrap">
+              <div className="flex items-baseline gap-2 shrink-0">
+                <span className="font-mono text-xs font-bold text-[var(--text)]">{quote.price.toFixed(2)}</span>
+                <span className={`font-mono text-[9px] font-bold ${isUp ? "text-red-500" : "text-emerald-500"}`}>
+                  {isUp ? "+" : ""}{quote.changePct.toFixed(2)}%
+                </span>
+              </div>
+              {assessment.recommendedBuy && assessment.buyPriceRange && (
+                <span className="font-mono text-[7px] text-[var(--muted)] shrink-0">
+                  买入价: {assessment.buyPriceRange}
+                </span>
+              )}
             </div>
           </div>
           {/* 晨星信用评级风格总分 */}
@@ -255,17 +269,29 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
             {/* 行情与评分 (晨星风格) */}
             <div className="p-2 flex flex-col justify-center min-w-0" style={cardStyle}>
               <div className="flex items-baseline justify-between gap-1">
-                <h2 className="font-bold text-[12px] text-[var(--text)] truncate max-w-[120px] leading-none">{quote.name}</h2>
-                <span className="font-mono text-[8px] text-[var(--muted)]">{quote.code}</span>
+                <div className="flex items-baseline gap-1 min-w-0 truncate">
+                  <h2 className="font-bold text-[12px] text-[var(--text)] leading-none truncate">{quote.name}</h2>
+                  <span className="font-mono text-[8px] text-[var(--muted)] shrink-0">{quote.code}</span>
+                </div>
+                {assessment.recommendedBuy && (
+                  <span className="border border-[var(--accent)] text-[var(--accent)] bg-transparent px-1 py-0.2 text-[6px] font-bold uppercase tracking-wider rounded-none shrink-0 leading-none">
+                    BUY
+                  </span>
+                )}
               </div>
               <div className="flex justify-between items-end mt-1.5 border-t border-[var(--border)] pt-1.5">
-                <div className="flex flex-col">
+                <div className="flex flex-col min-w-0">
                   <span className="font-mono text-[10px] font-bold text-[var(--text)] leading-none">{quote.price.toFixed(2)}</span>
                   <span className={`font-mono text-[7.5px] font-bold ${isUp ? "text-red-500" : "text-emerald-500"} mt-0.5`}>
                     {isUp ? "+" : ""}{quote.changePct.toFixed(2)}%
                   </span>
+                  {assessment.recommendedBuy && assessment.buyPriceRange && (
+                    <span className="font-mono text-[5.5px] text-[var(--muted)] mt-0.5 truncate leading-none" title={assessment.buyPriceRange}>
+                      建议买入: {assessment.buyPriceRange}
+                    </span>
+                  )}
                 </div>
-                <div className="text-right flex flex-col justify-center">
+                <div className="text-right flex flex-col justify-center shrink-0">
                   <span className="text-[11px] font-mono font-black text-[var(--accent)] leading-none">{assessment.totalScore} 分</span>
                   <span className="text-[6.5px] text-[var(--muted)] font-bold mt-0.5 tracking-tighter truncate max-w-[90px] block">{assessment.verdict}</span>
                 </div>
