@@ -68,7 +68,7 @@ export default function SharingCard({ quote, stats, assessment, onClose }: Shari
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
-      <div className="flex w-full max-w-5xl flex-col rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl md:p-6">
+      <div className="flex w-full max-w-5xl flex-col rounded-2xl border border-[var(--border)] bg-[var(--popover-bg,var(--surface))] p-5 shadow-2xl md:p-6">
         
         {/* 顶部标题与选项卡 */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
