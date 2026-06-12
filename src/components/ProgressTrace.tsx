@@ -78,6 +78,11 @@ export function ProgressTrace({
     }
   }, [structured]);
 
+  // 估算已经生成的总 token 数量（字符数粗略折算）
+  const totalTokens = reasoning.length + content.length + structured.length;
+  // 估算实时生成速度 (tokens / sec)
+  const speed = elapsed > 0 ? Math.round(totalTokens / elapsed) : 0;
+
   return (
     <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
       <div className="flex items-center justify-between">
@@ -109,8 +114,16 @@ export function ProgressTrace({
           ))}
         </ol>
         {(running || elapsed > 0) && (
-          <span className="ml-3 shrink-0 self-start font-mono text-xs text-[var(--muted)]" aria-label="已用时">
-            {elapsed.toFixed(1)}s
+          <span className="ml-3 shrink-0 self-start font-mono text-xs text-[var(--muted)] flex items-center gap-1.5" aria-label="运行指标">
+            <span>{elapsed.toFixed(1)}s</span>
+            {totalTokens > 0 && (
+              <>
+                <span className="text-[var(--border)]">|</span>
+                <span className="text-[var(--accent)] font-semibold">{totalTokens} tokens</span>
+                <span className="text-[var(--border)]">|</span>
+                <span className="text-[var(--muted)]">{speed} t/s</span>
+              </>
+            )}
           </span>
         )}
       </div>
@@ -128,12 +141,19 @@ export function ProgressTrace({
             </details>
           )}
           <div className="rounded-lg border border-[var(--border)] bg-[var(--inset)]">
-            <div className="px-3 py-1.5 text-xs text-[var(--muted)]">
-              AI 实时分析推理 · live
-              {running && <span className="ml-1 animate-pulse text-[var(--accent)]">▍</span>}
+            <div className="px-3 py-1.5 text-xs text-[var(--muted)] flex items-center justify-between">
+              <span>
+                AI 实时分析推理 · live
+                {running && <span className="ml-1 animate-pulse text-[var(--accent)]">▍</span>}
+              </span>
+              {totalTokens > 0 && (
+                <span className="font-mono text-[10px] text-[var(--faint)] select-none">
+                  {totalTokens} tokens · {speed} t/s
+                </span>
+              )}
             </div>
             <pre ref={contentRef} className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 text-[12px] leading-6 text-[var(--text)]">
-              {content || (awaitingFirstToken ? `等待模型返回首个 token… ${elapsed.toFixed(1)}s（取决于模型，首字可能需数秒）` : "")}
+              {content || (awaitingFirstToken ? `正在接入 AI 投研推理网络，正在调取系统知识库与市场数据… ${elapsed.toFixed(1)}s (若模型处于休眠状态可能需要数秒)` : "")}
             </pre>
           </div>
           {structured && (
