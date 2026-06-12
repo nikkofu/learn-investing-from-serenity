@@ -273,3 +273,35 @@ body {
   border: 1px solid var(--border) !important;
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.08) !important;
 }
+
+/* ============================================================
+   Custom Scrollbar Styling
+   Replaces ugly default scrollbars with sleek, premium semi-transparent round thumbs.
+   ============================================================ */
+
+/* WebKit-based browsers (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 6px;  /* 纵向滚动条宽度 */
+  height: 6px; /* 横向滚动条高度 */
+}
+
+::-webkit-scrollbar-track {
+  background: transparent; /* 轨道背景完全透明，不遮挡面板渐变 */
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border, rgba(255, 255, 255, 0.15)); /* 默认色度：采用变量边框灰 */
+  border-radius: 9999px; /* 全圆角 */
+  border: 1px solid transparent; /* 边缘微距保护 */
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--faint, rgba(255, 255, 255, 0.35)); /* 悬浮时显现为淡灰，方便点按 */
+}
+
+/* Firefox standard scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border, rgba(255, 255, 255, 0.15)) transparent;
+}
