@@ -42,12 +42,14 @@ export function ProgressTrace({
   content,
   structured,
   running,
+  retryCount = 1,
 }: {
   stages: Stage[];
   reasoning: string;
   content: string;
   structured: string;
   running: boolean;
+  retryCount?: number;
 }) {
   const elapsed = useElapsed(running);
   const showLive = running || Boolean(reasoning) || Boolean(content) || Boolean(structured);
@@ -70,7 +72,15 @@ export function ProgressTrace({
               >
                 {s.label}
               </span>
-              {s.status === "active" && <span className="text-xs text-[var(--accent)]">进行中…</span>}
+              {s.status === "active" && (
+                <span
+                  className={`text-xs ml-1.5 font-semibold transition ${
+                    retryCount > 1 ? "text-amber-500 animate-pulse" : "text-[var(--accent)]"
+                  }`}
+                >
+                  {retryCount > 1 ? `正在重试 ${retryCount}/10...` : "进行中…"}
+                </span>
+              )}
             </li>
           ))}
         </ol>

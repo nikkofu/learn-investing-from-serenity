@@ -1,0 +1,636 @@
+"use client";
+
+import { useEffect, useState, useRef, Fragment } from "react";
+import type { ChokepointAssessment, StockQuote } from "@/lib/types";
+import { readNdjson } from "@/lib/stream-client";
+import RadarChart from "@/components/RadarChart";
+
+interface HotStockItem {
+  rank: number;
+  code: string;
+  name: string;
+  price: number;
+  changePct: number;
+  turnoverPct: number;
+  market: "SH" | "SZ" | "BJ";
+}
+
+interface ScanData {
+  quote: StockQuote;
+  stats: {
+    windowDays: number;
+    periodReturnPct: number;
+    rangePosition: number;
+    avgTurnoverPct: number;
+    windowHigh: number;
+    windowLow: number;
+  } | null;
+  assessment: ChokepointAssessment;
+}
+
+interface AssessmentState {
+  status: "idle" | "loading" | "done" | "error";
+  errorMsg?: string;
+  retryCount?: number;
+  data?: ScanData;
+}
+
+const FACTOR_LABELS: Record<string, string> = {
+  demand: "确定需求",
+  supply: "受限供给",
+  attention: "低关注度",
+  valueCapture: "价值捕获",
+  catalyst: "催化剂",
+};
+
+export default function HotScannerPage() {
+  const [list, setList] = useState<HotStockItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [assessments, setAssessments] = useState<Record<string, AssessmentState>>({});
+  
+  // 扫描控制状态
+  const [filterType, setFilterType] = useState<"all" | "up" | "down" | "active">("all");
+  const [scanning, setScanning] = useState(false);
+  const [expandedCode, setExpandedCode] = useState<string | null>(null);
+
+  // 终止扫描的信号控制器
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const activeTasksCount = useRef(0);
+  const taskQueue = useRef<string[]>([]);
+
+  // 1. 获取热榜列表
+  async function fetchList() {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/market/hot-rank");
+      if (!res.ok) {
+        throw new Error(`请求热榜错误: ${res.status}`);
+      }
+      const json = await res.json();
+      setList(json.list ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "热榜获取失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchList();
+  }, []);
+
+  // 2. 单股分析核心拉取器 (附带 ndjson 流读取，可抽取最终 result)
+  async function performSingleScan(code: string, onUpdate: (state: AssessmentState) => void): Promise<ScanData> {
+    const res = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!(res.headers.get("content-type") || "").includes("ndjson")) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error || "分析接口异常");
+    }
+
+    let scanData: ScanData | null = null;
+    let streamError = "";
+
+    await readNdjson(res, (ev) => {
+      if (ev.type === "result") {
+        scanData = {
+          quote: ev.quote as StockQuote,
+          stats: ev.stats as any,
+          assessment: ev.assessment as ChokepointAssessment,
+        };
+      } else if (ev.type === "error") {
+        streamError = ev.message as string;
+      }
+    });
+
+    if (streamError) {
+      throw new Error(streamError);
+    }
+    if (!scanData) {
+      throw new Error("模型未返回打分结果");
+    }
+    return scanData;
+  }
+
+  // 3. 递归重试诊断调度
+  async function scanWithRetry(code: string, attempt = 1, signal?: AbortSignal): Promise<ScanData> {
+    if (signal?.aborted) {
+      throw new Error("扫描已中止");
+    }
+    
+    // 更新重试状态
+    setAssessments((prev) => ({
+      ...prev,
+      [code]: { status: "loading", retryCount: attempt },
+    }));
+
+    try {
+      return await performSingleScan(code, (state) => {
+        if (!signal?.aborted) {
+          setAssessments((prev) => ({ ...prev, [code]: state }));
+        }
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "分析失败";
+      if (attempt < 10 && !signal?.aborted) {
+        console.warn(`[Scanner] 股票 ${code} 第 ${attempt}/10 次尝试失败，准备重试: ${msg}`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        return scanWithRetry(code, attempt + 1, signal);
+      } else {
+        throw new Error(msg);
+      }
+    }
+  }
+
+  // 4. 单股手动诊断
+  async function triggerSingleScan(code: string) {
+    if (assessments[code]?.status === "loading") return;
+    
+    setAssessments((prev) => ({
+      ...prev,
+      [code]: { status: "loading", retryCount: 1 },
+    }));
+
+    try {
+      const data = await scanWithRetry(code, 1);
+      setAssessments((prev) => ({
+        ...prev,
+        [code]: { status: "done", data },
+      }));
+    } catch (err) {
+      setAssessments((prev) => ({
+        ...prev,
+        [code]: {
+          status: "error",
+          errorMsg: err instanceof Error ? err.message : "诊断失败",
+        },
+      }));
+    }
+  }
+
+  // 5. 过滤出当前显示的热门股
+  const filteredList = list.filter((item) => {
+    if (filterType === "up") return item.changePct >= 4.0;
+    if (filterType === "down") return item.changePct < 0;
+    if (filterType === "active") return item.turnoverPct >= 5.0;
+    return true;
+  });
+
+  // 6. 批量并发执行器 (CONCURRENCY = 3)
+  const CONCURRENCY = 3;
+
+  function stopScanning() {
+    setScanning(false);
+    taskQueue.current = [];
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  }
+
+  async function startScanning() {
+    if (scanning) return;
+    setScanning(true);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    // 找出所有需要扫描的股票代码
+    const toScan = filteredList
+      .filter((s) => {
+        const state = assessments[s.code];
+        return !state || state.status !== "done";
+      })
+      .map((s) => s.code);
+
+    taskQueue.current = toScan;
+    activeTasksCount.current = 0;
+
+    const runNext = async () => {
+      if (abortController.signal.aborted) return;
+      if (taskQueue.current.length === 0) {
+        if (activeTasksCount.current === 0) {
+          setScanning(false);
+        }
+        return;
+      }
+
+      const code = taskQueue.current.shift()!;
+      activeTasksCount.current++;
+
+      try {
+        const data = await scanWithRetry(code, 1, abortController.signal);
+        if (!abortController.signal.aborted) {
+          setAssessments((prev) => ({
+            ...prev,
+            [code]: { status: "done", data },
+          }));
+        }
+      } catch (err) {
+        if (!abortController.signal.aborted) {
+          setAssessments((prev) => ({
+            ...prev,
+            [code]: {
+              status: "error",
+              errorMsg: err instanceof Error ? err.message : "扫描重试超限",
+            },
+          }));
+        }
+      } finally {
+        activeTasksCount.current--;
+        runNext();
+      }
+    };
+
+    // 启动初始并发
+    const initRunCount = Math.min(CONCURRENCY, toScan.length);
+    if (initRunCount === 0) {
+      setScanning(false);
+      return;
+    }
+    for (let i = 0; i < initRunCount; i++) {
+      runNext();
+    }
+  }
+
+  // 辅助函数：格式化市值
+  const formatCap = (n: number | undefined) => {
+    if (!n) return "-";
+    return (n / 1e8).toFixed(1) + " 亿";
+  };
+
+  return (
+    <div className="space-y-6">
+      
+      {/* 头部标题区域 */}
+      <div className="border-b border-[var(--border)] pb-3">
+        <h1 className="text-xl font-bold tracking-wider font-mono">SERENITY MARKET SCANNER / 热门股策略扫描器</h1>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          实时监控东方财富股吧人气前 100 个股，多因子并行打分与突破股识别，快速挑选进入跟踪股票池。
+        </p>
+      </div>
+
+      {/* 控制台与筛选选项卡 (直角扁平底板) */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border border-[var(--border)] bg-[var(--surface)] p-4 rounded-[2px]">
+        
+        {/* 筛选按钮组 */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setFilterType("all")}
+            disabled={scanning}
+            className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+              filterType === "all"
+                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
+            }`}
+          >
+            全部人气股 ({list.length})
+          </button>
+          <button
+            onClick={() => setFilterType("up")}
+            disabled={scanning}
+            className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+              filterType === "up"
+                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
+            }`}
+          >
+            今日领涨 (涨幅 ≥ 4%)
+          </button>
+          <button
+            onClick={() => setFilterType("active")}
+            disabled={scanning}
+            className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+              filterType === "active"
+                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
+            }`}
+          >
+            交投活跃 (换手 ≥ 5%)
+          </button>
+          <button
+            onClick={() => setFilterType("down")}
+            disabled={scanning}
+            className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+              filterType === "down"
+                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
+            }`}
+          >
+            逆势下跌
+          </button>
+        </div>
+
+        {/* 批量操作控制 */}
+        <div className="flex gap-2.5">
+          <button
+            onClick={fetchList}
+            disabled={scanning || loading}
+            className="rounded-[2px] border border-[var(--border)] px-4 py-1.5 text-xs font-semibold tracking-wider text-[var(--text)] hover:bg-[var(--hover)] transition cursor-pointer disabled:opacity-50"
+          >
+            刷新榜单
+          </button>
+          {scanning ? (
+            <button
+              onClick={stopScanning}
+              className="rounded-[2px] bg-red-600 px-4 py-1.5 text-xs font-semibold tracking-wider text-white hover:bg-red-700 transition cursor-pointer animate-pulse"
+            >
+              停止扫描 (分批中)
+            </button>
+          ) : (
+            <button
+              onClick={startScanning}
+              disabled={loading || filteredList.length === 0}
+              className="rounded-[2px] bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold tracking-wider text-[var(--accent-fg)] hover:opacity-90 transition cursor-pointer disabled:opacity-50"
+            >
+              一键扫描符合标的 (并发x3)
+            </button>
+          )}
+        </div>
+
+      </div>
+
+      {/* 热门股表格渲染 */}
+      {loading ? (
+        <div className="py-12 text-center text-xs text-[var(--muted)] font-mono">
+          LOADING REALTIME RANKING FROM EASTMONEY...
+        </div>
+      ) : error ? (
+        <div className="border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-300 rounded-[2px] font-mono">
+          ERROR: {error}
+        </div>
+      ) : (
+        <div className="overflow-x-auto border border-[var(--border)] rounded-[2px] bg-[var(--surface)]">
+          <table className="w-full border-collapse text-left text-xs font-sans">
+            <thead>
+              <tr className="border-b border-[var(--border)] bg-[var(--inset)] text-[var(--faint)] font-mono uppercase tracking-wider">
+                <th className="px-4 py-3 font-semibold text-center w-12">热度</th>
+                <th className="px-4 py-3 font-semibold">股票名称</th>
+                <th className="px-4 py-3 font-semibold">证券代码</th>
+                <th className="px-4 py-3 font-semibold text-right w-24">最新价</th>
+                <th className="px-4 py-3 font-semibold text-right w-24">今日涨跌</th>
+                <th className="px-4 py-3 font-semibold text-right w-24">换手率</th>
+                <th className="px-4 py-3 font-semibold text-center w-24">Serenity 评分</th>
+                <th className="px-4 py-3 font-semibold text-center w-28">买入决策</th>
+                <th className="px-4 py-3 font-semibold text-center w-40">买卖区间建议</th>
+                <th className="px-4 py-3 font-semibold text-center w-28">策略诊断</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredList.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-8 text-center text-[var(--muted)] font-mono">
+                    NO STOCKS MATCHING CURRENT FILTERS
+                  </td>
+                </tr>
+              ) : (
+                filteredList.map((item) => {
+                  const state = assessments[item.code] || { status: "idle" };
+                  const isExpanded = expandedCode === item.code;
+                  const quoteUp = item.changePct >= 0;
+
+                  return (
+                    <Fragment key={item.code}>
+                      {/* 股票主信息行 */}
+                      <tr
+                        className={`border-b border-[var(--border)] hover:bg-[var(--hover)] transition-colors ${
+                          isExpanded ? "bg-[var(--inset)]" : ""
+                        }`}
+                      >
+                        {/* 排名 */}
+                        <td className="px-4 py-3 font-mono font-bold text-center text-[var(--faint)]">
+                          {item.rank}
+                        </td>
+                        {/* 股票名 */}
+                        <td className="px-4 py-3 font-bold text-[var(--text)]">
+                          {item.name}
+                        </td>
+                        {/* 代码 */}
+                        <td className="px-4 py-3 font-mono text-[var(--muted)]">
+                          {item.code}.{item.market}
+                        </td>
+                        {/* 最新价 */}
+                        <td className="px-4 py-3 font-mono text-right font-semibold">
+                          {item.price > 0 ? item.price.toFixed(2) : "-"}
+                        </td>
+                        {/* 涨跌幅 */}
+                        <td
+                          className={`px-4 py-3 font-mono text-right font-bold ${
+                            quoteUp ? "text-red-500" : "text-emerald-500"
+                          }`}
+                        >
+                          {quoteUp ? "+" : ""}
+                          {item.changePct.toFixed(2)}%
+                        </td>
+                        {/* 换手率 */}
+                        <td className="px-4 py-3 font-mono text-right text-[var(--muted)]">
+                          {item.turnoverPct.toFixed(2)}%
+                        </td>
+                        {/* Serenity 得分 */}
+                        <td className="px-4 py-3 text-center font-mono font-black">
+                          {state.status === "done" && state.data ? (
+                            <span className="text-[var(--accent)] text-sm">
+                              {state.data.assessment.totalScore} 分
+                            </span>
+                          ) : (
+                            <span className="text-[var(--faint)]">--</span>
+                          )}
+                        </td>
+                        {/* 买入决策 */}
+                        <td className="px-4 py-3 text-center">
+                          {state.status === "done" && state.data ? (
+                            state.data.assessment.recommendedBuy ? (
+                              <span className="border border-[var(--accent)] text-[var(--accent)] bg-transparent px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-wider rounded-none">
+                                推荐买入
+                              </span>
+                            ) : (
+                              <span className="border border-[var(--border)] text-[var(--muted)] bg-transparent px-1.5 py-0.5 text-[8.5px] font-semibold tracking-wider rounded-none">
+                                观望中
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-[var(--faint)] font-mono">--</span>
+                          )}
+                        </td>
+                        {/* 买卖区间建议 */}
+                        <td className="px-4 py-3 text-center font-mono text-[10px] text-[var(--muted)]">
+                          {state.status === "done" && state.data ? (
+                            state.data.assessment.recommendedBuy ? (
+                              <span>
+                                {state.data.assessment.buyPriceRange || "-"} / {state.data.assessment.sellPriceRange || "-"}
+                              </span>
+                            ) : (
+                              <span className="text-[var(--faint)]">不符合区间</span>
+                            )
+                          ) : (
+                            <span className="text-[var(--faint)]">--</span>
+                          )}
+                        </td>
+                        {/* 操作诊断按钮 */}
+                        <td className="px-4 py-3 text-center">
+                          {state.status === "loading" ? (
+                            <span className="text-amber-500 font-mono text-[10px] tracking-wide animate-pulse">
+                              诊断中{state.retryCount && state.retryCount > 1 ? `(${state.retryCount}/10)` : "..."}
+                            </span>
+                          ) : state.status === "error" ? (
+                            <button
+                              onClick={() => triggerSingleScan(item.code)}
+                              className="text-red-400 font-semibold underline cursor-pointer"
+                              title={state.errorMsg}
+                            >
+                              重试
+                            </button>
+                          ) : state.status === "done" ? (
+                            <button
+                              onClick={() => setExpandedCode(isExpanded ? null : item.code)}
+                              className="text-[var(--accent)] font-semibold underline cursor-pointer"
+                            >
+                              {isExpanded ? "收起报告" : "展开评估"}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => triggerSingleScan(item.code)}
+                              disabled={scanning}
+                              className="bg-[var(--hover)] hover:bg-[var(--border)] text-[var(--text)] border border-[var(--border)] rounded-[2px] px-2 py-1 text-[10px] font-semibold cursor-pointer transition disabled:opacity-50"
+                            >
+                              AI 诊断
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+
+                      {/* 展开的 Bloomberg 投行报告卡片行 */}
+                      {isExpanded && state.status === "done" && state.data && (
+                        <tr className="bg-[var(--inset)]">
+                          <td colSpan={10} className="px-6 py-5 border-b border-[var(--border)]">
+                            <div className="grid grid-cols-[140px_1fr] gap-6 items-stretch">
+                              
+                              {/* 左侧：微小雷达图 */}
+                              <div className="border border-[var(--border)] bg-[var(--surface)] p-2.5 flex items-center justify-center rounded-none w-[140px] h-[140px] shrink-0">
+                                <RadarChart
+                                  factors={state.data.assessment.factors.map((f) => ({
+                                    label: FACTOR_LABELS[f.key] || f.key,
+                                    score: f.score,
+                                  }))}
+                                  size={120}
+                                />
+                              </div>
+
+                              {/* 右侧：完整打分内容 */}
+                              <div className="flex flex-col justify-between space-y-4 min-w-0">
+                                
+                                {/* 决策印章与价格范围说明 */}
+                                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-2.5">
+                                  <div>
+                                    {state.data.assessment.recommendedBuy ? (
+                                      <span className="border-[1.5px] border-[var(--accent)] bg-transparent px-2 py-1 text-[10px] text-[var(--accent)] font-bold uppercase tracking-widest rounded-none">
+                                        [RECOMMENDED BUY / 策略推荐买入]
+                                      </span>
+                                    ) : (
+                                      <span className="border-[1.5px] border-[var(--border)] bg-transparent px-2 py-1 text-[10px] text-[var(--faint)] font-bold uppercase tracking-widest rounded-none">
+                                        [HOLD & WATCH / 观望策略]
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex gap-4 font-mono text-[10px]">
+                                    <div className="flex gap-1.5 items-center">
+                                      <span className="text-[var(--faint)] uppercase">buy target:</span>
+                                      <span className="text-[var(--text)] font-bold">{state.data.assessment.buyPriceRange || "暂无建议"}</span>
+                                    </div>
+                                    <div className="flex gap-1.5 items-center border-l border-[var(--border)] pl-4">
+                                      <span className="text-[var(--faint)] uppercase">exit target:</span>
+                                      <span className="text-[var(--text)] font-bold">{state.data.assessment.sellPriceRange || "暂无建议"}</span>
+                                    </div>
+                                    <div className="flex gap-1.5 items-center border-l border-[var(--border)] pl-4">
+                                      <span className="text-[var(--faint)] uppercase">market cap:</span>
+                                      <span className="text-[var(--text)] font-bold">{formatCap(state.data.quote.totalMarketCap)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* 因子打分依据细节 */}
+                                <div className="grid grid-cols-1 md:grid-cols-5 gap-2.5">
+                                  {state.data.assessment.factors.map((f) => (
+                                    <div key={f.key} className="border border-[var(--border)] bg-[var(--surface)] p-2 rounded-none">
+                                      <div className="flex justify-between items-center text-[9px] font-mono border-b border-[var(--border)] pb-1 mb-1">
+                                        <span className="text-[var(--faint)] font-semibold">{FACTOR_LABELS[f.key]}</span>
+                                        <span className="text-[var(--accent)] font-bold">{f.score} / 5</span>
+                                      </div>
+                                      <p className="text-[8.5px] text-[var(--muted)] leading-3.5 text-justify truncate-3-lines" title={f.rationale}>
+                                        {f.rationale}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* 核心金句、催化剂与风险双列排版 */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                  {/* 论述 */}
+                                  <div className="border-l-[3px] border-l-[var(--accent)] bg-[var(--surface)] border border-[var(--border)] p-3 flex flex-col justify-center rounded-none">
+                                    <span className="text-[7.5px] font-mono font-bold text-[var(--accent)] uppercase tracking-wider block mb-1 border-b border-[var(--border)] pb-0.5">
+                                      INVESTMENT THESIS / 瓶颈核心论述
+                                    </span>
+                                    <p className="text-[9.5px] leading-4 text-[var(--text)] text-justify italic">
+                                      {state.data.assessment.thesis}
+                                    </p>
+                                  </div>
+                                  {/* 催化剂与风险 */}
+                                  <div className="grid grid-cols-2 gap-3 min-w-0">
+                                    <div className="border border-[var(--border)] bg-[var(--surface)] p-2.5 border-l-2 border-l-[var(--accent-line)] min-w-0">
+                                      <span className="text-[7.5px] font-mono font-bold text-[var(--accent)] uppercase tracking-wider block mb-1 border-b border-[var(--border)] pb-0.5">
+                                        CATALYSTS / 催化剂
+                                      </span>
+                                      <div className="space-y-0.5">
+                                        {state.data.assessment.catalysts.slice(0, 2).map((item, idx) => (
+                                          <div key={idx} className="flex gap-1 items-start text-[8px] leading-3 text-[var(--muted)]">
+                                            <span className="font-mono text-[var(--accent)] font-semibold shrink-0">[0{idx + 1}]</span>
+                                            <span className="truncate flex-1 min-w-0">{item}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div className="border border-[var(--border)] bg-[var(--surface)] p-2.5 border-l-2 border-l-[var(--warn-line)] min-w-0">
+                                      <span className="text-[7.5px] font-mono font-bold text-[var(--warn)] uppercase tracking-wider block mb-1 border-b border-[var(--border)] pb-0.5">
+                                        KEY RISKS / 风险点
+                                      </span>
+                                      <div className="space-y-0.5">
+                                        {state.data.assessment.risks.slice(0, 2).map((item, idx) => (
+                                          <div key={idx} className="flex gap-1 items-start text-[8px] leading-3 text-[var(--muted)]">
+                                            <span className="font-mono text-[var(--warn)] font-semibold shrink-0">[0{idx + 1}]</span>
+                                            <span className="truncate flex-1 min-w-0">{item}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                              </div>
+
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 免责申明 */}
+      <div className="text-[10px] text-[var(--faint)] leading-4 font-mono uppercase tracking-wide">
+        NOTICE: DATA IS EXTRACTED FROM EASTMONEY REALTIME FORUM AND STOCK GRAPHS. LLM ASSESSMENT AND SUGGESTED PRICE RANGES ARE GENERATED AUTOMATICALLY BY AI AND IN NO WAY CONSTITUTE FORMAL FINANCIAL ADVICE (NFA).
+      </div>
+
+    </div>
+  );
+}

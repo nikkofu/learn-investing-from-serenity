@@ -22,14 +22,18 @@ export default function MapPage() {
   const [reasoning, setReasoning] = useState("");
   const [content, setContent] = useState("");
   const [structured, setStructured] = useState("");
+  const [retryCount, setRetryCount] = useState(1);
 
-  async function run(t?: string) {
+  async function run(t?: string, attempt = 1) {
     const q = (t ?? trend).trim();
     if (!q) return;
     setTrend(q);
     setLoading(true);
+    setRetryCount(attempt);
     setError("");
-    setMap(null);
+    if (attempt === 1) {
+      setMap(null);
+    }
     setStages(MAP_STAGES.map((s) => ({ ...s, status: "pending" })));
     setReasoning("");
     setContent("");
@@ -44,6 +48,8 @@ export default function MapPage() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "拆解失败");
       }
+      let gotResult = false;
+      let streamError = "";
       await readNdjson(res, (ev) => {
         switch (ev.type as string) {
           case "stage":
@@ -56,16 +62,30 @@ export default function MapPage() {
             break;
           case "result":
             setMap(ev.map as SupplyChainMap);
+            gotResult = true;
             break;
           case "error":
-            setError(ev.message as string);
+            streamError = ev.message as string;
             break;
         }
       });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "拆解失败");
-    } finally {
+      if (streamError) {
+        throw new Error(streamError);
+      }
+      if (!gotResult) {
+        throw new Error("模型未返回有效拆解结果（JSON 解析失败）");
+      }
       setLoading(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "拆解失败";
+      if (attempt < 10) {
+        console.warn(`第 ${attempt}/10 次尝试失败，准备重试: ${msg}`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        return run(t, attempt + 1);
+      } else {
+        setError(`${msg}（已重试 10 次，均告失败，请换一个能力更强的模型）`);
+        setLoading(false);
+      }
     }
   }
 
@@ -112,7 +132,7 @@ export default function MapPage() {
       )}
 
       {(loading || content || reasoning || structured || stages.some((s) => s.status !== "pending")) && (
-        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} />
+        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} retryCount={retryCount} />
       )}
 
       {map && (

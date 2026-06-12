@@ -85,6 +85,9 @@ export interface ChokepointAssessment {
   thesis: string; // Serenity-style narrative
   risks: string[];
   catalysts: string[];
+  recommendedBuy?: boolean;
+  buyPriceRange?: string;
+  sellPriceRange?: string;
 }
 
 /** A node in a trend → supply-chain map. */
