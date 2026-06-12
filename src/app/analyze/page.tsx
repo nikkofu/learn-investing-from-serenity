@@ -61,6 +61,10 @@ function AnalyzeInner() {
     setLoading(true);
     setRetryCount(attempt);
     setError("");
+    if (debounce.current) {
+      clearTimeout(debounce.current);
+      debounce.current = null;
+    }
     setResults([]);
     if (attempt === 1) {
       setData(null);
@@ -143,7 +147,7 @@ function AnalyzeInner() {
   function onQueryChange(v: string) {
     setQuery(v);
     if (debounce.current) clearTimeout(debounce.current);
-    if (v.trim().length < 1) {
+    if (loading || v.trim().length < 1) {
       setResults([]);
       return;
     }
@@ -186,7 +190,7 @@ function AnalyzeInner() {
             {loading ? "分析中…" : "分析"}
           </button>
         </div>
-        {results.length > 0 && (
+        {results.length > 0 && !loading && (
           <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--popover-bg,var(--surface))] shadow-xl">
             {results.map((r, idx) => (
               <button
