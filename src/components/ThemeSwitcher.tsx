@@ -56,6 +56,13 @@ export default function ThemeSwitcher() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  // 双保险：强行同步客户端根元素的 data-theme 属性，防止 React 虚拟 DOM 抹除或重置原生 dataset
+  useEffect(() => {
+    if (typeof document !== "undefined" && theme) {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+  }, [theme]);
+
   const active = THEMES.find((t) => t.id === theme) ?? THEMES[0];
 
   return (
