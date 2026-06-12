@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/methodology", label: "方法论 / 知识库" },
   { href: "/map", label: "趋势→产业链" },
   { href: "/analyze", label: "个股分析" },
+  { href: "/scanner", label: "热门股扫描" },
   { href: "/settings", label: "设置" },
 ];
 

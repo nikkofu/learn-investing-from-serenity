@@ -111,14 +111,17 @@ ${CHINA_CONTEXT}
 你要对给定的 A 股标的，按照下面五个因子各打 0-5 分（0=完全不符合，5=极强符合），并给出一句中文理由（理由要尽量结合公司在产业链中的位置与给定行情数据，不要编造不存在的财务数字）：
 ${factorsDoc}
 
-在第一步的实时推理里，请逐个因子说明大致打几分及理由，并给出整体瓶颈点判断、主要风险与潜在催化；第二步再汇总成结构化 JSON。verdict 用「隐形冠军 / 值得跟踪 / 一般 / 回避」之一并附半句话，thesis 为120字内的 Serenity 风格瓶颈点论述，risks/catalysts 各 2-4 条，score 为 0-5 整数。
+在第一步的实时推理里，请逐个因子说明大致打几分及理由，并给出整体瓶颈点判断、主要风险与潜在催化。特别地，请结合近 120 日的价格区间位置（如 rangePosition 接近 0 代表超跌，接近 1 代表高位）、最新价格、估值与行业地位，判断该股是否属于“刚刚从底部启动”或“处于极佳突破/买入位置”。第二步再汇总成结构化 JSON。verdict 用「隐形冠军 / 值得跟踪 / 一般 / 回避」之一并附半句话，thesis 为120字内的 Serenity 风格瓶颈点论述，risks/catalysts 各 2-4 条，score 为 0-5 整数。
 
 ${twoPhaseGuard(`{
   "factors": [{"key": "demand|supply|attention|valueCapture|catalyst", "score": 0-5, "rationale": "..."}],
   "verdict": "...",
   "thesis": "...",
   "risks": ["..."],
-  "catalysts": ["..."]
+  "catalysts": ["..."],
+  "recommendedBuy": true|false,
+  "buyPriceRange": "建议买入价区间，如 xx.x-xx.x 元，若不符合可填空字串",
+  "sellPriceRange": "建议卖出/止盈价区间，如 xx.x-xx.x 元，若不符合可填空字串"
 }`)}`;
 
   const dataBlock = {
