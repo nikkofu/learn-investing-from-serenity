@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Fragment } from "react";
 import type { ChokepointAssessment, StockQuote } from "@/lib/types";
 import { readNdjson } from "@/lib/stream-client";
 import RadarChart from "@/components/RadarChart";
@@ -396,10 +396,9 @@ export default function HotScannerPage() {
                   const quoteUp = item.changePct >= 0;
 
                   return (
-                    <>
+                    <Fragment key={item.code}>
                       {/* 股票主信息行 */}
                       <tr
-                        key={item.code}
                         className={`border-b border-[var(--border)] hover:bg-[var(--hover)] transition-colors ${
                           isExpanded ? "bg-[var(--inset)]" : ""
                         }`}
@@ -618,7 +617,7 @@ export default function HotScannerPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })
               )}
