@@ -83,22 +83,38 @@ export default function RadarChart({
         const cos = Math.cos(angle(i));
         const anchor = Math.abs(cos) < 0.3 ? "middle" : cos > 0 ? "start" : "end";
 
-        // 字号：兼顾网页展示和海报导出的可读性，适当调小以保证 80% 占比下排版合理（4汉字不带数值）
-        const computedFontSize = Math.max(10, Math.round(size * 0.065));
-        const baseOffset = size * 0.05; // 紧凑的文字离雷达图边缘的合理距离 (5%)
+        // 字号：将字号等比例缩小 30%，消除与其他布局重合的可能
+        const computedFontSize = Math.max(8, Math.round(size * 0.065 * 0.7));
+        const baseOffset = size * 0.04; // 紧凑的文字离雷达图边缘的合理距离 (4%)
 
-        // dy 微调：替代 dominantBaseline，防止 html-to-image 序列化翻转 Bug
+        // 对 2, 3, 4, 5 个因子位置（即代码 i=1, 2, 3, 4）进行横向微调，使其安全收缩在视口内
         let dy = "0.35em";
         let offsetR = baseOffset;
+        let lxOffset = 0;
+        let lyOffset = 0;
+
         if (i === 0) {
           dy = "-0.4em";   // 最上方：文字往上顶
           offsetR = baseOffset * 0.4;
-        } else if (i === 2 || i === 3) {
-          dy = "0.9em";    // 下方：文字往下沉
+        } else if (i === 1) {
+          lxOffset = -size * 0.045; // 右偏上：往左偏，防止超出右边缘
+          lyOffset = -size * 0.01;
+        } else if (i === 2) {
+          dy = "0.9em";    // 右偏下：文字往下沉并往左偏
+          lxOffset = -size * 0.035;
           offsetR = baseOffset * 0.4;
+        } else if (i === 3) {
+          dy = "0.9em";    // 左偏下：文字往下沉并往右偏
+          lxOffset = size * 0.035;
+          offsetR = baseOffset * 0.4;
+        } else if (i === 4) {
+          lxOffset = size * 0.045;  // 左偏上：往右偏，防止超出左边缘
+          lyOffset = -size * 0.01;
         }
 
-        const [lx, ly] = point(i, R + offsetR);
+        const [lxRaw, lyRaw] = point(i, R + offsetR);
+        const lx = lxRaw + lxOffset;
+        const ly = lyRaw + lyOffset;
         const labelText = f.label; // 去掉打分数值的显示，直接显示名字
         return (
           <text
