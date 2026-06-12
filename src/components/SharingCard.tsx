@@ -31,10 +31,17 @@ interface PosterContentProps {
   stats: any;
   assessment: ChokepointAssessment;
   isUp: boolean;
+  innerRef?: React.RefObject<HTMLDivElement | null>;
+  themeColors?: {
+    text: string;
+    border: string;
+    accent: string;
+    accentSoft: string;
+  };
 }
 
 // 抽取公共的海报渲染逻辑，保证预览与导出使用完全一致的 DOM 树
-function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentProps) {
+function PosterContent({ ratio, quote, stats, assessment, isUp, innerRef, themeColors }: PosterContentProps) {
   const dateStr = new Date().toISOString().split("T")[0];
 
   // 投行专业版式：直角/微小圆角，半透明毛玻璃底板，精细实线分割
@@ -50,10 +57,11 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
   if (ratio === "3-4") {
     return (
       <div
-        className="relative overflow-hidden flex flex-col justify-between select-none"
+        ref={innerRef}
+        className="relative flex flex-col justify-between select-none"
         style={{
           width: "880px",
-          height: "1160px",
+          minHeight: "1160px",
           padding: "40px 44px",
           background: "var(--bg-gradient, var(--bg))",
           color: "var(--text)",
@@ -121,9 +129,16 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
         </div>
 
         {/* 4. 分析区 (雷达图 + 五因子) */}
-        <div className="relative z-10" style={{ ...cardStyle, display: "grid", gridTemplateColumns: "270px 1fr", gap: "20px", alignItems: "center", padding: "18px 22px" }}>
-          <div style={{ width: "250px", height: "250px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <RadarChart factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))} size={240} />
+        <div className="relative z-10" style={{ ...cardStyle, display: "grid", gridTemplateColumns: "300px 1fr", gap: "20px", alignItems: "center", padding: "18px 22px" }}>
+          <div style={{ width: "300px", height: "300px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <RadarChart
+              factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))}
+              size={240}
+              textColor={themeColors?.text}
+              borderColor={themeColors?.border}
+              accentColor={themeColors?.accent}
+              accentSoftColor={themeColors?.accentSoft}
+            />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "14px", minWidth: 0, paddingRight: "8px" }}>
             {assessment.factors.map((f) => (
@@ -190,10 +205,11 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
   if (ratio === "9-16") {
     return (
       <div
-        className="relative overflow-hidden flex flex-col justify-between select-none"
+        ref={innerRef}
+        className="relative flex flex-col justify-between select-none"
         style={{
           width: "880px",
-          height: "1560px",
+          minHeight: "1560px",
           padding: "44px 48px",
           background: "var(--bg-gradient, var(--bg))",
           color: "var(--text)",
@@ -261,9 +277,16 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
         </div>
 
         {/* 4. 分析区 */}
-        <div className="relative z-10" style={{ ...cardStyle, display: "grid", gridTemplateColumns: "300px 1fr", gap: "24px", alignItems: "center", padding: "22px 26px" }}>
-          <div style={{ width: "280px", height: "280px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <RadarChart factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))} size={260} />
+        <div className="relative z-10" style={{ ...cardStyle, display: "grid", gridTemplateColumns: "330px 1fr", gap: "24px", alignItems: "center", padding: "22px 26px" }}>
+          <div style={{ width: "330px", height: "330px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <RadarChart
+              factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))}
+              size={260}
+              textColor={themeColors?.text}
+              borderColor={themeColors?.border}
+              accentColor={themeColors?.accent}
+              accentSoftColor={themeColors?.accentSoft}
+            />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px", minWidth: 0, paddingRight: "8px" }}>
             {assessment.factors.map((f) => (
@@ -328,10 +351,11 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
     // ===================== 16:9 横版 (1440×810) =====================
     return (
       <div
-        className="relative overflow-hidden flex flex-col justify-between select-none"
+        ref={innerRef}
+        className="relative flex flex-col justify-between select-none"
         style={{
           width: "1440px",
-          height: "810px",
+          minHeight: "810px",
           padding: "36px 44px",
           background: "var(--bg-gradient, var(--bg))",
           color: "var(--text)",
@@ -396,7 +420,14 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
 
             {/* 雷达图 */}
             <div style={{ ...cardStyle, padding: "16px", display: "flex", alignItems: "center", justifyContent: "center", flex: 1, minHeight: "220px" }}>
-              <RadarChart factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))} size={220} />
+              <RadarChart
+                factors={assessment.factors.map((f) => ({ label: FACTOR_LABELS[f.key] || f.key, score: f.score }))}
+                size={220}
+                textColor={themeColors?.text}
+                borderColor={themeColors?.border}
+                accentColor={themeColors?.accent}
+                accentSoftColor={themeColors?.accentSoft}
+              />
             </div>
           </div>
 
@@ -479,6 +510,82 @@ export default function SharingCard({ quote, stats, assessment, onClose }: Shari
   const [exporting, setExporting] = useState(false);
   const [scale, setScale] = useState(0.85);
   const cardRef = useRef<HTMLDivElement>(null);
+  const posterRef = useRef<HTMLDivElement>(null);
+  const [contentHeight, setContentHeight] = useState(1160);
+  const [themeStyles, setThemeStyles] = useState<React.CSSProperties>({});
+  const [themeColors, setThemeColors] = useState({
+    text: "#e7ecf3",
+    border: "rgba(255, 255, 255, 0.1)",
+    accent: "#10b981",
+    accentSoft: "rgba(16, 185, 129, 0.15)",
+  });
+
+  // 获取页面运行时计算出的所有 CSS 主题变量及特定颜色值，通过内联 style 写入以解决 html-to-image 沙箱导出变量丢失问题
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const rootStyle = window.getComputedStyle(document.documentElement);
+
+    // 1. 读取用于 RadarChart 的直接颜色值
+    setThemeColors({
+      text: rootStyle.getPropertyValue("--text").trim() || "#e7ecf3",
+      border: rootStyle.getPropertyValue("--border").trim() || "rgba(255, 255, 255, 0.1)",
+      accent: rootStyle.getPropertyValue("--accent").trim() || "#10b981",
+      accentSoft: rootStyle.getPropertyValue("--accent-soft").trim() || "rgba(16, 185, 129, 0.15)",
+    });
+
+    // 2. 读取所有的 CSS 变量值
+    const variables = [
+      "--bg",
+      "--bg-gradient",
+      "--surface",
+      "--border",
+      "--hover",
+      "--text",
+      "--muted",
+      "--faint",
+      "--accent",
+      "--accent-strong",
+      "--accent-soft",
+      "--accent-line",
+      "--accent-fg",
+      "--warn",
+      "--warn-soft",
+      "--warn-line",
+      "--card-blur",
+    ];
+    const styles: Record<string, string> = {};
+    variables.forEach((v) => {
+      const val = rootStyle.getPropertyValue(v);
+      if (val) {
+        styles[v] = val.trim();
+      }
+    });
+    setThemeStyles(styles as React.CSSProperties);
+  }, [ratio, assessment]);
+
+  // 动态测量预览中海报内容的实际渲染高度，配合 scale 调整预览盒子的长宽，消除大片空白和被截断的可能
+  useEffect(() => {
+    const measureHeight = () => {
+      if (posterRef.current) {
+        setContentHeight(posterRef.current.offsetHeight);
+      }
+    };
+    const timer = setTimeout(measureHeight, 60);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof window !== "undefined" && window.ResizeObserver && posterRef.current) {
+      observer = new ResizeObserver(() => {
+        measureHeight();
+      });
+      observer.observe(posterRef.current);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      if (observer) observer.disconnect();
+    };
+  }, [ratio, scale, assessment, themeStyles]);
 
   useEffect(() => {
     const updateScale = () => {
@@ -505,14 +612,15 @@ export default function SharingCard({ quote, stats, assessment, onClose }: Shari
     setExporting(true);
     try {
       // 稍等以保证渲染完全
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 200));
       const dataUrl = await toPng(cardRef.current, {
         cacheBust: true,
         pixelRatio: 2, // 导出 2 倍图，确保高清
         style: {
+          ...themeStyles,
           transform: "scale(1)", // 确保无缩放影响
           transformOrigin: "top left",
-        },
+        } as any,
       });
 
       const link = document.createElement("a");
@@ -577,44 +685,61 @@ export default function SharingCard({ quote, stats, assessment, onClose }: Shari
         <div className="flex flex-1 items-center justify-center overflow-auto bg-[var(--inset)] p-4 max-h-[50vh] sm:max-h-[60vh] min-h-[260px] sm:min-h-[380px] rounded-[2px] border border-[var(--border)]">
           
           {/* ============================================================== */}
-          {/* 预览卡片容器：只做预览渲染，外层通过 CSS 动态缩放以完美自适应手机视口 */}
+          {/* 预览卡片容器：外层容器限制为缩放后的实际尺寸，防止撑开产生滚动条 */}
           {/* ============================================================== */}
           <div 
-            className="shrink-0 transition-transform origin-center"
-            style={{ transform: `scale(${scale})` }}
+            className="shrink-0 transition-all duration-300"
+            style={{ 
+              width: `${(ratio === "16-9" ? 1440 : 880) * scale}px`,
+              height: `${contentHeight * scale}px`,
+              position: "relative",
+              overflow: "hidden"
+            }}
           >
-            <PosterContent
-              ratio={ratio}
-              quote={quote}
-              stats={stats}
-              assessment={assessment}
-              isUp={isUp}
-            />
+            <div 
+              style={{ 
+                transform: `scale(${scale})`, 
+                transformOrigin: "top left",
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: ratio === "16-9" ? "1440px" : "880px",
+                ...themeStyles // 注入内联 CSS 主题变量
+              }}
+            >
+              <PosterContent
+                ratio={ratio}
+                quote={quote}
+                stats={stats}
+                assessment={assessment}
+                isUp={isUp}
+                innerRef={posterRef}
+                themeColors={themeColors}
+              />
+            </div>
           </div>
 
         </div>
 
         {/* ============================================================== */}
-        {/* 导出专用离屏 DOM (绝对物理尺寸锁定，保证 html-to-image 克隆时不发生裁切溢出) */}
+        {/* 导出专用离屏 DOM：不设固定高度和 overflow:hidden，让内容自然撑开以避免裁切 */}
         {/* ============================================================== */}
         <div
           style={{
             position: "absolute",
             left: "-9999px",
             top: "-9999px",
-            overflow: "hidden",
-            // 翻倍后的物理尺寸，与 PosterContent 保持一致
             width: ratio === "3-4" ? "880px" : ratio === "9-16" ? "880px" : "1440px",
-            height: ratio === "3-4" ? "1160px" : ratio === "9-16" ? "1560px" : "810px",
           }}
         >
-          <div ref={cardRef}>
+          <div ref={cardRef} style={themeStyles}>
             <PosterContent
               ratio={ratio}
               quote={quote}
               stats={stats}
               assessment={assessment}
               isUp={isUp}
+              themeColors={themeColors}
             />
           </div>
         </div>
