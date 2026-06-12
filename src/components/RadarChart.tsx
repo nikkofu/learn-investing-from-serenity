@@ -66,18 +66,23 @@ export default function RadarChart({
         const cos = Math.cos(angle(i));
         const anchor = Math.abs(cos) < 0.3 ? "middle" : cos > 0 ? "start" : "end";
         
+        // 根据 size 动态计算字号与偏移，确保等比放大时不拥挤不重叠
+        const computedFontSize = Math.max(9, Math.round(size * 0.082)); 
+        const baseOffset = size * 0.11;
+        
         // 传统 dy 高度微调：替代 dominantBaseline 防止 html-to-image 序列化翻转 Bug
         let dy = "0.35em"; // 居中
-        let offsetR = 15;  // 顶点向外的偏移像素
+        let offsetR = baseOffset;  // 顶点向外的偏移像素
         if (i === 0) {
-          dy = "-0.2em";   // 最上方顶点：文字往上顶
-          offsetR = 12;
+          dy = "-0.3em";   // 最上方顶点：文字往上顶
+          offsetR = baseOffset * 0.75;
         } else if (i === 2 || i === 3) {
-          dy = "0.85em";   // 下方顶点：文字往下沉
-          offsetR = 12;
+          dy = "0.9em";    // 下方顶点：文字往下沉
+          offsetR = baseOffset * 0.75;
         }
         
         const [lx, ly] = point(i, R + offsetR);
+        const labelText = `${f.label} ${f.score}`;
         return (
           <text
             key={i}
@@ -85,14 +90,14 @@ export default function RadarChart({
             y={ly}
             textAnchor={anchor}
             dy={dy}
-            fontSize={11}
+            fontSize={computedFontSize}
             style={{
               fill: "var(--text)",
               fontFamily: "var(--font-sans), system-ui, sans-serif",
               fontWeight: 600,
             }}
           >
-            {f.label} {f.score}
+            {labelText}
           </text>
         );
       })}
