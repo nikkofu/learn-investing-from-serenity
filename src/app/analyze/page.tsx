@@ -54,18 +54,22 @@ function AnalyzeInner() {
   const [content, setContent] = useState("");
   const [structured, setStructured] = useState("");
   const [preview, setPreview] = useState<{ quote: StockQuote; stats: Stats } | null>(null);
+  const [retryCount, setRetryCount] = useState(1);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function analyze(code: string) {
+  async function analyze(code: string, attempt = 1) {
     setLoading(true);
+    setRetryCount(attempt);
     setError("");
-    setData(null);
     setResults([]);
+    if (attempt === 1) {
+      setData(null);
+      setPreview(null);
+    }
     setStages(ANALYZE_STAGES.map((s) => ({ ...s, status: "pending" })));
     setReasoning("");
     setContent("");
     setStructured("");
-    setPreview(null);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -76,6 +80,8 @@ function AnalyzeInner() {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error || "分析失败");
       }
+      let gotResult = false;
+      let streamError = "";
       await readNdjson(res, (ev) => {
         switch (ev.type as string) {
           case "stage":
@@ -95,16 +101,30 @@ function AnalyzeInner() {
               stats: ev.stats as Stats,
               assessment: ev.assessment as ChokepointAssessment,
             });
+            gotResult = true;
             break;
           case "error":
-            setError(ev.message as string);
+            streamError = ev.message as string;
             break;
         }
       });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "分析失败");
-    } finally {
+      if (streamError) {
+        throw new Error(streamError);
+      }
+      if (!gotResult) {
+        throw new Error("模型未返回有效打分结果（JSON 解析失败）");
+      }
       setLoading(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "分析失败";
+      if (attempt < 10) {
+        console.warn(`第 ${attempt}/10 次尝试失败，准备重试: ${msg}`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        return analyze(code, attempt + 1);
+      } else {
+        setError(`${msg}（已重试 10 次，均告失败，请换一个能力更强的模型）`);
+        setLoading(false);
+      }
     }
   }
 
@@ -167,10 +187,10 @@ function AnalyzeInner() {
           </button>
         </div>
         {results.length > 0 && (
-          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl">
-            {results.map((r) => (
+          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--popover-bg,var(--surface))] shadow-xl">
+            {results.map((r, idx) => (
               <button
-                key={r.code}
+                key={`${r.code}-${r.market}-${idx}`}
                 onClick={() => {
                   setQuery(r.code);
                   setResults([]);
@@ -199,7 +219,7 @@ function AnalyzeInner() {
       )}
 
       {(loading || content || reasoning || structured || stages.some((s) => s.status !== "pending")) && (
-        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} />
+        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} retryCount={retryCount} />
       )}
 
       {preview && !data && <PreviewCard quote={preview.quote} stats={preview.stats} />}
@@ -212,7 +232,7 @@ function AnalyzeInner() {
 function PreviewCard({ quote, stats }: { quote: StockQuote; stats: Stats }) {
   const up = quote.changePct >= 0;
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
+    <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold">
@@ -245,15 +265,21 @@ function Result({ data }: { data: AnalyzeResponse }) {
   const [showPoster, setShowPoster] = useState(false);
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
+      <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold">
-              {quote.name} <span className="font-mono text-sm text-[var(--faint)]">{quote.code}.{quote.market}</span>
+            <h2 className="text-xl font-bold tracking-wide flex items-center gap-2 flex-wrap">
+              <span>{quote.name}</span>
+              <span className="font-mono text-sm text-[var(--faint)]">{quote.code}.{quote.market}</span>
+              {assessment.recommendedBuy && (
+                <span className="border border-[var(--accent)] text-[var(--accent)] px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-wider rounded-none">
+                  策略买入推荐
+                </span>
+              )}
             </h2>
-            <div className="mt-1 flex items-baseline gap-3">
-              <span className="text-2xl font-semibold">{quote.price.toFixed(2)}</span>
-              <span className={up ? "text-red-400" : "text-emerald-400"}>
+            <div className="mt-1.5 flex items-baseline gap-3">
+              <span className="text-2xl font-mono font-bold">{quote.price.toFixed(2)}</span>
+              <span className={`font-mono text-sm font-bold ${up ? "text-red-500" : "text-emerald-500"}`}>
                 {up ? "+" : ""}{quote.change.toFixed(2)} ({up ? "+" : ""}{quote.changePct.toFixed(2)}%)
               </span>
             </div>
@@ -261,7 +287,7 @@ function Result({ data }: { data: AnalyzeResponse }) {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowPoster(true)}
-              className="rounded-lg bg-[var(--accent)] px-3.5 py-2 text-xs font-semibold text-[var(--accent-fg)] hover:opacity-90 transition shadow-sm cursor-pointer"
+              className="rounded-[2px] bg-[var(--accent)] px-4 py-2 text-xs font-semibold tracking-wider text-[var(--accent-fg)] hover:opacity-90 transition cursor-pointer"
             >
               生成社交海报
             </button>
@@ -275,15 +301,17 @@ function Result({ data }: { data: AnalyzeResponse }) {
           <Stat label="换手率" value={quote.turnoverPct.toFixed(2) + "%"} />
           {stats && <Stat label={`近${stats.windowDays}日涨跌`} value={stats.periodReturnPct + "%"} />}
           {stats && <Stat label="区间位置" value={(stats.rangePosition * 100).toFixed(0) + "%"} />}
+          {assessment.buyPriceRange && <Stat label="建议买入区间" value={assessment.buyPriceRange} />}
+          {assessment.sellPriceRange && <Stat label="建议止盈区间" value={assessment.sellPriceRange} />}
           {stats && <Stat label="均换手" value={stats.avgTurnoverPct + "%"} />}
           <Stat label="更新时间" value={quote.time.slice(5)} />
         </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
-        <h3 className="mb-3 font-semibold">瓶颈点五因子打分</h3>
+      <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
+        <h3 className="mb-3 font-bold tracking-wider">瓶颈点五因子打分</h3>
         <div className="grid items-center gap-6 lg:grid-cols-[320px_1fr]">
-          <div className="rounded-lg bg-[var(--inset)] py-3">
+          <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] py-3">
             <RadarChart
               factors={assessment.factors.map((f) => ({
                 label: FACTOR_LABELS[f.key] || f.key,
@@ -291,26 +319,26 @@ function Result({ data }: { data: AnalyzeResponse }) {
               }))}
             />
           </div>
-          <div className="space-y-3">
+          <div className="space-y-4">
             {assessment.factors.map((f) => (
               <div key={f.key}>
-                <div className="mb-1 flex items-center justify-between text-sm">
-                  <span className="text-[var(--text)]">{FACTOR_LABELS[f.key] || f.key}</span>
-                  <span className="font-mono text-[var(--muted)]">{f.score}/5</span>
+                <div className="mb-1.5 flex items-center justify-between text-xs font-mono">
+                  <span className="text-[var(--text)] font-semibold">{FACTOR_LABELS[f.key] || f.key}</span>
+                  <span className="font-bold text-[var(--accent)]">{f.score} / 5</span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-[var(--hover)]">
-                  <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${(f.score / 5) * 100}%` }} />
+                <div className="h-[3px] overflow-hidden rounded-none bg-[var(--hover)]">
+                  <div className="h-full rounded-none bg-[var(--accent)]" style={{ width: `${(f.score / 5) * 100}%` }} />
                 </div>
-                <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{f.rationale}</p>
+                <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">{f.rationale}</p>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
-        <h3 className="mb-2 font-semibold">Serenity 风格论述</h3>
-        <p className="text-sm leading-7 text-[var(--text)]">{assessment.thesis}</p>
+      <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
+        <h3 className="mb-2 font-bold tracking-wider">Serenity 风格论述</h3>
+        <p className="text-sm leading-7 text-[var(--text)] text-justify">{assessment.thesis}</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -334,9 +362,9 @@ function Result({ data }: { data: AnalyzeResponse }) {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-[var(--inset)] px-3 py-2">
-      <p className="text-[11px] text-[var(--faint)]">{label}</p>
-      <p className="mt-0.5 font-medium text-[var(--text)]">{value}</p>
+    <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] px-3 py-2">
+      <p className="text-[10px] text-[var(--faint)] font-mono uppercase tracking-wider">{label}</p>
+      <p className="mt-0.5 font-mono font-bold text-[var(--text)]">{value}</p>
     </div>
   );
 }
@@ -345,9 +373,8 @@ function ScoreBadge({ score, verdict }: { score: number; verdict: string }) {
   const color = score >= 75 ? "text-[var(--accent)]" : score >= 55 ? "text-sky-400" : score >= 35 ? "text-amber-400" : "text-[var(--muted)]";
   return (
     <div className="text-right">
-      <div className={`text-3xl font-bold ${color}`}>{score}</div>
-      <p className="text-xs text-[var(--muted)]">瓶颈点综合分</p>
-      <p className="mt-0.5 text-xs text-[var(--text)]">{verdict}</p>
+      <div className={`text-3xl font-mono font-black ${color} leading-none`}>{score}</div>
+      <p className="text-[9px] text-[var(--faint)] font-mono uppercase tracking-wider mt-1 border-t border-[var(--border)] pt-0.5">{verdict}</p>
     </div>
   );
 }
@@ -356,11 +383,14 @@ function ListCard({ title, items, tone }: { title: string; items: string[]; tone
   const border = tone === "emerald" ? "border-[var(--accent-line)]" : "border-[var(--warn-line)]";
   const head = tone === "emerald" ? "text-[var(--accent)]" : "text-[var(--warn)]";
   return (
-    <div className={`rounded-xl border ${border} bg-[var(--panel)] p-4`}>
-      <h3 className={`mb-2 text-sm font-semibold ${head}`}>{title}</h3>
-      <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-[var(--text)]">
+    <div className={`rounded-[2px] border ${border} bg-[var(--panel)] p-4`}>
+      <h3 className={`mb-3 text-xs font-bold tracking-wider uppercase border-b border-[var(--border)] pb-1.5 ${head}`}>{title}</h3>
+      <ul className="space-y-1.5 text-xs leading-5 text-[var(--text)]">
         {items.map((it, i) => (
-          <li key={i}>{it}</li>
+          <li key={i} className="flex gap-2 items-start font-mono text-[var(--muted)]">
+            <span className={`${head} font-bold`}>[0{i + 1}]</span>
+            <span className="text-[var(--text)] font-sans text-justify">{it}</span>
+          </li>
         ))}
       </ul>
     </div>
