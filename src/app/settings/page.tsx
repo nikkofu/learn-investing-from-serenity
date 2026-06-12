@@ -64,6 +64,7 @@ export default function SettingsPage() {
       setStatus({ kind: "ok", msg: "已保存。API key 仅存储在服务端本地文件，不会回传浏览器。" });
       setHasApiKey(true);
       setApiKey("");
+      window.dispatchEvent(new Event("llm-config-updated"));
     } catch (err) {
       setStatus({ kind: "err", msg: err instanceof Error ? err.message : "保存失败" });
     } finally {
