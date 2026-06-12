@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import type { ChokepointAssessment, StockQuote } from "@/lib/types";
 import RadarChart from "@/components/RadarChart";
