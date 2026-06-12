@@ -26,7 +26,7 @@ const FACTOR_LABELS: Record<string, string> = {
 };
 
 interface PosterContentProps {
-  ratio: "9-16" | "16-9";
+  ratio: "3-4" | "9-16" | "16-9";
   quote: StockQuote;
   stats: any;
   assessment: ChokepointAssessment;
@@ -45,6 +45,165 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
     border: "1px solid var(--border)",
     borderRadius: "2px",
   };
+
+  if (ratio === "3-4") {
+    return (
+      <div
+        className="relative overflow-hidden p-5 flex flex-col justify-between select-none"
+        style={{
+          width: "440px",
+          height: "580px",
+          background: "var(--bg-gradient, var(--bg))",
+          color: "var(--text)",
+          fontFamily: "var(--font-sans), sans-serif",
+          boxSizing: "border-box",
+        }}
+      >
+        {/* 背景光晕 */}
+        <div className="absolute -top-20 -right-20 h-52 w-52 rounded-full bg-[var(--accent-soft)] blur-3xl opacity-20 pointer-events-none" />
+        <div className="absolute -bottom-20 -left-20 h-52 w-52 rounded-full bg-[var(--accent-soft)] blur-3xl opacity-15 pointer-events-none" />
+
+        {/* 1. 顶部眉栏 */}
+        <div className="relative z-10 flex items-center justify-between border-b border-[var(--border)] pb-1.5 text-[8px] uppercase tracking-wider text-[var(--faint)] font-mono">
+          <span>SERENITY MOBILE REPORT</span>
+          <span>{dateStr} · PROPRIETARY</span>
+        </div>
+
+        {/* 2. 博主资质卡片 (高度收紧) */}
+        <div className="relative z-10 my-1 flex items-center gap-2.5 p-2" style={cardStyle}>
+          <div className="relative h-8 w-8 shrink-0 overflow-hidden border border-[var(--border)] rounded-[2px] bg-[var(--hover)]">
+            <img src="/serenity-avatar.png" alt="Serenity" className="h-full w-full object-cover grayscale-[20%]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono font-bold text-[9.5px] text-[var(--text)] tracking-wider">@aleabitoreddit</span>
+              <span className="border border-[var(--accent)] bg-transparent px-1 py-0.2 text-[5px] text-[var(--accent)] font-bold tracking-wider rounded-none">
+                ORIGINATOR
+              </span>
+            </div>
+          </div>
+          <div className="text-right shrink-0 border-l border-[var(--border)] pl-2 flex flex-col justify-center h-6.5">
+            <span className="text-[6px] text-[var(--faint)] font-mono uppercase block">YTD RETURN</span>
+            <span className="text-[9.5px] font-mono font-black text-[var(--accent)] leading-none mt-0.5">≈ 45.0x</span>
+          </div>
+        </div>
+
+        {/* 3. 股票基本行情与总分 */}
+        <div className="relative z-10 my-1 grid grid-cols-[1fr_105px] gap-2 items-stretch">
+          <div className="flex flex-col justify-center p-2 min-w-0" style={cardStyle}>
+            <div className="flex items-center justify-between gap-1">
+              <div className="flex items-baseline gap-1 min-w-0">
+                <h1 className="text-sm font-bold tracking-tight text-[var(--text)] leading-none truncate">{quote.name}</h1>
+                <span className="font-mono text-[8px] text-[var(--muted)] shrink-0">{quote.code}</span>
+              </div>
+            </div>
+            <div className="mt-1 flex items-baseline justify-between gap-1">
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-mono text-xs font-bold text-[var(--text)]">{quote.price.toFixed(2)}</span>
+                <span className={`font-mono text-[8.5px] font-bold ${isUp ? "text-red-500" : "text-emerald-500"}`}>
+                  {isUp ? "+" : ""}{quote.changePct.toFixed(2)}%
+                </span>
+              </div>
+              {assessment.recommendedBuy && assessment.buyPriceRange && (
+                <span className="font-mono text-[7px] text-[var(--muted)]">
+                  建议: {assessment.buyPriceRange}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="text-center p-1.5 flex flex-col justify-between" style={cardStyle}>
+            <span className="text-[6px] text-[var(--faint)] font-mono block">SERENITY SCORE</span>
+            <span className="text-base font-mono font-black text-[var(--accent)] leading-none">{assessment.totalScore}</span>
+            <span className="text-[7px] text-[var(--muted)] font-bold border-t border-[var(--border)] pt-0.2 block truncate">
+              {assessment.verdict}
+            </span>
+          </div>
+        </div>
+
+        {/* 4. 中间分析区 (极细直角进度条 + 雷达图) */}
+        <div className="relative z-10 grid grid-cols-[125px_1fr] gap-2 items-center p-2" style={cardStyle}>
+          <div className="scale-95 origin-center shrink-0 w-[115px] h-[115px] flex items-center justify-center">
+            <RadarChart
+              factors={assessment.factors.map((f) => ({
+                label: FACTOR_LABELS[f.key] || f.key,
+                score: f.score,
+              }))}
+              size={110}
+            />
+          </div>
+          <div className="space-y-1.5 min-w-0">
+            {assessment.factors.map((f) => (
+              <div key={f.key} className="min-w-0">
+                <div className="flex items-center justify-between text-[8px] font-mono">
+                  <span className="text-[var(--text)] font-semibold">{FACTOR_LABELS[f.key] || f.key}</span>
+                  <span className="font-bold text-[var(--accent)]">{f.score}/5</span>
+                </div>
+                <div className="mt-0.5 h-[1.5px] bg-[var(--border)] rounded-none overflow-hidden">
+                  <div
+                    className="h-full rounded-none"
+                    style={{
+                      width: `${(f.score / 5) * 100}%`,
+                      background: "var(--accent)",
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 5. 投资逻辑主线 (EXECUTIVE SUMMARY 风格) */}
+        <div className="relative z-10 my-1 border-l-[2.5px] border-l-[var(--accent)] p-2" style={cardStyle}>
+          <div className="flex items-center justify-between border-b border-[var(--border)] pb-0.5 mb-1 text-[7px] font-mono text-[var(--accent)] uppercase font-bold">
+            <span>INVESTMENT THESIS / 瓶颈核心论述</span>
+          </div>
+          <p className="text-[8.5px] leading-3.5 text-[var(--text)] font-normal text-justify">
+            {assessment.thesis.length > 85 ? assessment.thesis.slice(0, 82) + "..." : assessment.thesis}
+          </p>
+        </div>
+
+        {/* 6. 催化剂与风险点对比 (只各展示 2 条，更加扁平紧凑) */}
+        <div className="relative z-10 grid grid-cols-2 gap-2 min-h-[60px]">
+          <div className="p-2 flex flex-col justify-between min-w-0" style={{ ...cardStyle, borderLeft: "1.5px solid var(--accent-line)" }}>
+            <div>
+              <span className="text-[7px] font-mono font-bold text-[var(--accent)] uppercase block mb-0.5 border-b border-[var(--border)] pb-0.2">
+                CATALYSTS / 催化剂
+              </span>
+              <div className="space-y-0.5 min-w-0">
+                {assessment.catalysts.slice(0, 2).map((item, idx) => (
+                  <div key={idx} className="flex gap-1 items-start min-w-0 text-[7.5px] leading-3 text-[var(--muted)]">
+                    <span className="font-mono text-[var(--accent)] font-semibold shrink-0">[0{idx + 1}]</span>
+                    <span className="truncate flex-1 min-w-0 block">{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="p-2 flex flex-col justify-between min-w-0" style={{ ...cardStyle, borderLeft: "1.5px solid var(--warn-line)" }}>
+            <div>
+              <span className="text-[7px] font-mono font-bold text-[var(--warn)] uppercase block mb-0.5 border-b border-[var(--border)] pb-0.2">
+                KEY RISKS / 风险点
+              </span>
+              <div className="space-y-0.5 min-w-0">
+                {assessment.risks.slice(0, 2).map((item, idx) => (
+                  <div key={idx} className="flex gap-1 items-start min-w-0 text-[7.5px] leading-3 text-[var(--muted)]">
+                    <span className="font-mono text-[var(--warn)] font-semibold shrink-0">[0{idx + 1}]</span>
+                    <span className="truncate flex-1 min-w-0 block">{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 7. 页脚 */}
+        <div className="relative z-10 pt-1 border-t border-[var(--border)] flex items-center justify-between text-[7px] text-[var(--faint)] font-mono">
+          <span>SERENITY AUTOMATION ENGINE</span>
+          <span>VALUATION CHOKEPOINT MODEL</span>
+        </div>
+      </div>
+    );
+  }
 
   if (ratio === "9-16") {
     return (
@@ -399,9 +558,28 @@ function PosterContent({ ratio, quote, stats, assessment, isUp }: PosterContentP
 }
 
 export default function SharingCard({ quote, stats, assessment, onClose }: SharingCardProps) {
-  const [ratio, setRatio] = useState<"9-16" | "16-9">("9-16");
+  const [ratio, setRatio] = useState<"3-4" | "9-16" | "16-9">("3-4");
   const [exporting, setExporting] = useState(false);
+  const [scale, setScale] = useState(0.85);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const updateScale = () => {
+      if (typeof window === "undefined") return;
+      const width = window.innerWidth;
+      const targetWidth = ratio === "16-9" ? 720 : 440;
+      if (width < 520) {
+        // 手机端，留出边距，动态缩放以完美嵌入屏幕
+        const newScale = Math.max(0.4, (width - 40) / targetWidth);
+        setScale(newScale);
+      } else {
+        setScale(ratio === "16-9" ? 0.75 : ratio === "9-16" ? 0.7 : 0.85);
+      }
+    };
+    updateScale();
+    window.addEventListener("resize", updateScale);
+    return () => window.removeEventListener("resize", updateScale);
+  }, [ratio]);
 
   // 导出 PNG
   const handleExport = async () => {
@@ -435,7 +613,7 @@ export default function SharingCard({ quote, stats, assessment, onClose }: Shari
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
-      <div className="flex w-full max-w-5xl flex-col rounded-[4px] border border-[var(--border)] bg-[var(--popover-bg,var(--surface))] p-5 shadow-2xl md:p-6">
+      <div className="flex w-full max-w-5xl flex-col max-h-[95vh] overflow-y-auto rounded-[4px] border border-[var(--border)] bg-[var(--popover-bg,var(--surface))] p-4 sm:p-5 shadow-2xl md:p-6">
         
         {/* 顶部标题与选项卡 */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
@@ -443,37 +621,50 @@ export default function SharingCard({ quote, stats, assessment, onClose }: Shari
             <h3 className="text-base font-bold text-[var(--text)] tracking-wider">生成专业研报海报</h3>
             <p className="text-[11px] text-[var(--muted)]">海报将自动适配您当前所选的系统配色与渐变</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2">
+            <button
+              onClick={() => setRatio("3-4")}
+              className={`rounded-[2px] px-2.5 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+                ratio === "3-4"
+                  ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                  : "bg-[var(--hover)] text-[var(--text)] hover:opacity-80"
+              }`}
+            >
+              3:4 手机卡片 (推荐)
+            </button>
             <button
               onClick={() => setRatio("9-16")}
-              className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+              className={`rounded-[2px] px-2.5 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
                 ratio === "9-16"
                   ? "bg-[var(--accent)] text-[var(--accent-fg)]"
                   : "bg-[var(--hover)] text-[var(--text)] hover:opacity-80"
               }`}
             >
-              9:16 竖版 (小红书/Story)
+              9:16 故事版
             </button>
             <button
               onClick={() => setRatio("16-9")}
-              className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+              className={`rounded-[2px] px-2.5 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
                 ratio === "16-9"
                   ? "bg-[var(--accent)] text-[var(--accent-fg)]"
                   : "bg-[var(--hover)] text-[var(--text)] hover:opacity-80"
               }`}
             >
-              16:9 横版 (X/Meta Feed)
+              16:9 横版
             </button>
           </div>
         </div>
 
         {/* 预览展示区域，海报容器按实际尺寸输出，外部以 CSS 缩小以适应视口 */}
-        <div className="flex flex-1 items-center justify-center overflow-auto bg-[var(--inset)] p-4 max-h-[60vh] min-h-[380px] rounded-[2px] border border-[var(--border)]">
+        <div className="flex flex-1 items-center justify-center overflow-auto bg-[var(--inset)] p-4 max-h-[50vh] sm:max-h-[60vh] min-h-[260px] sm:min-h-[380px] rounded-[2px] border border-[var(--border)]">
           
           {/* ============================================================== */}
-          {/* 预览卡片容器：只做预览渲染，外层通过 CSS 进行缩放以自适应视口 */}
+          {/* 预览卡片容器：只做预览渲染，外层通过 CSS 动态缩放以完美自适应手机视口 */}
           {/* ============================================================== */}
-          <div className="shrink-0 scale-[0.75] md:scale-90 transition-transform origin-center">
+          <div 
+            className="shrink-0 transition-transform origin-center"
+            style={{ transform: `scale(${scale})` }}
+          >
             <PosterContent
               ratio={ratio}
               quote={quote}
@@ -494,8 +685,8 @@ export default function SharingCard({ quote, stats, assessment, onClose }: Shari
             left: "-9999px",
             top: "-9999px",
             overflow: "hidden",
-            width: ratio === "9-16" ? "440px" : "720px",
-            height: ratio === "9-16" ? "780px" : "405px",
+            width: ratio === "3-4" ? "440px" : ratio === "9-16" ? "440px" : "720px",
+            height: ratio === "3-4" ? "580px" : ratio === "9-16" ? "780px" : "405px",
           }}
         >
           <div ref={cardRef}>
