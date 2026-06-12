@@ -54,18 +54,22 @@ function AnalyzeInner() {
   const [content, setContent] = useState("");
   const [structured, setStructured] = useState("");
   const [preview, setPreview] = useState<{ quote: StockQuote; stats: Stats } | null>(null);
+  const [retryCount, setRetryCount] = useState(1);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function analyze(code: string) {
+  async function analyze(code: string, attempt = 1) {
     setLoading(true);
+    setRetryCount(attempt);
     setError("");
-    setData(null);
     setResults([]);
+    if (attempt === 1) {
+      setData(null);
+      setPreview(null);
+    }
     setStages(ANALYZE_STAGES.map((s) => ({ ...s, status: "pending" })));
     setReasoning("");
     setContent("");
     setStructured("");
-    setPreview(null);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -76,6 +80,8 @@ function AnalyzeInner() {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error || "分析失败");
       }
+      let gotResult = false;
+      let streamError = "";
       await readNdjson(res, (ev) => {
         switch (ev.type as string) {
           case "stage":
@@ -95,16 +101,30 @@ function AnalyzeInner() {
               stats: ev.stats as Stats,
               assessment: ev.assessment as ChokepointAssessment,
             });
+            gotResult = true;
             break;
           case "error":
-            setError(ev.message as string);
+            streamError = ev.message as string;
             break;
         }
       });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "分析失败");
-    } finally {
+      if (streamError) {
+        throw new Error(streamError);
+      }
+      if (!gotResult) {
+        throw new Error("模型未返回有效打分结果（JSON 解析失败）");
+      }
       setLoading(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "分析失败";
+      if (attempt < 10) {
+        console.warn(`第 ${attempt}/10 次尝试失败，准备重试: ${msg}`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        return analyze(code, attempt + 1);
+      } else {
+        setError(`${msg}（已重试 10 次，均告失败，请换一个能力更强的模型）`);
+        setLoading(false);
+      }
     }
   }
 
@@ -199,7 +219,7 @@ function AnalyzeInner() {
       )}
 
       {(loading || content || reasoning || structured || stages.some((s) => s.status !== "pending")) && (
-        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} />
+        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} retryCount={retryCount} />
       )}
 
       {preview && !data && <PreviewCard quote={preview.quote} stats={preview.stats} />}
