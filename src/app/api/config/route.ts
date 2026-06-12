@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPublicConfig, saveConfig } from "@/lib/config";
+import { getPublicConfig, saveConfig, loadConfig } from "@/lib/config";
 import type { LLMConfig } from "@/lib/types";
 
 export async function GET() {
@@ -13,12 +13,20 @@ export async function POST(req: Request) {
   const model = (body.model || "").trim();
   const apiKey = (body.apiKey || "").trim();
 
-  if (!baseURL || !model || !apiKey) {
+  let finalApiKey = apiKey;
+  if (!finalApiKey) {
+    const existing = await loadConfig();
+    if (existing && existing.apiKey) {
+      finalApiKey = existing.apiKey;
+    }
+  }
+
+  if (!baseURL || !model || !finalApiKey) {
     return NextResponse.json(
       { error: "baseURL、model、apiKey 均为必填" },
       { status: 400 }
     );
   }
-  await saveConfig({ provider: provider || "openai", baseURL, model, apiKey });
+  await saveConfig({ provider: provider || "openai", baseURL, model, apiKey: finalApiKey });
   return NextResponse.json({ ok: true });
 }

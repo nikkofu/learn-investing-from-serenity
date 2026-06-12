@@ -9,6 +9,10 @@ const PRESETS: Record<string, { baseURL: string; model: string }> = {
     model: "deepseek/deepseek-chat-v3-0324:free",
   },
   DeepSeek: { baseURL: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  SiliconFlow: {
+    baseURL: "https://api.siliconflow.cn/v1",
+    model: "deepseek-ai/DeepSeek-V3",
+  },
   Moonshot: { baseURL: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
   通义千问: {
     baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -105,9 +109,15 @@ export default function SettingsPage() {
           <input className={field} value={model} onChange={(e) => setModel(e.target.value)} placeholder="deepseek-chat" />
           {baseURL.includes("openrouter.ai") && (
             <p className="mt-1 text-xs text-[var(--faint)]">
-              OpenRouter 免费模型需带 <code className="font-mono">:free</code> 后缀，例如{" "}
+              OpenRouter 免费模型需带 <code className="font-mono text-xs">:free</code> 后缀，例如{" "}
               <code className="font-mono">deepseek/deepseek-chat-v3-0324:free</code>、
               <code className="font-mono">meta-llama/llama-3.3-70b-instruct:free</code>。
+            </p>
+          )}
+          {baseURL.includes("siliconflow") && (
+            <p className="mt-1 text-xs text-[var(--faint)]">
+              SiliconFlow 的 Base URL 建议为 <code className="font-mono">https://api.siliconflow.cn/v1</code>。
+              如果填入了带 <code className="font-mono">/chat/completions</code> 后缀的完整路径，系统也会自动进行规整裁剪，确保不会出现 404 报错。
             </p>
           )}
         </div>

@@ -25,6 +25,10 @@ export async function loadConfig(): Promise<LLMConfig | null> {
     apiKey: fromFile.apiKey || process.env.OPENAI_API_KEY || "",
   };
 
+  if (merged.baseURL) {
+    merged.baseURL = merged.baseURL.trim().replace(/\/chat\/completions\/?$/, "");
+  }
+
   if (!merged.apiKey || !merged.baseURL || !merged.model) return null;
   return merged;
 }
@@ -42,10 +46,38 @@ export async function getPublicConfig(): Promise<PublicLLMConfig> {
   } catch {
     // none saved
   }
+  let baseURL = fromFile.baseURL || process.env.OPENAI_BASE_URL || "";
+  if (baseURL) {
+    baseURL = baseURL.trim().replace(/\/chat\/completions\/?$/, "");
+  }
+
   return {
     provider: fromFile.provider || process.env.LLM_PROVIDER || "",
-    baseURL: fromFile.baseURL || process.env.OPENAI_BASE_URL || "",
+    baseURL,
     model: fromFile.model || process.env.OPENAI_MODEL || "",
     hasApiKey: Boolean(fromFile.apiKey || process.env.OPENAI_API_KEY),
   };
+}
+
+export async function loadTheme(): Promise<string> {
+  try {
+    const raw = await fs.readFile(CONFIG_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed.theme || "emerald";
+  } catch {
+    return "emerald";
+  }
+}
+
+export async function saveTheme(theme: string): Promise<void> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  let current: any = {};
+  try {
+    const raw = await fs.readFile(CONFIG_PATH, "utf8");
+    current = JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  current.theme = theme;
+  await fs.writeFile(CONFIG_PATH, JSON.stringify(current, null, 2), "utf8");
 }
