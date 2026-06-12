@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type StageStatus = "pending" | "active" | "done";
 export interface Stage {
@@ -54,6 +54,30 @@ export function ProgressTrace({
   const elapsed = useElapsed(running);
   const showLive = running || Boolean(reasoning) || Boolean(content) || Boolean(structured);
   const awaitingFirstToken = running && !reasoning && !content && !structured;
+
+  const reasoningRef = useRef<HTMLPreElement>(null);
+  const contentRef = useRef<HTMLPreElement>(null);
+  const structuredRef = useRef<HTMLPreElement>(null);
+
+  // 监控文本流更新，自动滚动容器，使用户始终能看到最新生成的文字行
+  useEffect(() => {
+    if (reasoningRef.current) {
+      reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight;
+    }
+  }, [reasoning]);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight;
+    }
+  }, [content]);
+
+  useEffect(() => {
+    if (structuredRef.current) {
+      structuredRef.current.scrollTop = structuredRef.current.scrollHeight;
+    }
+  }, [structured]);
+
   return (
     <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
       <div className="flex items-center justify-between">
@@ -98,7 +122,7 @@ export function ProgressTrace({
               <summary className="cursor-pointer px-3 py-1.5 text-xs text-[var(--muted)]">
                 模型思考过程 · reasoning
               </summary>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-[var(--faint)]">
+              <pre ref={reasoningRef} className="max-h-48 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-[var(--faint)]">
                 {reasoning}
               </pre>
             </details>
@@ -108,7 +132,7 @@ export function ProgressTrace({
               AI 实时分析推理 · live
               {running && <span className="ml-1 animate-pulse text-[var(--accent)]">▍</span>}
             </div>
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 text-[12px] leading-6 text-[var(--text)]">
+            <pre ref={contentRef} className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 text-[12px] leading-6 text-[var(--text)]">
               {content || (awaitingFirstToken ? `等待模型返回首个 token… ${elapsed.toFixed(1)}s（取决于模型，首字可能需数秒）` : "")}
             </pre>
           </div>
@@ -118,7 +142,7 @@ export function ProgressTrace({
                 结构化结果生成中（JSON）
                 {running && <span className="ml-1 animate-pulse text-[var(--accent)]">▍</span>}
               </summary>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-[var(--faint)]">
+              <pre ref={structuredRef} className="max-h-40 overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[11px] leading-5 text-[var(--faint)]">
                 {structured}
               </pre>
             </details>
