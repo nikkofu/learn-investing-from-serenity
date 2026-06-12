@@ -187,10 +187,10 @@ function AnalyzeInner() {
           </button>
         </div>
         {results.length > 0 && (
-          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl">
-            {results.map((r) => (
+          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--popover-bg,var(--surface))] shadow-xl">
+            {results.map((r, idx) => (
               <button
-                key={r.code}
+                key={`${r.code}-${r.market}-${idx}`}
                 onClick={() => {
                   setQuery(r.code);
                   setResults([]);
