@@ -1,83 +1,93 @@
-# Learn Investing from Serenity · 瓶颈点投研台
+# 🚀 Learn Investing from Serenity · 瓶颈点智能投研台
 
-把 X 博主 **Serenity（@aleabitoreddit，“白毛股神”）** 的 **瓶颈点投资法 (Chokepoint Investing)** 系统化，结合可配置的 OpenAI 兼容 LLM 与 A 股公开行情数据，用于学习其投资技巧、拆解产业链、对个股做瓶颈点评分。
+> **把“白毛股神”的供应链卡脖子投资学，变成你的自动化选股武器。**
 
-> ⚠️ **免责声明**：本项目仅供学习研究，**不构成任何投资建议 (NFA)**。Serenity 自报收益未经第三方审计。
+[![Next.js](https://img.shields.io/badge/Framework-Next.js%2016-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
+[![React 19](https://img.shields.io/badge/Library-React%2019-blue?style=for-the-badge&logo=react)](https://react.dev)
+[![Tailwind v4](https://img.shields.io/badge/CSS-Tailwind%20v4-38bdf8?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-纯 TypeScript / Next.js（App Router）全栈，无需 Python。
+**Serenity 瓶颈智能投研台** 是一款将 X 顶级半导体与算力供应链分析师 **Serenity（@aleabitoreddit，“白毛股神”）** 的 **“瓶颈点投资法 (Chokepoint Investing)”** 系统化的全栈选股与投研台。我们结合了最先进的大语言模型与 A 股实时行情数据，协助投资者深度拆解产业链，定位那些低关注度、高定价权的上游隐形冠军。
 
-## 功能
+> ⚠️ **免责声明**：本项目仅供学习与研究之用，**不构成任何投资建议 (NFA)**。股市有风险，入市需谨慎。
 
-- **方法论 / 知识库**：拆解 Serenity 的瓶颈点五因子框架、交易原则、主题 → A 股映射（代码经东方财富接口校验），并展示从 X 抓取的历史发言。
-- **趋势 → 产业链拆解**：输入一个趋势（如“AI 算力 / 光模块”），AI 按瓶颈点方法拆出产业链分层并标注 A 股“卡脖子”环节。
-- **个股瓶颈点分析**：搜索 A 股（名称/代码/拼音）→ 拉取实时行情与 K 线 → AI 按五因子打分 + 生成 Serenity 风格论述、催化剂、风险。
-- **设置**：填写任意 OpenAI 兼容服务（provider / base URL / model / API key），保存在服务端本地，**不入库**。
+---
 
-## 五因子框架
+## ✨ 核心亮点
 
-| 因子 | 权重 | 含义 |
-|---|---|---|
-| 确定需求 Confirmed Demand | 20% | 下游趋势被验证、需求明确持续 |
-| 受限供给 Constrained Supply | 30% | “没它不行”、短期难替代（**瓶颈核心**） |
-| 低关注度 Low Attention | 15% | 市场认知滞后、估值未反映 |
-| 价值捕获 Value Capture | 20% | 定价权、毛利率、客户锁定、份额 |
-| 催化剂 Catalyst | 15% | 财报、量产、政策、指数纳入、大单 |
+### 💡 瓶颈点投资法自动化
+告别昂贵的研报与繁琐的产业链核对。输入任何大趋势，AI 将按照五因子评估框架自动对个股进行科学量化打分，识别真正的卡脖子标的：
+*   **确定需求 (Confirmed Demand - 20%)**：验证下游景气度是否明确且具备持续性。
+*   **受限供给 (Constrained Supply - 30%)**：**瓶颈核心！**短期内难以复制、没它不行的核心壁垒。
+*   **低关注度 (Low Attention - 15%)**：寻找未被市场充分定价、估值尚处洼地的冷门环节。
+*   **价值捕获 (Value Capture - 20%)**：评估产品定价权、毛利率、客户绑定深度与市场份额。
+*   **催化剂 (Catalyst - 15%)**：捕捉财报、量产、核心招标、指数纳入等重估节点。
 
-详见 [`knowledge/serenity-methodology.md`](knowledge/serenity-methodology.md) 与 [`data/serenity_knowledge.json`](data/serenity_knowledge.json)。
+### 🎨 沉浸式专业投研美学（全新升级！）
+我们精心设计了 **8 套极具专业感与科技感的配色主题**。新增的渐变与毛玻璃（Glassmorphism）效果让数据分析界面如同高端金融杂志般高贵精美：
+*   **极光冰川 (`aurora-frost`)**：深邃的冰川夜空渐变，配以高透光卡片与极光冰蓝强调色，冷静深邃。
+*   **熔岩赤金 (`lava-gold`)**：熔岩黑底色搭配香槟赤金的斜角渐变，超大字号数据展示，视觉张力拉满。
+*   **雨林寒露 (`rainforest-mist`)**：微粉浅灰底色，温润森绿斜角渐变强调色，呈现清新高级的学术研究氛围。
+*   **冰川极光 (`glacier-aurora`)**：清冷理性的浅冰蓝底色，模拟现代金融科技报告的干净与理智。
+*   **香槟宣纸 (`champagne-scroll`)**：温润的宣纸米黄搭配琥珀朱砂红强调色，国风底蕴，凸显长线投资价值。
 
-## 快速开始
+### 📸 爆款社交分享海报生成器（全新核心功能！）
+一键生成专为**小红书、X.com (Twitter)、Meta (Facebook)** 设计的专业报道海报，帮您的研报迅速在社交圈引流破圈：
+*   **双比例自适应**：支持 **9:16 黄金竖版**（完美适配小红书笔记 / Story）与 **16:9 经典横版**（适合 X 平台发布）。
+*   **大博主设计板式**：卡片内置 Serenity 卡通头像，配有博主资质栏、超大评分徽章、高保真 SVG 因子雷达图以及独特的“Serenity 投资论述金句引用卡”。
+*   **不透明蒙版菜单**：配色切换覆层专门设计了不透明底色变量 `--popover-bg`，杜绝文字重叠叠加。
+*   **2倍超清 PNG 导出**：采用 `html-to-image` 离线渲染，直接点击即可下载超清大图。
 
+---
+
+## 🛠️ 技术栈
+
+*   **前端框架**：Next.js 16 (App Router) · React 19
+*   **样式体系**：Tailwind CSS v4 (含 PostCSS 处理)
+*   **语言支持**：TypeScript
+*   **海报渲染**：`html-to-image` 无损导出
+*   **数据采集**：`playwright-core` (用于抓取 X 一手发言)
+*   **行情来源**：东方财富 + 腾讯财经公开行情接口
+
+---
+
+## 🚀 快速开始
+
+### 1. 安装与本地启动
 ```bash
 npm install
-npm run dev    # http://localhost:3000
+npm run dev    # 本地服务已自适应运行在 http://localhost:3000 或 http://localhost:3001
 ```
 
-打开 `/settings` 填写 LLM 配置（如 DeepSeek / OpenAI / 通义千问 等任意 OpenAI 兼容服务），即可使用「产业链拆解」与「个股分析」。
+### 2. 配置大语言模型
+打开浏览器，导航至 `/settings`（设置页），填入您的任意 OpenAI 兼容服务（例如 OpenAI, DeepSeek, OpenRouter, 通义千问等）：
+*   **Provider**：如 `DeepSeek`
+*   **Base URL**：如 `https://api.deepseek.com/v1`
+*   **Model**：如 `deepseek-chat`
+*   **API Key**：`sk-...` (API key 仅存储在您的本地服务端 `.data/llm-config.json` 中，绝不会泄露回传至浏览器)
 
-也可用环境变量代替（见下）。
+配置好后，即可立即解锁**产业链拆解**与**个股五因子打分分析**功能。
 
-## LLM 配置
+---
 
-设置页保存到 `.data/llm-config.json`（已 gitignore）。或用环境变量：
-
-```bash
-export OPENAI_BASE_URL="https://api.deepseek.com/v1"
-export OPENAI_MODEL="deepseek-chat"
-export OPENAI_API_KEY="sk-..."
-```
-
-## 数据来源
-
-| 用途 | 来源 | 备注 |
-|---|---|---|
-| 股票搜索 | 东方财富 searchadapter | 名称/代码/拼音 |
-| 实时行情 + PE/PB/市值 | 腾讯财经 `qt.gtimg.cn` | GBK 解码 |
-| 日 K 线 | 东方财富 `push2his` | best-effort，失败不影响分析 |
-| 知识库 | X @aleabitoreddit 公开时间线 | 见下方脚本 |
-
-## 抓取 Serenity 的 X 知识库
-
-`scripts/scrape-x.mjs` 通过 CDP 连接已运行的 Chrome，滚动抓取公开时间线到 `.data/x-posts.json`（含第三方内容，默认 gitignore，不入库）。
-
-```bash
-node scripts/scrape-x.mjs aleabitoreddit 60
-```
-
-抓取后，首页与方法论页会自动展示其高频标的与近期发言。
-
-> Reddit (u/AleaBito) 为其早期资料，但部分网络环境对 Reddit 有访问限制；如需可在浏览器登录后再抓取。
-
-## 技术栈
-
-Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS 4 · `openai` SDK（OpenAI 兼容）· `playwright-core`（抓取）。
-
-## 目录
+## 📂 项目结构说明
 
 ```
-src/lib/         数据层、LLM 客户端、瓶颈点评分、知识库加载
-src/app/api/     config / market / analyze / map / knowledge 路由
-src/app/         概览 / 方法论 / 产业链 / 个股 / 设置 页面
-data/            curated 知识库（可入库，无密钥）
-knowledge/       方法论拆解 markdown
-scripts/         X 抓取脚本
+├── src/
+│   ├── app/                # 路由页面（首页、方法论、产业链、个股分析、LLM设置）
+│   │   └── api/            # 服务端 API（配置读写、实时行情、AI评分流程、NDJSON流推送）
+│   ├── components/         # 核心组件（ThemeSwitcher 配色管理器、SharingCard 分享海报生成器等）
+│   ├── lib/                # 数据处理层（LLM 客户端、评分算法、行情 GBK 解析、东财接口等）
+├── public/                 # 静态资源（含 Serenity 卡通头像）
+├── knowledge/              # markdown 格式的方法论拆解库
+├── scripts/                # 自动化抓取脚本
 ```
+
+---
+
+## 🤝 贡献与反馈
+
+欢迎提交 Issue 或 Pull Request！我们致力于将本项目打造为最符合投资者直觉、美观度与易用性极佳的开源投研台。
+
+*如果你喜欢这个项目，不妨给它点一个 ⭐ Star，感谢你的支持！*
+

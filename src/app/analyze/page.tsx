@@ -6,6 +6,7 @@ import type { ChokepointAssessment, StockQuote, StockSearchResult } from "@/lib/
 import { ProgressTrace, applyStageEvent, type Stage } from "@/components/ProgressTrace";
 import RadarChart from "@/components/RadarChart";
 import { readNdjson } from "@/lib/stream-client";
+import SharingCard from "@/components/SharingCard";
 
 const FACTOR_LABELS: Record<string, string> = {
   demand: "确定需求",
@@ -241,6 +242,7 @@ function PreviewCard({ quote, stats }: { quote: StockQuote; stats: Stats }) {
 function Result({ data }: { data: AnalyzeResponse }) {
   const { quote, stats, assessment } = data;
   const up = quote.changePct >= 0;
+  const [showPoster, setShowPoster] = useState(false);
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
@@ -256,7 +258,15 @@ function Result({ data }: { data: AnalyzeResponse }) {
               </span>
             </div>
           </div>
-          <ScoreBadge score={assessment.totalScore} verdict={assessment.verdict} />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowPoster(true)}
+              className="rounded-lg bg-[var(--accent)] px-3.5 py-2 text-xs font-semibold text-[var(--accent-fg)] hover:opacity-90 transition shadow-sm cursor-pointer"
+            >
+              生成社交海报
+            </button>
+            <ScoreBadge score={assessment.totalScore} verdict={assessment.verdict} />
+          </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <Stat label="市盈率 TTM" value={quote.pe != null ? quote.pe.toFixed(1) : "-"} />
@@ -310,6 +320,14 @@ function Result({ data }: { data: AnalyzeResponse }) {
       <p className="text-xs text-[var(--faint)]">
         以上由 AI 依据公开行情与 Serenity 方法生成，可能有误，仅供研究，不构成投资建议。
       </p>
+      {showPoster && (
+        <SharingCard
+          quote={quote}
+          stats={stats}
+          assessment={assessment}
+          onClose={() => setShowPoster(false)}
+        />
+      )}
     </div>
   );
 }
