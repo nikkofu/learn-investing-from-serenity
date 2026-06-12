@@ -32,7 +32,7 @@ function getSnapshot(): ThemeId {
 function getServerSnapshot(): ThemeId {
   return DEFAULT_THEME;
 }
-function setTheme(id: ThemeId) {
+async function setTheme(id: ThemeId) {
   document.documentElement.dataset.theme = id;
   try {
     localStorage.setItem(STORAGE_KEY, id);
@@ -40,6 +40,18 @@ function setTheme(id: ThemeId) {
     /* ignore */
   }
   listeners.forEach((l) => l());
+
+  try {
+    await fetch("/api/theme", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ theme: id }),
+    });
+  } catch (err) {
+    console.error("Failed to persist theme to server config:", err);
+  }
 }
 
 export default function ThemeSwitcher() {
