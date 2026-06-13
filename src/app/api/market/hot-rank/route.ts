@@ -5,6 +5,26 @@ export const dynamic = "force-dynamic";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3, delay = 1000): Promise<Response> {
+  let lastError: any;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.ok) {
+        return res;
+      }
+      lastError = new Error(`HTTP 错误: ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+    if (i < retries - 1) {
+      // 延迟重试，每次重试稍微增加延迟
+      await new Promise((resolve) => setTimeout(resolve, delay * (i + 1)));
+    }
+  }
+  throw lastError || new Error("请求失败且已超过最大重试次数");
+}
+
 export async function GET() {
   try {
     // 1. 获取东方财富股吧人气榜前 100 列表
@@ -17,7 +37,7 @@ export async function GET() {
       pageSize: 100,
     };
 
-    const rankRes = await fetch(rankUrl, {
+    const rankRes = await fetchWithRetry(rankUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -27,10 +47,6 @@ export async function GET() {
       body: JSON.stringify(rankPayload),
       cache: "no-store",
     });
-
-    if (!rankRes.ok) {
-      throw new Error(`东财热度榜获取失败: ${rankRes.status}`);
-    }
 
     const rankJson = await rankRes.json();
     const rawList = rankJson.data ?? [];
@@ -56,17 +72,13 @@ export async function GET() {
     // f2: 最新价, f3: 涨跌幅, f12: 代码, f14: 股票名称, f24: 换手率
     const quoteUrl = `https://push2.eastmoney.com/api/qt/ulist.np/get?ut=f057cbcbce2a86e2866ab8877db1d059&fltt=2&invt=2&fields=f2,f3,f12,f14,f24&secids=${secids}`;
 
-    const quoteRes = await fetch(quoteUrl, {
+    const quoteRes = await fetchWithRetry(quoteUrl, {
       headers: {
         "User-Agent": UA,
         Referer: "https://quote.eastmoney.com/",
       },
       cache: "no-store",
     });
-
-    if (!quoteRes.ok) {
-      throw new Error(`东财行情列表获取失败: ${quoteRes.status}`);
-    }
 
     const quoteJson = await quoteRes.json();
     const diffList = quoteJson.data?.diff ?? [];

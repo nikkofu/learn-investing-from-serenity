@@ -32,6 +32,7 @@ interface AssessmentState {
   status: "idle" | "loading" | "done" | "error";
   errorMsg?: string;
   retryCount?: number;
+  stageMsg?: string;
   data?: ScanData;
 }
 
@@ -47,6 +48,8 @@ export default function HotScannerPage() {
   const [list, setList] = useState<HotStockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [hotRankRetryCount, setHotRankRetryCount] = useState(0); // 记录热榜请求重试次数
+  const [concurrency, setConcurrency] = useState(5); // 并行诊断数量 (默认 5，可配置)
   const [assessments, setAssessments] = useState<Record<string, AssessmentState>>({});
   
   // 扫描控制状态
@@ -59,10 +62,11 @@ export default function HotScannerPage() {
   const activeTasksCount = useRef(0);
   const taskQueue = useRef<string[]>([]);
 
-  // 1. 获取热榜列表
-  async function fetchList() {
+  // 1. 获取热榜列表 (包含错误捕捉、最多 10 次重试机制)
+  async function fetchList(attempt = 1) {
     setLoading(true);
     setError("");
+    setHotRankRetryCount(attempt);
     try {
       const res = await fetch("/api/market/hot-rank");
       if (!res.ok) {
@@ -70,10 +74,20 @@ export default function HotScannerPage() {
       }
       const json = await res.json();
       setList(json.list ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "热榜获取失败");
-    } finally {
+      setHotRankRetryCount(0); // 成功后重置
       setLoading(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "热榜获取失败";
+      if (attempt < 10) {
+        console.warn(`[Scanner] 获取热榜第 ${attempt}/10 次尝试失败，准备重试: ${msg}`);
+        // 延迟 1.5 秒后重试
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await fetchList(attempt + 1);
+      } else {
+        setError(msg);
+        setHotRankRetryCount(0);
+        setLoading(false);
+      }
     }
   }
 
@@ -82,7 +96,7 @@ export default function HotScannerPage() {
   }, []);
 
   // 2. 单股分析核心拉取器 (附带 ndjson 流读取，可抽取最终 result)
-  async function performSingleScan(code: string, onUpdate: (state: AssessmentState) => void): Promise<ScanData> {
+  async function performSingleScan(code: string, onUpdate: (state: Partial<AssessmentState>) => void): Promise<ScanData> {
     const res = await fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -96,9 +110,31 @@ export default function HotScannerPage() {
 
     let scanData: ScanData | null = null;
     let streamError = "";
+    let tokenCount = 0;
+    let lastUpdateTime = 0;
+    const THROTTLE_MS = 300; // 每 300ms 最多更新一次字数状态，防止渲染卡顿
 
-    await readNdjson(res, (ev) => {
-      if (ev.type === "result") {
+    await readNdjson(res, (ev: any) => {
+      if (ev.type === "stage") {
+        let stageMsg = "";
+        if (ev.key === "quote" && ev.status === "start") {
+          stageMsg = "获取行情中...";
+        } else if (ev.key === "reason" && ev.status === "start") {
+          stageMsg = "AI深度推理中...";
+        } else if (ev.key === "summary" && ev.status === "start") {
+          stageMsg = "整理评估中...";
+        }
+        if (stageMsg) {
+          onUpdate({ stageMsg });
+        }
+      } else if (ev.type === "token") {
+        tokenCount += (ev.text || "").length;
+        const now = Date.now();
+        if (now - lastUpdateTime > THROTTLE_MS) {
+          lastUpdateTime = now;
+          onUpdate({ stageMsg: `AI推理中(${tokenCount}字)` });
+        }
+      } else if (ev.type === "result") {
         scanData = {
           quote: ev.quote as StockQuote,
           stats: ev.stats as any,
@@ -127,13 +163,28 @@ export default function HotScannerPage() {
     // 更新重试状态
     setAssessments((prev) => ({
       ...prev,
-      [code]: { status: "loading", retryCount: attempt },
+      [code]: { 
+        status: "loading", 
+        retryCount: attempt,
+        stageMsg: attempt > 1 ? `重试(第${attempt}/10次)...` : "启动诊断..."
+      },
     }));
 
     try {
-      return await performSingleScan(code, (state) => {
+      return await performSingleScan(code, (partialState) => {
         if (!signal?.aborted) {
-          setAssessments((prev) => ({ ...prev, [code]: state }));
+          setAssessments((prev) => {
+            const current = prev[code] || {};
+            return {
+              ...prev,
+              [code]: {
+                ...current,
+                status: "loading",
+                retryCount: attempt,
+                ...partialState,
+              },
+            };
+          });
         }
       });
     } catch (e) {
@@ -154,7 +205,7 @@ export default function HotScannerPage() {
     
     setAssessments((prev) => ({
       ...prev,
-      [code]: { status: "loading", retryCount: 1 },
+      [code]: { status: "loading", retryCount: 1, stageMsg: "启动诊断..." },
     }));
 
     try {
@@ -182,8 +233,7 @@ export default function HotScannerPage() {
     return true;
   });
 
-  // 6. 批量并发执行器 (CONCURRENCY = 3)
-  const CONCURRENCY = 3;
+  // 6. 批量并发执行器
 
   function stopScanning() {
     setScanning(false);
@@ -249,7 +299,7 @@ export default function HotScannerPage() {
     };
 
     // 启动初始并发
-    const initRunCount = Math.min(CONCURRENCY, toScan.length);
+    const initRunCount = Math.min(concurrency, toScan.length);
     if (initRunCount === 0) {
       setScanning(false);
       return;
@@ -328,9 +378,26 @@ export default function HotScannerPage() {
         </div>
 
         {/* 批量操作控制 */}
-        <div className="flex gap-2.5">
+        <div className="flex items-center gap-2.5">
+          {/* 并发数选择 */}
+          <div className="flex items-center gap-1.5 border border-[var(--border)] px-2 py-1 bg-[var(--hover)] rounded-[2px] text-xs">
+            <span className="text-[var(--muted)] font-mono uppercase tracking-wider text-[10px]">并发数:</span>
+            <select
+              value={concurrency}
+              onChange={(e) => setConcurrency(Number(e.target.value))}
+              disabled={scanning}
+              className="bg-transparent border-none text-[var(--text)] font-semibold font-mono focus:outline-none cursor-pointer text-xs"
+            >
+              <option value={1} className="bg-[var(--surface)] text-[var(--text)]">1</option>
+              <option value={3} className="bg-[var(--surface)] text-[var(--text)]">3</option>
+              <option value={5} className="bg-[var(--surface)] text-[var(--text)]">5</option>
+              <option value={8} className="bg-[var(--surface)] text-[var(--text)]">8 (可能排队)</option>
+              <option value={10} className="bg-[var(--surface)] text-[var(--text)]">10 (可能排队)</option>
+            </select>
+          </div>
+
           <button
-            onClick={fetchList}
+            onClick={() => fetchList(1)}
             disabled={scanning || loading}
             className="rounded-[2px] border border-[var(--border)] px-4 py-1.5 text-xs font-semibold tracking-wider text-[var(--text)] hover:bg-[var(--hover)] transition cursor-pointer disabled:opacity-50"
           >
@@ -349,7 +416,7 @@ export default function HotScannerPage() {
               disabled={loading || filteredList.length === 0}
               className="rounded-[2px] bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold tracking-wider text-[var(--accent-fg)] hover:opacity-90 transition cursor-pointer disabled:opacity-50"
             >
-              一键扫描符合标的 (并发x3)
+              一键扫描符合标的 (并发x{concurrency})
             </button>
           )}
         </div>
@@ -358,12 +425,23 @@ export default function HotScannerPage() {
 
       {/* 热门股表格渲染 */}
       {loading ? (
-        <div className="py-12 text-center text-xs text-[var(--muted)] font-mono">
-          LOADING REALTIME RANKING FROM EASTMONEY...
+        <div className="py-12 text-center text-xs text-[var(--muted)] font-mono flex flex-col items-center justify-center gap-2">
+          <span>LOADING REALTIME RANKING FROM EASTMONEY...</span>
+          {hotRankRetryCount > 1 && (
+            <span className="text-amber-500 animate-pulse">
+              [正在重试: 第 {hotRankRetryCount}/10 次尝试...]
+            </span>
+          )}
         </div>
       ) : error ? (
-        <div className="border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-300 rounded-[2px] font-mono">
-          ERROR: {error}
+        <div className="border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-300 rounded-[2px] font-mono flex items-center justify-between">
+          <span>ERROR: {error}</span>
+          <button
+            onClick={() => fetchList(1)}
+            className="rounded-[2px] bg-red-950/40 hover:bg-red-950/60 border border-red-500/30 px-3 py-1 text-[10px] font-semibold text-red-200 transition cursor-pointer"
+          >
+            手动重试
+          </button>
         </div>
       ) : (
         <div className="overflow-x-auto border border-[var(--border)] rounded-[2px] bg-[var(--surface)]">
@@ -466,7 +544,9 @@ export default function HotScannerPage() {
                                 {state.data.assessment.buyPriceRange || "-"} / {state.data.assessment.sellPriceRange || "-"}
                               </span>
                             ) : (
-                              <span className="text-[var(--faint)]">不符合区间</span>
+                              <span className="text-[var(--faint)] cursor-help" title="该股当前评估决策为【观望】，未达到 Serenity 策略的推荐买入标准，因此不提供具体的买入/卖出目标区间建议。">
+                                未达买入条件(观望)
+                              </span>
                             )
                           ) : (
                             <span className="text-[var(--faint)]">--</span>
@@ -475,8 +555,8 @@ export default function HotScannerPage() {
                         {/* 操作诊断按钮 */}
                         <td className="px-4 py-3 text-center">
                           {state.status === "loading" ? (
-                            <span className="text-amber-500 font-mono text-[10px] tracking-wide animate-pulse">
-                              诊断中{state.retryCount && state.retryCount > 1 ? `(${state.retryCount}/10)` : "..."}
+                            <span className="text-amber-500 font-mono text-[9px] tracking-wide animate-pulse block truncate max-w-[120px] mx-auto" title={state.stageMsg || "诊断中..."}>
+                              {state.stageMsg || "诊断中..."}
                             </span>
                           ) : state.status === "error" ? (
                             <button
