@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import type { ChokepointAssessment, StockQuote, StockSearchResult } from "@/lib/types";
 import { ProgressTrace, applyStageEvent, type Stage } from "@/components/ProgressTrace";
 import RadarChart from "@/components/RadarChart";
+import QuantChart from "@/components/QuantChart";
 import { readNdjson } from "@/lib/stream-client";
 import SharingCard from "@/components/SharingCard";
 
@@ -32,6 +33,7 @@ interface AnalyzeResponse {
     themeThesis: string;
     tweets: { date: string; text: string }[];
   } | null;
+  quant?: any;
 }
 
 type Stats = AnalyzeResponse["stats"];
@@ -109,6 +111,7 @@ function AnalyzeInner() {
               quote: ev.quote as StockQuote,
               stats: ev.stats as Stats,
               assessment: ev.assessment as ChokepointAssessment,
+              quant: ev.quant,
             });
             gotResult = true;
             break;
@@ -448,6 +451,19 @@ function Result({ data }: { data: AnalyzeResponse }) {
         <ListCard title="潜在催化剂" items={assessment.catalysts} tone="emerald" />
         <ListCard title="风险点" items={assessment.risks} tone="amber" />
       </div>
+
+      {data.quant && (
+        <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
+          <div className="text-[9.5px] font-mono text-[var(--accent)] font-extrabold uppercase tracking-widest mb-3 flex items-center gap-1.5 border-b border-[var(--border)] pb-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+            [Serenity Quant Engine / 均线量化与筹码图谱诊断]
+          </div>
+          <QuantChart
+            quantData={data.quant}
+            currentPrice={quote.price}
+          />
+        </div>
+      )}
       <p className="text-xs text-[var(--faint)]">
         以上由 AI 依据公开行情与 Serenity 方法生成，可能有误，仅供研究，不构成投资建议。
       </p>

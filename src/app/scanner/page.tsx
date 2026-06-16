@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef, Fragment } from "react";
+import { useEffect, useState, useRef, Fragment, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import type { ChokepointAssessment, StockQuote } from "@/lib/types";
 import { readNdjson } from "@/lib/stream-client";
 import RadarChart from "@/components/RadarChart";
+import QuantChart from "@/components/QuantChart";
 
 interface HotStockItem {
   rank: number;
@@ -26,6 +28,12 @@ interface ScanData {
     windowLow: number;
   } | null;
   assessment: ChokepointAssessment;
+  quant?: {
+    chips: any;
+    backtest: any;
+    technical?: any;
+    candles?: any[];
+  };
 }
 
 interface AssessmentState {
@@ -44,7 +52,12 @@ const FACTOR_LABELS: Record<string, string> = {
   catalyst: "催化剂",
 };
 
-export default function HotScannerPage() {
+function ScannerContent() {
+  const searchParams = useSearchParams();
+  const codesParam = searchParams.get("codes") || "";
+  const customTitle = searchParams.get("title") || "";
+  const isCustomMode = !!codesParam;
+
   const [list, setList] = useState<HotStockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -62,24 +75,27 @@ export default function HotScannerPage() {
   const activeTasksCount = useRef(0);
   const taskQueue = useRef<string[]>([]);
 
-  // 1. 获取热榜列表 (包含错误捕捉、最多 10 次重试机制)
+  // 1. 获取股票列表 (包含错误捕捉、最多 10 次重试机制，支持自定数据源)
   async function fetchList(attempt = 1) {
     setLoading(true);
     setError("");
     setHotRankRetryCount(attempt);
     try {
-      const res = await fetch("/api/market/hot-rank");
+      const targetUrl = isCustomMode 
+        ? `/api/market/batch?codes=${encodeURIComponent(codesParam)}`
+        : "/api/market/hot-rank";
+      const res = await fetch(targetUrl);
       if (!res.ok) {
-        throw new Error(`请求热榜错误: ${res.status}`);
+        throw new Error(`请求股票数据错误: ${res.status}`);
       }
       const json = await res.json();
       setList(json.list ?? []);
       setHotRankRetryCount(0); // 成功后重置
       setLoading(false);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "热榜获取失败";
+      const msg = e instanceof Error ? e.message : "股票数据获取失败";
       if (attempt < 10) {
-        console.warn(`[Scanner] 获取热榜第 ${attempt}/10 次尝试失败，准备重试: ${msg}`);
+        console.warn(`[Scanner] 获取股票数据第 ${attempt}/10 次尝试失败，准备重试: ${msg}`);
         // 延迟 1.5 秒后重试
         await new Promise((resolve) => setTimeout(resolve, 1500));
         await fetchList(attempt + 1);
@@ -139,6 +155,7 @@ export default function HotScannerPage() {
           quote: ev.quote as StockQuote,
           stats: ev.stats as any,
           assessment: ev.assessment as ChokepointAssessment,
+          quant: ev.quant as any,
         };
       } else if (ev.type === "error") {
         streamError = ev.message as string;
@@ -320,9 +337,15 @@ export default function HotScannerPage() {
       
       {/* 头部标题区域 */}
       <div className="border-b border-[var(--border)] pb-3">
-        <h1 className="text-xl font-bold tracking-wider font-mono">SERENITY MARKET SCANNER / 热门股策略扫描器</h1>
+        <h1 className="text-xl font-bold tracking-wider font-mono">
+          {isCustomMode 
+            ? `[自定股票池 · ${customTitle || "未命名"}] 策略扫描器`
+            : "SERENITY MARKET SCANNER / 热门股策略扫描器"}
+        </h1>
         <p className="mt-1 text-xs text-[var(--muted)]">
-          实时监控东方财富股吧人气前 100 个股，多因子并行打分与突破股识别，快速挑选进入跟踪股票池。
+          {isCustomMode 
+            ? `当前导入自定股票池（共 ${list.length} 只股票），支持一键开启 AI 多因子并发打分与突破股识别诊断。`
+            : "实时监控东方财富股吧人气前 100 个股，多因子并行打分与突破股识别，快速挑选进入跟踪股票池。"}
         </p>
       </div>
 
@@ -331,50 +354,58 @@ export default function HotScannerPage() {
         
         {/* 筛选按钮组 */}
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setFilterType("all")}
-            disabled={scanning}
-            className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
-              filterType === "all"
-                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
-                : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
-            }`}
-          >
-            全部人气股 ({list.length})
-          </button>
-          <button
-            onClick={() => setFilterType("up")}
-            disabled={scanning}
-            className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
-              filterType === "up"
-                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
-                : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
-            }`}
-          >
-            今日领涨 (涨幅 ≥ 4%)
-          </button>
-          <button
-            onClick={() => setFilterType("active")}
-            disabled={scanning}
-            className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
-              filterType === "active"
-                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
-                : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
-            }`}
-          >
-            交投活跃 (换手 ≥ 5%)
-          </button>
-          <button
-            onClick={() => setFilterType("down")}
-            disabled={scanning}
-            className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
-              filterType === "down"
-                ? "bg-[var(--accent)] text-[var(--accent-fg)]"
-                : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
-            }`}
-          >
-            逆势下跌
-          </button>
+          {isCustomMode ? (
+            <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs text-[var(--muted)] font-mono">
+              股票池成员数: <span className="text-[var(--text)] font-bold">{list.length}</span>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => setFilterType("all")}
+                disabled={scanning}
+                className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+                  filterType === "all"
+                    ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                    : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
+                }`}
+              >
+                全部人气股 ({list.length})
+              </button>
+              <button
+                onClick={() => setFilterType("up")}
+                disabled={scanning}
+                className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+                  filterType === "up"
+                    ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                    : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
+                }`}
+              >
+                今日领涨 (涨幅 ≥ 4%)
+              </button>
+              <button
+                onClick={() => setFilterType("active")}
+                disabled={scanning}
+                className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+                  filterType === "active"
+                    ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                    : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
+                }`}
+              >
+                交投活跃 (换手 ≥ 5%)
+              </button>
+              <button
+                onClick={() => setFilterType("down")}
+                disabled={scanning}
+                className={`rounded-[2px] px-3 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer ${
+                  filterType === "down"
+                    ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                    : "bg-[var(--hover)] text-[var(--text)] hover:opacity-85 disabled:opacity-50"
+                }`}
+              >
+                逆势下跌
+              </button>
+            </>
+          )}
         </div>
 
         {/* 批量操作控制 */}
@@ -401,7 +432,7 @@ export default function HotScannerPage() {
             disabled={scanning || loading}
             className="rounded-[2px] border border-[var(--border)] px-4 py-1.5 text-xs font-semibold tracking-wider text-[var(--text)] hover:bg-[var(--hover)] transition cursor-pointer disabled:opacity-50"
           >
-            刷新榜单
+            {isCustomMode ? "刷新行情" : "刷新榜单"}
           </button>
           {scanning ? (
             <button
@@ -487,7 +518,23 @@ export default function HotScannerPage() {
                         </td>
                         {/* 股票名 */}
                         <td className="px-4 py-3 font-bold text-[var(--text)]">
-                          {item.name}
+                          <a
+                            href={`/analyze?code=${item.code}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:text-[var(--accent)] hover:underline flex items-center gap-1 group"
+                          >
+                            <span>{item.name}</span>
+                            <svg
+                              className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--accent)] inline-block shrink-0"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                            </svg>
+                          </a>
                         </td>
                         {/* 代码 */}
                         <td className="px-4 py-3 font-mono text-[var(--muted)]">
@@ -544,8 +591,8 @@ export default function HotScannerPage() {
                                 {state.data.assessment.buyPriceRange || "-"} / {state.data.assessment.sellPriceRange || "-"}
                               </span>
                             ) : (
-                              <span className="text-[var(--faint)] cursor-help" title="该股当前评估决策为【观望】，未达到 Serenity 策略的推荐买入标准，因此不提供具体的买入/卖出目标区间建议。">
-                                未达买入条件(观望)
+                              <span className="text-amber-500/80 font-medium cursor-help" title={state.data.assessment.thesis || "未达到 Serenity 策略的推荐买入标准，不提供具体买卖区间建议。"}>
+                                {state.data.assessment.verdict || "未达买入条件(观望)"}
                               </span>
                             )
                           ) : (
@@ -691,6 +738,20 @@ export default function HotScannerPage() {
                                   </div>
                                 </div>
 
+                                {/* Serenity 突破策略与筹码直方可视化图谱 */}
+                                {state.data.quant && (
+                                  <div className="border-t border-[var(--border)] pt-4 mt-2">
+                                    <div className="text-[9.5px] font-mono text-[var(--accent)] font-extrabold uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+                                      [Serenity Quant Engine / 均线量化与筹码图谱诊断]
+                                    </div>
+                                    <QuantChart
+                                      quantData={state.data.quant}
+                                      currentPrice={state.data.quote.price}
+                                    />
+                                  </div>
+                                )}
+
                               </div>
 
                             </div>
@@ -712,5 +773,13 @@ export default function HotScannerPage() {
       </div>
 
     </div>
+  );
+}
+
+export default function HotScannerPage() {
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-xs text-[var(--muted)] font-mono">LOADING PAGE CONTEXT...</div>}>
+      <ScannerContent />
+    </Suspense>
   );
 }

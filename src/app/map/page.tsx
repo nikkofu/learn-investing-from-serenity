@@ -23,6 +23,18 @@ export default function MapPage() {
   const [content, setContent] = useState("");
   const [structured, setStructured] = useState("");
   const [retryCount, setRetryCount] = useState(1);
+  const [viewMode, setViewMode] = useState<"mindmap" | "list">("mindmap");
+
+  // 提取当前图谱中的所有有效A股股票代码
+  const allStockCodes = map
+    ? Array.from(
+        new Set(
+          map.nodes
+            .flatMap((n) => n.tickers.map((t) => t.code))
+            .filter((code) => /^\d{6}$/.test(code))
+        )
+      ).join(",")
+    : "";
 
   async function run(t?: string, attempt = 1) {
     const q = (t ?? trend).trim();
@@ -136,63 +148,213 @@ export default function MapPage() {
       )}
 
       {map && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-[var(--accent-line)] bg-[var(--accent-soft)] p-4">
-            <p className="text-sm font-medium text-[var(--accent)]">瓶颈点总结</p>
-            <p className="mt-1 text-sm leading-6 text-[var(--text)]">{map.summary}</p>
+        <div className="space-y-6">
+          {/* 顶栏信息与模式切换 */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-[var(--border)] pb-4">
+            <div className="rounded-xl border border-[var(--accent-line)] bg-[var(--accent-soft)] p-4 flex-1">
+              <p className="text-sm font-medium text-[var(--accent)]">瓶颈点总结</p>
+              <p className="mt-1 text-sm leading-6 text-[var(--text)]">{map.summary}</p>
+            </div>
+            
+            {/* 操作控制区 */}
+            <div className="flex flex-wrap items-center gap-3 self-end md:self-center">
+              {allStockCodes.length > 0 && (
+                <Link
+                  href={`/scanner?codes=${allStockCodes}&title=${encodeURIComponent(map.trend + "产业链")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg border border-[var(--accent-line)] bg-[var(--accent-soft)] hover:bg-[var(--hover)] text-[var(--accent)] hover:text-[var(--text)] transition cursor-pointer text-xs font-semibold px-3 py-1.5 flex items-center gap-1.5 shrink-0"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  一键并发诊断 ⚡
+                </Link>
+              )}
+
+              {/* 切换 Tab */}
+              <div className="flex border border-[var(--border)] rounded-lg p-1 bg-[var(--inset)] text-xs font-semibold shrink-0">
+                <button
+                  onClick={() => setViewMode("mindmap")}
+                  className={`px-3 py-1.5 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                    viewMode === "mindmap" 
+                      ? "bg-[var(--accent)] text-[var(--accent-fg)]" 
+                      : "text-[var(--muted)] hover:text-[var(--text)]"
+                  }`}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v12"/><path d="M6 12h12"/></svg>
+                  思维导图
+                </button>
+                <button
+                  onClick={() => setViewMode("list")}
+                  className={`px-3 py-1.5 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                    viewMode === "list" 
+                      ? "bg-[var(--accent)] text-[var(--accent-fg)]" 
+                      : "text-[var(--muted)] hover:text-[var(--text)]"
+                  }`}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                  卡片列表
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="space-y-3">
-            {map.nodes.map((n, i) => (
-              <div
-                key={i}
-                className={`rounded-xl border p-4 ${
-                  n.isChokepoint ? "border-[var(--accent-line)] bg-[var(--accent-soft)]" : "border-[var(--border)] bg-[var(--panel)]"
-                }`}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-semibold">{n.layer}</h3>
-                  {n.isChokepoint && (
-                    <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">瓶颈点</span>
+
+          {/* 渲染内容 */}
+          {viewMode === "mindmap" ? (
+            <div className="overflow-x-auto pb-4 border border-[var(--border)] rounded-xl bg-[var(--panel)] p-6">
+              <div className="min-w-[900px] flex items-stretch gap-10 py-6 select-none relative">
+                
+                {/* 1. 核心树根：趋势主题 */}
+                <div className="flex items-center shrink-0">
+                  <div className="relative rounded-2xl border-2 border-[var(--accent)] bg-[var(--accent-soft)] shadow-[0_0_15px_rgba(16,185,129,0.12)] px-6 py-5 text-center max-w-[200px] z-10">
+                    <span className="text-[9px] text-[var(--accent)] font-mono uppercase tracking-widest block mb-1">CORE THESIS</span>
+                    <h2 className="text-sm font-bold text-[var(--text)] leading-snug">{map.trend}</h2>
+                    {/* 右侧连线 */}
+                    <div className="absolute right-0 top-1/2 -mr-10 w-10 h-[2px] bg-gradient-to-r from-[var(--accent)] to-[var(--border)] -translate-y-1/2" />
+                  </div>
+                </div>
+
+                {/* 2. 环节树干与叶子个股 */}
+                <div className="flex-1 flex flex-col justify-center gap-6 relative pl-6 border-l-2 border-[var(--border)]">
+                  {map.nodes.map((n, idx) => (
+                    <div key={idx} className="relative flex items-center gap-6 pl-6">
+                      
+                      {/* 从左侧垂直树干延伸出的横向连线 */}
+                      <div className={`absolute left-0 top-1/2 -ml-[2px] w-6 h-[2px] -translate-y-1/2 ${n.isChokepoint ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`} />
+
+                      {/* 环节卡片 */}
+                      <div className={`relative shrink-0 w-[260px] rounded-xl border p-4 shadow-sm backdrop-blur-[4px] transition-all hover:-translate-y-0.5 hover:shadow-md ${
+                        n.isChokepoint 
+                          ? "border-[var(--accent-line)] bg-gradient-to-br from-[var(--accent-soft)] to-[var(--panel)] shadow-[0_0_10px_rgba(245,158,11,0.06)]" 
+                          : "border-[var(--border)] bg-[var(--panel)]"
+                      }`}>
+                        {n.isChokepoint && (
+                          <div className="absolute top-3 right-3 flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <h3 className="font-semibold text-sm text-[var(--text)]">{n.layer}</h3>
+                          {n.isChokepoint && (
+                            <span className="rounded bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">瓶颈点</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[var(--muted)] line-clamp-2 leading-relaxed" title={n.role}>{n.role}</p>
+                        
+                        {n.bomRatio && (
+                          <div className="mt-2 text-[10px] font-mono text-[var(--muted)] flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-[var(--accent)]" />
+                            BOM占比: <span className="font-bold text-[var(--text)]">{n.bomRatio}</span>
+                          </div>
+                        )}
+
+                        {/* 右侧连线 */}
+                        {n.tickers.length > 0 && (
+                          <div className="absolute right-0 top-1/2 -mr-6 w-6 h-[2px] bg-dashed bg-[var(--border)] -translate-y-1/2" />
+                        )}
+                      </div>
+
+                      {/* 3. 叶子个股节点 */}
+                      {n.tickers.length > 0 ? (
+                        <div className="flex flex-wrap gap-2 max-w-[380px]">
+                          {n.tickers.map((t, j) => {
+                            const isA = /^\d{6}$/.test(t.code);
+                            const linkContent = (
+                              <div className="flex flex-col text-left">
+                                <span className="font-semibold text-[var(--text)] text-[11px] leading-tight">{t.name}</span>
+                                {t.code && <span className="font-mono text-[9px] text-[var(--faint)]">{t.code}</span>}
+                              </div>
+                            );
+
+                            return isA ? (
+                              <Link 
+                                key={j} 
+                                href={`/analyze?code=${t.code}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-2.5 py-1.5 text-xs transition-all hover:border-[var(--accent-line)] hover:bg-[var(--hover)] hover:shadow-sm flex items-center gap-1.5 cursor-pointer shrink-0"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                                {linkContent}
+                              </Link>
+                            ) : (
+                              <div 
+                                key={j} 
+                                className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-2.5 py-1.5 text-xs flex items-center gap-1.5 shrink-0 opacity-60"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-[var(--border)] shrink-0" />
+                                {linkContent}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-[var(--faint)] font-mono italic">暂无代表A股</div>
+                      )}
+
+                    </div>
+                  ))}
+                </div>
+
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {map.nodes.map((n, i) => (
+                <div
+                  key={i}
+                  className={`rounded-xl border p-4 ${
+                    n.isChokepoint ? "border-[var(--accent-line)] bg-[var(--accent-soft)]" : "border-[var(--border)] bg-[var(--panel)]"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold">{n.layer}</h3>
+                    {n.isChokepoint && (
+                      <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">瓶颈点</span>
+                    )}
+                    {n.bomRatio && (
+                      <span className="rounded-full bg-[var(--hover)] border border-[var(--border)] px-2 py-0.5 text-[11px] font-mono text-[var(--text)] font-semibold">
+                        BOM 占比: {n.bomRatio}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="mt-1 text-sm text-[var(--text)]">{n.role}</p>
+                  {n.isChokepoint && n.chokepointReason && (
+                    <p className="mt-1 text-xs leading-5 text-[var(--accent)] font-medium">为何卡脖子：{n.chokepointReason}</p>
                   )}
-                  {n.bomRatio && (
-                    <span className="rounded-full bg-[var(--hover)] border border-[var(--border)] px-2 py-0.5 text-[11px] font-mono text-[var(--text)] font-semibold">
-                      BOM 占比: {n.bomRatio}
-                    </span>
+                  {n.bomDetail && (
+                    <div className="mt-2.5 rounded-[2px] border border-dashed border-[var(--border)] bg-[var(--inset)] p-2.5 text-xs">
+                      <span className="font-bold text-[var(--faint)] block mb-1 tracking-wider uppercase text-[10px]">物料清单细分拆解 (BOM Details)：</span>
+                      <p className="font-mono text-[var(--muted)] leading-relaxed">{n.bomDetail}</p>
+                    </div>
+                  )}
+                  {n.tickers.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {n.tickers.map((t, j) => {
+                        const inner = (
+                          <>
+                            <span className="font-medium text-[var(--text)]">{t.name}</span>
+                            {t.code && <span className="ml-1 font-mono text-xs text-[var(--faint)]">{t.code}</span>}
+                            {t.note && <p className="mt-0.5 max-w-[15rem] text-[11px] leading-4 text-[var(--muted)]">{t.note}</p>}
+                          </>
+                        );
+
+                        return /^\d{6}$/.test(t.code) ? (
+                          <Link key={j} href={`/analyze?code=${t.code}`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs transition hover:border-[var(--accent-line)]">
+                            {inner}
+                          </Link>
+                        ) : (
+                          <div key={j} className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs">{inner}</div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-                <p className="mt-1 text-sm text-[var(--text)]">{n.role}</p>
-                {n.isChokepoint && n.chokepointReason && (
-                  <p className="mt-1 text-xs leading-5 text-[var(--accent)] font-medium">为何卡脖子：{n.chokepointReason}</p>
-                )}
-                {n.bomDetail && (
-                  <div className="mt-2.5 rounded-[2px] border border-dashed border-[var(--border)] bg-[var(--inset)] p-2.5 text-xs">
-                    <span className="font-bold text-[var(--faint)] block mb-1 tracking-wider uppercase text-[10px]">物料清单细分拆解 (BOM Details)：</span>
-                    <p className="font-mono text-[var(--muted)] leading-relaxed">{n.bomDetail}</p>
-                  </div>
-                )}
-                {n.tickers.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {n.tickers.map((t, j) => {
-                      const inner = (
-                        <>
-                          <span className="font-medium text-[var(--text)]">{t.name}</span>
-                          {t.code && <span className="ml-1 font-mono text-xs text-[var(--faint)]">{t.code}</span>}
-                          {t.note && <p className="mt-0.5 max-w-[15rem] text-[11px] leading-4 text-[var(--muted)]">{t.note}</p>}
-                        </>
-                      );
-                      return /^\d{6}$/.test(t.code) ? (
-                        <Link key={j} href={`/analyze?code=${t.code}`} className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs transition hover:border-[var(--accent-line)]">
-                          {inner}
-                        </Link>
-                      ) : (
-                        <div key={j} className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs">{inner}</div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
+          
           <p className="text-xs text-[var(--faint)]">{map.disclaimer}</p>
         </div>
       )}

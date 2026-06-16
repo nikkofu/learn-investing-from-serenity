@@ -4,6 +4,7 @@ import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
 import { ndjsonStream } from "@/lib/stream";
 import { NarrativeJsonSplitter } from "@/lib/split";
 import type { SupplyChainMap, SupplyChainNode } from "@/lib/types";
+import { globalCache } from "@/lib/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,22 @@ export async function POST(req: Request) {
   const trend = body.trend?.trim();
   if (!trend) {
     return NextResponse.json({ error: "请提供一个趋势/主题" }, { status: 400 });
+  }
+
+  const cacheKey = `map:trend:${trend}`;
+  const cachedMap = globalCache.get<SupplyChainMap>(cacheKey);
+
+  if (cachedMap) {
+    // 缓存命中：快速模拟流式协议输出以完全兼容前端组件
+    return ndjsonStream(async (send) => {
+      send({ type: "stage", key: "reason", status: "start" });
+      send({ type: "token", kind: "content", text: `已从系统缓存中加载此前关于“${trend}”的产业链拆解结果...\n\n` });
+      send({ type: "stage", key: "reason", status: "done" });
+      send({ type: "stage", key: "summary", status: "start" });
+      send({ type: "stage", key: "summary", status: "done" });
+      send({ type: "result", map: cachedMap });
+      send({ type: "done" });
+    });
   }
 
   const { system, user } = buildMapPrompt(trend);
@@ -78,6 +95,10 @@ export async function POST(req: Request) {
           "本图由 AI 依据 Serenity 瓶颈点方法生成，公司/代码可能有误，仅供研究，不构成投资建议。",
       };
       send({ type: "result", map });
+      
+      // 写入缓存，由于产业链结构是低频稳定数据，直接缓存 24 小时
+      globalCache.set(cacheKey, map, 24 * 60 * 60 * 1000);
+
       send({ type: "stage", key: "summary", status: "done" });
       send({ type: "done" });
     } catch {

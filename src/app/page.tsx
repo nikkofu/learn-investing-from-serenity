@@ -20,7 +20,7 @@ export default async function Home() {
           <Link href="/map" className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-fg)] hover:opacity-90">
             趋势 → 产业链拆解
           </Link>
-          <Link href="/analyze" className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]">
+          <Link href="/analyze" target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]">
             个股瓶颈点评分
           </Link>
           <Link href="/methodology" className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]">

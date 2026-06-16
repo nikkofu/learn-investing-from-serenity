@@ -6,6 +6,8 @@ export interface LLMConfig {
   baseURL: string; // OpenAI-compatible base URL, e.g. https://api.deepseek.com/v1
   model: string; // e.g. "deepseek-chat", "gpt-4o"
   apiKey: string; // stored server-side only, never sent to the browser
+  filters?: string; // comma-separated keywords to filter models
+  providers?: Record<string, { baseURL: string; apiKey: string; model?: string; filters?: string }>;
 }
 
 /** Config as exposed to the browser — apiKey is redacted. */
@@ -14,6 +16,8 @@ export interface PublicLLMConfig {
   baseURL: string;
   model: string;
   hasApiKey: boolean;
+  filters?: string;
+  providers?: Record<string, { baseURL: string; hasApiKey: boolean; model?: string; filters?: string }>;
 }
 
 /** A single A-share security returned by the search endpoint. */
