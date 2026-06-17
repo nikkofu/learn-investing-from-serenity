@@ -262,7 +262,7 @@ export default function SectorsPage() {
   // 4. 排序与筛选计算
   const processedSectors = useMemo(() => {
     // 搜索过滤
-    let list = sectors.filter((s) => {
+    const list = sectors.filter((s) => {
       const query = searchQuery.trim().toLowerCase();
       if (!query) return true;
       return s.name.toLowerCase().includes(query) || s.code.toLowerCase().includes(query);

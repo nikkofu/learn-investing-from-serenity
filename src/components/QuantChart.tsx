@@ -1670,7 +1670,7 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
           </div>
           {chartType === "worth" && (
             <p className="mt-1.5 text-[8.5px] font-mono text-[var(--faint)] italic leading-relaxed select-none">
-              【注】资产净值线（绿色曲线）中出现平直横盘段，代表系统策略处于空仓现金避险期（未持有仓位，不随股价涨跌而变化）；当出现 "B" (买入) 重新持股后，资产净值即恢复随股价波动。
+              【注】资产净值线（绿色曲线）中出现平直横盘段，代表系统策略处于空仓现金避险期（未持有仓位，不随股价涨跌而变化）；当出现 &quot;B&quot; (买入) 重新持股后，资产净值即恢复随股价波动。
             </p>
           )}
         </div>

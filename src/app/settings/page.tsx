@@ -82,6 +82,15 @@ export default function SettingsPage() {
     }
   };
 
+  const clearForm = () => {
+    setProvider("");
+    setBaseURL("");
+    setModel("");
+    setApiKey("");
+    setFilters("");
+    setHasApiKey(false);
+  };
+
   const fetchConfig = async () => {
     try {
       const res = await fetch("/api/config");
@@ -109,15 +118,6 @@ export default function SettingsPage() {
     fetchConfig();
     fetchDbStatus();
   }, []);
-
-  const clearForm = () => {
-    setProvider("");
-    setBaseURL("");
-    setModel("");
-    setApiKey("");
-    setFilters("");
-    setHasApiKey(false);
-  };
 
   const selectProviderCard = (name: string) => {
     const p = providerConfigs[name];
