@@ -239,3 +239,101 @@ ${twoPhaseGuard(`{
   const user = `趋势/主题：${trend}\n请先实时写出产业链拆解与 BOM 推理，再用 \`\`\`json 代码块输出瓶颈点地图。`;
   return { system, user };
 }
+
+/** Build messages for analyzing an A-share industry sector through the chokepoint lens. */
+export function buildSectorAnalyzePrompt(args: {
+  sectorName: string;
+  sectorCode: string;
+  sectorPrice: number;
+  sectorChangePct: number;
+  sectorNetInflow: number;
+  riseCount: number;
+  fallCount: number;
+  stocks: Array<{ code: string; name: string; price: number; changePct: number; turnoverPct: number }>;
+  matchedKnowledge?: {
+    themeName: string;
+    themeThesis: string;
+    tweets: { date: string; text: string }[];
+  } | null;
+}) {
+  const {
+    sectorName,
+    sectorCode,
+    sectorPrice,
+    sectorChangePct,
+    sectorNetInflow,
+    riseCount,
+    fallCount,
+    stocks,
+    matchedKnowledge,
+  } = args;
+
+  const factorsDoc = CHOKEPOINT_FACTORS.map(
+    (f) => `- ${f.key} (${f.zh} ${f.en}, 权重 ${f.weight}): ${f.description}`
+  ).join("\n");
+
+  const knowledgeDoc = matchedKnowledge ? `
+【Serenity 一手知识库关联笔记】
+已为您从本地知识库中匹配到与该行业板块最相关的 Serenity 一手研报与推文观点：
+- 关联主题：${matchedKnowledge.themeName}
+- 主题核心论述：${matchedKnowledge.themeThesis}
+- Serenity 一手推文要点参考：
+${matchedKnowledge.tweets.map((t, idx) => `  [推文 ${idx + 1}] (${t.date}): ${t.text}`).join("\n")}
+请在对该行业板块进行深度分析时，**高度参考并融入以上 Serenity 的一手研报观点**，确保推导结论符合其投资逻辑。
+` : "";
+
+  const system = `你是 Serenity（白毛股神）投资方法论的 AI 行业板块分析助手。Serenity 的核心方法是“瓶颈点投资法(Chokepoint)”：${SERENITY_PROFILE.coreIdea}
+
+${CHINA_CONTEXT}
+${knowledgeDoc}
+
+你要对给定的 A 股行业板块，按照下面五个因子各打 0.0 - 5.0 分（0.0=完全不符合，5.0=极强符合，最小打分单位可以到 0.1，如：3.5，1.8），并给出一句中文理由（理由要尽量结合该行业在产业链中的位置以及成分股表现，不要编造不存在的财务数字）：
+${factorsDoc}
+
+【重要推理指令】
+在第一步的实时推理里，请像投研日记一样有条理、简洁地展开你的深度分析，包含以下要点：
+1. 【大趋势与行业定位】：确认该板块是否处于某项确定性强的宏观大趋势（如 AI 算力、国产替代等），并画出其在产业链中的位置。
+2. 【行业瓶颈识别】：剖析该行业本身是否为产业链中供给受限、难以替代的瓶颈环节，或者该行业内存在哪些子瓶颈环节。
+3. 【数据与资金面验证】：结合板块自身涨跌幅、主力净流入、个股换手率等指标，研判当前的资金关注度与热度级别。
+4. 【价值捕获与商业壁垒】：探讨该行业龙头的议价权、毛利率、客户黏性以及产能供给情况，验证其将瓶颈地位转化为高额现金流的能力。
+5. 【板块核心催化剂与核心标的】：梳理近期的催化事件（行业招标、国产认证导入等），并指出成分股中最有“卡脖子”潜力的龙头或隐形冠军标的。
+6. 【风控与投资评级】：指出该板块目前的主要投资风险（警惕反身性回撤、产能过剩、下游逻辑证伪），并给出综合投资评级。
+
+请在自然语言推理中写明分析思路，第二步再汇总成结构化 JSON。verdict 用「核心瓶颈板块 / 弹性跟风板块 / 普通周期板块 / 回避观望」之一，thesis 为120字内的 Serenity 风格板块瓶颈点论述，risks/catalysts 各 2-4 条，score 为 0.0 - 5.0 之间的数值，精度 0.1。
+
+${twoPhaseGuard(`{
+  "factors": [{"key": "demand|supply|attention|valueCapture|catalyst", "score": "0.0-5.0之间的数值，精度0.1，如3.5", "rationale": "..."}],
+  "verdict": "...",
+  "thesis": "...",
+  "chokepoints": ["BOM卡脖子节点1", "BOM卡脖子节点2", "..."],
+  "leaders": [
+    {"code": "6位个股代码", "name": "个股名称", "role": "对应该个股在板块中的瓶颈地位或龙头角色描述"}
+  ],
+  "risks": ["..."],
+  "catalysts": ["..."]
+}`)}`;
+
+  const dataBlock = {
+    板块名称: sectorName,
+    板块代码: sectorCode,
+    最新点数: sectorPrice,
+    今日涨跌幅: `${sectorChangePct}%`,
+    今日主力净流入元: sectorNetInflow,
+    上涨家数: riseCount,
+    下跌家数: fallCount,
+    代表成分股行情: stocks.map(s => ({
+      代码: s.code,
+      名称: s.name,
+      最新价: s.price,
+      涨跌幅: `${s.changePct}%`,
+      换手率: `${s.turnoverPct}%`
+    }))
+  };
+
+  const user = `请分析以下 A 股行业板块及成分股行情：
+${JSON.stringify(dataBlock, null, 2)}
+请先实时写出五因子与行业瓶颈推理，再用 \`\`\`json 代码块输出结构化打分。`;
+
+  return { system, user };
+}
+

@@ -143,17 +143,17 @@ export async function getQuote(code: string): Promise<StockQuote> {
 }
 
 /** Daily K-line history; best-effort (Eastmoney egress is flaky, so swallow errors). */
-export async function getKlineSafe(code: string, limit = 120): Promise<Candle[]> {
+export async function getKlineSafe(code: string, limit = 120, klt = 101): Promise<Candle[]> {
   try {
-    return await getKline(code, limit);
+    return await getKline(code, limit, klt);
   } catch {
     return [];
   }
 }
 
 /** Daily K-line history from Eastmoney (UTF-8). */
-export async function getKline(code: string, limit = 120): Promise<Candle[]> {
-  const cacheKey = `kline:${code}:${limit}`;
+export async function getKline(code: string, limit = 120, klt = 101): Promise<Candle[]> {
+  const cacheKey = `kline:${code}:${limit}:${klt}`;
   const ttl = getAdaptiveTTL("kline");
   return globalCache.getOrCreate(
     cacheKey,
@@ -162,7 +162,7 @@ export async function getKline(code: string, limit = 120): Promise<Candle[]> {
       const url =
         `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}` +
         `&ut=fa5fd1943c7b386f172d6893dbfba10b&fields1=f1,f2,f3,f4,f5,f6` +
-        `&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f61&klt=101&fqt=1&end=20500101&lmt=${limit}`;
+        `&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f61&klt=${klt}&fqt=1&end=20500101&lmt=${limit}`;
       const res = await fetchRetry(url, {
         headers: { "User-Agent": UA, Referer: "https://quote.eastmoney.com/" },
       });

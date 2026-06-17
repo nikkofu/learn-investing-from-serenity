@@ -124,6 +124,8 @@ function ScannerContent() {
       throw new Error(json.error || "分析接口异常");
     }
 
+    onUpdate({ retryCount: 1, stageMsg: "建立连接..." });
+
     let scanData: ScanData | null = null;
     let streamError = "";
     let tokenCount = 0;
@@ -741,9 +743,22 @@ function ScannerContent() {
                                 {/* Serenity 突破策略与筹码直方可视化图谱 */}
                                 {state.data.quant && (
                                   <div className="border-t border-[var(--border)] pt-4 mt-2">
-                                    <div className="text-[9.5px] font-mono text-[var(--accent)] font-extrabold uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-                                      [Serenity Quant Engine / 均线量化与筹码图谱诊断]
+                                    <div className="flex justify-between items-center pb-2 mb-3">
+                                      <div className="text-[9.5px] font-mono text-[var(--accent)] font-extrabold uppercase tracking-widest flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+                                        [Serenity Quant Engine / 均线量化与筹码图谱诊断]
+                                      </div>
+                                      <a
+                                        href={`/chart?code=${state.data.quote.code}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] hover:bg-[var(--hover)] px-2 py-0.5 text-[9px] font-semibold text-[var(--text)] transition flex items-center gap-1 font-mono cursor-pointer"
+                                      >
+                                        <svg className="w-3 h-3 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75v4.5m0-4.5h-4.5m4.5 0L15 9m5.25 11.25v-4.5m0 4.5h-4.5m4.5 0l-6-6" />
+                                        </svg>
+                                        <span>Full chart</span>
+                                      </a>
                                     </div>
                                     <QuantChart
                                       quantData={state.data.quant}

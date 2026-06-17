@@ -18,6 +18,8 @@ interface QuantChartProps {
     projections?: { date: string; bull: number; base: number; bear: number }[];
   };
   currentPrice: number;
+  height?: number;
+  externalPeriod?: "1D" | "1W" | "1M";
 }
 
 // 辅助：获取自然周的分组键
@@ -70,6 +72,132 @@ function aggregateWeeklyCandles(dailyCandles: Candle[]): Candle[] {
   return weekly.sort((a, b) => a.date.localeCompare(b.date));
 }
 
+// 聚合月K算法
+function aggregateMonthlyCandles(dailyCandles: Candle[]): Candle[] {
+  if (!dailyCandles || dailyCandles.length === 0) return [];
+  
+  const monthsMap = new Map<string, Candle[]>();
+  for (const c of dailyCandles) {
+    const key = c.date.slice(0, 7); // yyyy-mm
+    if (!monthsMap.has(key)) {
+      monthsMap.set(key, []);
+    }
+    monthsMap.get(key)!.push(c);
+  }
+  
+  const monthly: Candle[] = [];
+  for (const [_, monthCandles] of monthsMap.entries()) {
+    monthCandles.sort((a, b) => a.date.localeCompare(b.date));
+    const open = monthCandles[0].open;
+    const close = monthCandles[monthCandles.length - 1].close;
+    const highs = monthCandles.map(w => w.high);
+    const lows = monthCandles.map(w => w.low);
+    const high = Math.max(...highs);
+    const low = Math.min(...lows);
+    const volume = monthCandles.reduce((s, w) => s + (w.volume || 0), 0);
+    const amount = monthCandles.reduce((s, w) => s + (w.amount || 0), 0);
+    monthly.push({
+      date: monthCandles[monthCandles.length - 1].date,
+      open,
+      close,
+      high,
+      low,
+      volume,
+      amount,
+      changePct: Number(((close - open) / (open || 1) * 100).toFixed(2)),
+      turnoverPct: Number(monthCandles.reduce((s, w) => s + (w.turnoverPct || 0), 0).toFixed(2)),
+    });
+  }
+  return monthly.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// 自动趋势通道结构体
+interface HistChannel {
+  startIndex: number;
+  endIndex: number;
+  slope: number;
+  intercept: number;
+  stdDev: number;
+  type: "up" | "down" | "range";
+}
+
+// 自动趋势通道检测算法：寻找整个 K 线周期内所有的上升和下降历史通道
+function detectHistoricalChannels(candles: Candle[]): HistChannel[] {
+  const N = candles.length;
+  const channels: HistChannel[] = [];
+  if (N < 15) return [];
+
+  let i = 0;
+  while (i < N - 12) {
+    let bestJ = i + 12; // 最小通道长度为 12 根 K 线
+    let currentBestChannel: HistChannel | null = null;
+    
+    for (let j = i + 12; j <= Math.min(i + 60, N); j++) {
+      const sub = candles.slice(i, j);
+      const len = sub.length;
+      
+      let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
+      for (let k = 0; k < len; k++) {
+        sumX += k;
+        sumY += sub[k].close;
+        sumXX += k * k;
+        sumXY += k * sub[k].close;
+      }
+      const denom = len * sumXX - sumX * sumX;
+      if (denom === 0) continue;
+      const slope = (len * sumXY - sumX * sumY) / denom;
+      const intercept = (sumY - slope * sumX) / len;
+      
+      let sqDiffSum = 0;
+      for (let k = 0; k < len; k++) {
+        const fitY = slope * k + intercept;
+        const diff = sub[k].close - fitY;
+        sqDiffSum += diff * diff;
+      }
+      const stdDev = Math.sqrt(sqDiffSum / len) || 0.1;
+      
+      // 容差判定：允许有少量的极值毛刺，所有点都在 1.95 倍标准差内代表属于稳定通道
+      let allInside = true;
+      for (let k = 0; k < len; k++) {
+        const fitY = slope * k + intercept;
+        const price = sub[k].close;
+        if (price > fitY + 1.95 * stdDev || price < fitY - 1.95 * stdDev) {
+          allInside = false;
+          break;
+        }
+      }
+      
+      if (allInside) {
+        const relativeSlope = slope / (sub[len - 1].close || 1);
+        let type: "up" | "down" | "range" = "range";
+        if (relativeSlope > 0.0008) type = "up";
+        else if (relativeSlope < -0.0008) type = "down";
+        
+        currentBestChannel = {
+          startIndex: i,
+          endIndex: j - 1,
+          slope,
+          intercept,
+          stdDev,
+          type
+        };
+        bestJ = j;
+      } else {
+        break;
+      }
+    }
+    
+    if (currentBestChannel) {
+      channels.push(currentBestChannel);
+      i = bestJ - 2; // 从通道结尾减 2 开始重新计算，保证历史通道首尾相连但不会过度重合
+    } else {
+      i += 2; // 如果无法形成通道，向右移
+    }
+  }
+  
+  return channels;
+}
+
 // 均线计算
 const calculateMA = (data: Candle[], period: number): number[] => {
   const ma: number[] = [];
@@ -85,7 +213,7 @@ const calculateMA = (data: Candle[], period: number): number[] => {
   return ma;
 };
 
-export default function QuantChart({ quantData, currentPrice }: QuantChartProps) {
+export default function QuantChart({ quantData, currentPrice, height, externalPeriod }: QuantChartProps) {
   const { chips, technical, candles } = quantData;
 
   const [activeStrategy, setActiveStrategy] = useState<"chokepoint" | "traditional">("chokepoint");
@@ -103,19 +231,41 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
   const { history, trades, winRate, strategyReturn, stockReturn } = currentBacktest;
 
   const [activeTab, setActiveTab] = useState<"backtest" | "trades">("backtest");
-  const [periodMode, setPeriodMode] = useState<"1D" | "1W">("1D");
+  const [periodMode, setPeriodMode] = useState<"1D" | "1W" | "1M">("1D");
   const [chartType, setChartType] = useState<"kline" | "worth">("kline");
+
+  // 同步外部受控周期
+  useEffect(() => {
+    if (externalPeriod) {
+      setPeriodMode(externalPeriod);
+    }
+  }, [externalPeriod]);
   const [showMA5, setShowMA5] = useState(true);
   const [showMA10, setShowMA10] = useState(true);
   const [showMA20, setShowMA20] = useState(true);
   const [showMA60, setShowMA60] = useState(true);
-  const [showMA120, setShowMA120] = useState(false);
-  const [showMA250, setShowMA250] = useState(false);
+  const [showMA120, setShowMA120] = useState(true);
+  const [showMA250, setShowMA250] = useState(true);
   const [showChannel, setShowChannel] = useState(true);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [hoveredChip, setHoveredChip] = useState<{ price: number; volume: number; ratio: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [zoomCount, setZoomCount] = useState<number | null>(null);
+
+  // 原生绑定非 passive 的 wheel 事件，阻止页面在滚动图表时整体发生位移
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const preventDefaultWheel = (e: WheelEvent) => {
+      e.preventDefault();
+    };
+    svgEl.addEventListener("wheel", preventDefaultWheel, { passive: false });
+    return () => {
+      svgEl.removeEventListener("wheel", preventDefaultWheel);
+    };
+  }, []);
 
   // 1. 回测图大小与间隔
   const mainChartWidth = 620;
@@ -131,11 +281,18 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
   // 聚合当前周期的 K 线数据
   const currentCandles = useMemo(() => {
     const daily = candles || [];
+    // 如果外部传入了受控周期，代表 candles 已经是对应的周期了，直接原样返回，拒绝前端重复聚合
+    if (externalPeriod) {
+      return daily;
+    }
     if (periodMode === "1W") {
       return aggregateWeeklyCandles(daily);
     }
+    if (periodMode === "1M") {
+      return aggregateMonthlyCandles(daily);
+    }
     return daily;
-  }, [candles, periodMode]);
+  }, [candles, periodMode, externalPeriod]);
 
   // 均线列表计算
   const ma5List = useMemo(() => calculateMA(currentCandles, 5), [currentCandles]);
@@ -150,23 +307,36 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
     if (currentCandles.length === 0) return null;
 
     const len = currentCandles.length;
-    const hasProjections = chartType === "kline" && quantData.projections && quantData.projections.length > 0;
-    const totalLen = hasProjections ? len + quantData.projections!.length : len;
-
-    const getX = (idx: number) => {
-      return padding + (idx / (totalLen - 1)) * (mainChartWidth - 2 * padding);
-    };
+    const dataTotalLen = chartType === "worth" ? history.length : len;
+    const visibleCount = zoomCount !== null ? Math.min(zoomCount, dataTotalLen) : Math.min(100, dataTotalLen);
+    const sliceStart = Math.max(0, dataTotalLen - visibleCount);
 
     if (chartType === "kline") {
+      const slicedCandles = currentCandles.slice(sliceStart);
+      const slicedLen = slicedCandles.length;
+      const hasProjections = chartType === "kline" && quantData.projections && quantData.projections.length > 0;
+      const totalLen = hasProjections ? slicedLen + quantData.projections!.length : slicedLen;
+
+      const getX = (idx: number) => {
+        return padding + (idx / (totalLen - 1)) * (mainChartWidth - 2 * padding);
+      };
+
       // 股价K线视图
       const priceList: number[] = [];
-      currentCandles.forEach((c) => priceList.push(c.high, c.low));
-      if (showMA5) priceList.push(...ma5List);
-      if (showMA10) priceList.push(...ma10List);
-      if (showMA20) priceList.push(...ma20List);
-      if (showMA60) priceList.push(...ma60List);
-      if (showMA120) priceList.push(...ma120List);
-      if (showMA250) priceList.push(...ma250List);
+      const slicedMa5 = ma5List.slice(sliceStart);
+      const slicedMa10 = ma10List.slice(sliceStart);
+      const slicedMa20 = ma20List.slice(sliceStart);
+      const slicedMa60 = ma60List.slice(sliceStart);
+      const slicedMa120 = ma120List.slice(sliceStart);
+      const slicedMa250 = ma250List.slice(sliceStart);
+
+      slicedCandles.forEach((c) => priceList.push(c.high, c.low));
+      if (showMA5) priceList.push(...slicedMa5);
+      if (showMA10) priceList.push(...slicedMa10);
+      if (showMA20) priceList.push(...slicedMa20);
+      if (showMA60) priceList.push(...slicedMa60);
+      if (showMA120) priceList.push(...slicedMa120);
+      if (showMA250) priceList.push(...slicedMa250);
 
       if (technical?.trendChannel && showChannel) {
         priceList.push(technical.trendChannel.upperLine, technical.trendChannel.lowerLine);
@@ -186,8 +356,8 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
         return padding + (1 - (val - minVal) / range) * mainDrawHeight;
       };
 
-      // 计算成交量最大值
-      const maxVolume = Math.max(...currentCandles.map((c) => c.volume || 0), 1);
+      // 计算成交量最大值 (在可视蜡烛切片中取最值，使缩放后成交量柱子高低对比自适应展现)
+      const maxVolume = Math.max(...slicedCandles.map((c) => c.volume || 0), 1);
 
       // 拟合通道曲线在 K线视图下的价格映射路径 (延伸至未来预测端点)
       let upperChannelPath = "";
@@ -197,7 +367,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
 
       if (technical && technical.trendChannel) {
         const { slope, upperLine, lowerLine, midLine } = technical.trendChannel;
-        const channelLen = Math.min(len, periodMode === "1W" ? 12 : 60);
+        const channelLen = Math.min(len, (periodMode === "1W" || periodMode === "1M") ? 12 : 60);
         const startIndex = len - channelLen;
         
         const upperDiff = upperLine - midLine;
@@ -210,25 +380,28 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
         const polygonUpper: string[] = [];
         const polygonLower: string[] = [];
         
-        const limit = hasProjections ? totalLen : len;
+        const limit = hasProjections ? len + quantData.projections!.length : len;
         for (let i = startIndex; i < limit; i++) {
-          const offset = len - 1 - i;
-          const factor = periodMode === "1W" ? 5 : 1;
-          const midVal = midLine - slope * offset * factor;
-          const upperVal = midVal + upperDiff;
-          const lowerVal = midVal - lowerDiff;
-          
-          const x = getX(i);
-          const yMid = getY(midVal);
-          const yUpper = getY(upperVal);
-          const yLower = getY(lowerVal);
-          
-          midPoints.push(`${x.toFixed(1)},${yMid.toFixed(1)}`);
-          upperPoints.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
-          lowerPoints.push(`${x.toFixed(1)},${yLower.toFixed(1)}`);
-          
-          polygonUpper.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
-          polygonLower.unshift(`${x.toFixed(1)},${yLower.toFixed(1)}`);
+          if (i >= sliceStart) {
+            const visibleIdx = i - sliceStart;
+            const offset = len - 1 - i;
+            const factor = periodMode === "1W" ? 5 : periodMode === "1M" ? 20 : 1;
+            const midVal = midLine - slope * offset * factor;
+            const upperVal = midVal + upperDiff;
+            const lowerVal = midVal - lowerDiff;
+            
+            const x = getX(visibleIdx);
+            const yMid = getY(midVal);
+            const yUpper = getY(upperVal);
+            const yLower = getY(lowerVal);
+            
+            midPoints.push(`${x.toFixed(1)},${yMid.toFixed(1)}`);
+            upperPoints.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
+            lowerPoints.push(`${x.toFixed(1)},${yLower.toFixed(1)}`);
+            
+            polygonUpper.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
+            polygonLower.unshift(`${x.toFixed(1)},${yLower.toFixed(1)}`);
+          }
         }
         
         upperChannelPath = `M ${upperPoints.join(" L ")}`;
@@ -245,18 +418,18 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
       let projBasePath = "";
       let projBearPath = "";
       let projAreaPath = "";
-      const lastPrice = currentCandles[len - 1]?.close || currentPrice;
+      const lastPrice = slicedCandles[slicedLen - 1]?.close || currentPrice;
 
       if (hasProjections && quantData.projections) {
-        const bullPoints = [`${getX(len - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
-        const basePoints = [`${getX(len - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
-        const bearPoints = [`${getX(len - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
+        const bullPoints = [`${getX(slicedLen - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
+        const basePoints = [`${getX(slicedLen - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
+        const bearPoints = [`${getX(slicedLen - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
         
-        const polyUpper = [`${getX(len - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
-        const polyLower = [`${getX(len - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
+        const polyUpper = [`${getX(slicedLen - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
+        const polyLower = [`${getX(slicedLen - 1).toFixed(1)},${getY(lastPrice).toFixed(1)}`];
 
         quantData.projections.forEach((p, idx) => {
-          const x = getX(len + idx);
+          const x = getX(slicedLen + idx);
           bullPoints.push(`${x.toFixed(1)},${getY(p.bull).toFixed(1)}`);
           basePoints.push(`${x.toFixed(1)},${getY(p.base).toFixed(1)}`);
           bearPoints.push(`${x.toFixed(1)},${getY(p.bear).toFixed(1)}`);
@@ -267,26 +440,31 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
 
         projBullPath = `M ${bullPoints.join(" L ")}`;
         projBasePath = `M ${basePoints.join(" L ")}`;
-        projBearPath = `M ${bearPoints.join(" L ")}`;
+        projBearPath = `M ${projBearPath = `M ${bearPoints.join(" L ")}`}`;
         projAreaPath = `M ${polyUpper.join(" L ")} L ${polyLower.join(" L ")} Z`;
       }
 
       // 多均线路径
-      const ma5Points = ma5List.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
-      const ma10Points = ma10List.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
-      const ma20Points = ma20List.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
-      const ma60Points = ma60List.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
-      const ma120Points = ma120List.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
-      const ma250Points = ma250List.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
+      const ma5Points = slicedMa5.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
+      const ma10Points = slicedMa10.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
+      const ma20Points = slicedMa20.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
+      const ma60Points = slicedMa60.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
+      const ma120Points = slicedMa120.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
+      const ma250Points = slicedMa250.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
 
       // 交易标记点在 K线主图的映射 (找到相同日期的 K 线绘制在 high/low 上方)
       const tradePoints = trades
         .map((t) => {
-          const idx = currentCandles.findIndex((c) => c.date === t.date || (periodMode === "1W" && getYearWeek(c.date) === getYearWeek(t.date)));
+          const idx = slicedCandles.findIndex((c) => {
+            if (c.date === t.date) return true;
+            if (periodMode === "1W") return getYearWeek(c.date) === getYearWeek(t.date);
+            if (periodMode === "1M") return c.date.slice(0, 7) === t.date.slice(0, 7);
+            return false;
+          });
           if (idx === -1) return null;
           const isBuy = t.type === "buy";
           // 悬浮显示在K线高/低价两侧
-          const price = isBuy ? currentCandles[idx].low : currentCandles[idx].high;
+          const price = isBuy ? slicedCandles[idx].low : slicedCandles[idx].high;
           return {
             ...t,
             x: getX(idx),
@@ -294,6 +472,63 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
           };
         })
         .filter(Boolean) as (TradeAction & { x: number; y: number })[];
+
+      // 3. 计算所有可见的历史趋势通道路径
+      const histChannels = detectHistoricalChannels(currentCandles);
+      const histChannelPaths: Array<{
+        type: "up" | "down" | "range";
+        upperPath: string;
+        lowerPath: string;
+        midPath: string;
+        areaPath: string;
+      }> = [];
+
+      histChannels.forEach((chan) => {
+        if (chan.endIndex >= sliceStart && chan.startIndex < sliceStart + slicedLen) {
+          const drawStart = Math.max(chan.startIndex, sliceStart);
+          const drawEnd = Math.min(chan.endIndex, sliceStart + slicedLen - 1);
+          
+          if (drawEnd >= drawStart) {
+            const upperDiff = 1.8 * chan.stdDev;
+            const lowerDiff = 1.8 * chan.stdDev;
+            
+            const upperPoints: string[] = [];
+            const lowerPoints: string[] = [];
+            const midPoints: string[] = [];
+            
+            const polygonUpper: string[] = [];
+            const polygonLower: string[] = [];
+            
+            for (let i = drawStart; i <= drawEnd; i++) {
+              const visibleIdx = i - sliceStart;
+              const offset = i - chan.startIndex;
+              const midVal = chan.intercept + chan.slope * offset;
+              const upperVal = midVal + upperDiff;
+              const lowerVal = midVal - lowerDiff;
+              
+              const x = getX(visibleIdx);
+              const yMid = getY(midVal);
+              const yUpper = getY(upperVal);
+              const yLower = getY(lowerVal);
+              
+              midPoints.push(`${x.toFixed(1)},${yMid.toFixed(1)}`);
+              upperPoints.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
+              lowerPoints.push(`${x.toFixed(1)},${yLower.toFixed(1)}`);
+              
+              polygonUpper.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
+              polygonLower.unshift(`${x.toFixed(1)},${yLower.toFixed(1)}`);
+            }
+            
+            histChannelPaths.push({
+              type: chan.type,
+              upperPath: `M ${upperPoints.join(" L ")}`,
+              lowerPath: `M ${lowerPoints.join(" L ")}`,
+              midPath: `M ${midPoints.join(" L ")}`,
+              areaPath: polygonUpper.length > 0 ? `M ${polygonUpper.join(" L ")} L ${polygonLower.join(" L ")} Z` : ""
+            });
+          }
+        }
+      });
 
       return {
         type: "kline" as const,
@@ -319,19 +554,29 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
         projBearPath,
         projAreaPath,
         hasProjections,
-        len
+        len: slicedLen,
+        slicedCandles,
+        slicedMa5,
+        slicedMa10,
+        slicedMa20,
+        slicedMa60,
+        slicedMa120,
+        slicedMa250,
+        histChannelPaths
       };
     } else {
       // 策略净值视图 (基于 history 数组，仅当日线有效)
       if (history.length === 0) return null;
       const historyLen = history.length;
+      const slicedHistory = history.slice(sliceStart);
+      const slicedHistoryLen = slicedHistory.length;
       
       const getXWorth = (idx: number) => {
-        return padding + (idx / (historyLen - 1)) * (mainChartWidth - 2 * padding);
+        return padding + (idx / (slicedHistoryLen - 1)) * (mainChartWidth - 2 * padding);
       };
 
-      const strategyWorths = history.map((h) => h.strategyWorth);
-      const stockWorths = history.map((h) => h.stockWorth);
+      const strategyWorths = slicedHistory.map((h) => h.strategyWorth);
+      const stockWorths = slicedHistory.map((h) => h.stockWorth);
       const allWorths = [...strategyWorths, ...stockWorths];
 
       const maxWorth = Math.max(...allWorths, 100000) * 1.05;
@@ -342,8 +587,8 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
         return padding + (1 - (val - minWorth) / worthRange) * mainDrawHeight;
       };
 
-      const strategyPoints = history.map((h, idx) => `${getXWorth(idx).toFixed(1)},${getY(h.strategyWorth).toFixed(1)}`);
-      const stockPoints = history.map((h, idx) => `${getXWorth(idx).toFixed(1)},${getY(h.stockWorth).toFixed(1)}`);
+      const strategyPoints = slicedHistory.map((h, idx) => `${getXWorth(idx).toFixed(1)},${getY(h.strategyWorth).toFixed(1)}`);
+      const stockPoints = slicedHistory.map((h, idx) => `${getXWorth(idx).toFixed(1)},${getY(h.stockWorth).toFixed(1)}`);
 
       // 净值下的回归通道映射
       let upperChannelPath = "";
@@ -369,22 +614,25 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
         const polygonLower: string[] = [];
         
         for (let i = startIndex; i < historyLen; i++) {
-          const offset = historyLen - 1 - i;
-          const midVal = midLine - slope * offset;
-          const upperVal = midVal + upperDiff;
-          const lowerVal = midVal - lowerDiff;
-          
-          const x = getXWorth(i);
-          const yMid = getY(midVal * scaleFactor);
-          const yUpper = getY(upperVal * scaleFactor);
-          const yLower = getY(lowerVal * scaleFactor);
-          
-          midPoints.push(`${x.toFixed(1)},${yMid.toFixed(1)}`);
-          upperPoints.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
-          lowerPoints.push(`${x.toFixed(1)},${yLower.toFixed(1)}`);
-          
-          polygonUpper.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
-          polygonLower.unshift(`${x.toFixed(1)},${yLower.toFixed(1)}`);
+          if (i >= sliceStart) {
+            const visibleIdx = i - sliceStart;
+            const offset = historyLen - 1 - i;
+            const midVal = midLine - slope * offset;
+            const upperVal = midVal + upperDiff;
+            const lowerVal = midVal - lowerDiff;
+            
+            const x = getXWorth(visibleIdx);
+            const yMid = getY(midVal * scaleFactor);
+            const yUpper = getY(upperVal * scaleFactor);
+            const yLower = getY(lowerVal * scaleFactor);
+            
+            midPoints.push(`${x.toFixed(1)},${yMid.toFixed(1)}`);
+            upperPoints.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
+            lowerPoints.push(`${x.toFixed(1)},${yLower.toFixed(1)}`);
+            
+            polygonUpper.push(`${x.toFixed(1)},${yUpper.toFixed(1)}`);
+            polygonLower.unshift(`${x.toFixed(1)},${yLower.toFixed(1)}`);
+          }
         }
         
         upperChannelPath = `M ${upperPoints.join(" L ")}`;
@@ -397,12 +645,12 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
 
       const tradePoints = trades
         .map((t) => {
-          const idx = history.findIndex((h) => h.date === t.date);
+          const idx = slicedHistory.findIndex((h) => h.date === t.date);
           if (idx === -1) return null;
           return {
             ...t,
             x: getXWorth(idx),
-            y: getY(history[idx].strategyWorth),
+            y: getY(slicedHistory[idx].strategyWorth),
           };
         })
         .filter(Boolean) as (TradeAction & { x: number; y: number })[];
@@ -420,9 +668,10 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
         midChannelPath,
         channelAreaPath,
         tradePoints,
+        slicedHistory
       };
     }
-  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showChannel, technical, history, trades, currentPrice, periodMode, mainDrawHeight]);
+  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showChannel, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount]);
 
   // 3. 筹码分布直方图的渲染映射计算
   const chipChartWidth = 140;
@@ -483,10 +732,10 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
     const clientX = e.clientX - rect.left;
     const svgX = (clientX / rect.width) * mainChartWidth;
 
-    const hasProjections = chartType === "kline" && quantData.projections && quantData.projections.length > 0;
-    const len = chartType === "worth" 
-      ? history.length 
-      : currentCandles.length + (hasProjections ? quantData.projections!.length : 0);
+    const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
+    const len = chartParams.type === "worth" 
+      ? chartParams.slicedHistory.length 
+      : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
     if (len <= 1) return;
 
     const graphWidth = mainChartWidth - 2 * padding;
@@ -507,10 +756,10 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
     const clientX = touch.clientX - rect.left;
     const svgX = (clientX / rect.width) * mainChartWidth;
 
-    const hasProjections = chartType === "kline" && quantData.projections && quantData.projections.length > 0;
-    const len = chartType === "worth" 
-      ? history.length 
-      : currentCandles.length + (hasProjections ? quantData.projections!.length : 0);
+    const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
+    const len = chartParams.type === "worth" 
+      ? chartParams.slicedHistory.length 
+      : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
     if (len <= 1) return;
 
     const graphWidth = mainChartWidth - 2 * padding;
@@ -530,12 +779,31 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
     setHoveredIdx(null);
   };
 
+  const handleWheel = (e: React.WheelEvent<SVGSVGElement>) => {
+    const activeLen = chartType === "worth" ? history.length : currentCandles.length;
+    if (activeLen <= 15) return;
+
+    const currentVisible = zoomCount !== null ? zoomCount : Math.min(100, activeLen);
+    const step = Math.max(1, Math.round(currentVisible * 0.08));
+    let nextVisible = currentVisible;
+    
+    if (e.deltaY > 0) {
+      // 缩小 (增加可视数量)
+      nextVisible = Math.min(activeLen, currentVisible + step);
+    } else if (e.deltaY < 0) {
+      // 放大 (减少可视数量)
+      nextVisible = Math.max(15, currentVisible - step);
+    }
+    
+    setZoomCount(nextVisible);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!chartParams) return;
-    const hasProjections = chartType === "kline" && quantData.projections && quantData.projections.length > 0;
-    const len = chartType === "worth" 
-      ? history.length 
-      : currentCandles.length + (hasProjections ? quantData.projections!.length : 0);
+    const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
+    const len = chartParams.type === "worth" 
+      ? chartParams.slicedHistory.length 
+      : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
     if (len <= 1) return;
 
     let nextIdx = hoveredIdx === null ? len - 1 : hoveredIdx;
@@ -546,6 +814,18 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
     } else if (e.key === "ArrowRight") {
       nextIdx = Math.min(len - 1, nextIdx + 1);
       setHoveredIdx(nextIdx);
+      e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+      const dataLen = chartType === "worth" ? history.length : currentCandles.length;
+      const currentVisible = zoomCount !== null ? zoomCount : Math.min(100, dataLen);
+      const step = Math.max(1, Math.round(currentVisible * 0.08));
+      setZoomCount(Math.max(15, currentVisible - step));
+      e.preventDefault();
+    } else if (e.key === "ArrowDown") {
+      const dataLen = chartType === "worth" ? history.length : currentCandles.length;
+      const currentVisible = zoomCount !== null ? zoomCount : Math.min(100, dataLen);
+      const step = Math.max(1, Math.round(currentVisible * 0.08));
+      setZoomCount(Math.min(dataLen, currentVisible + step));
       e.preventDefault();
     }
   };
@@ -590,14 +870,14 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
 
   // 获取 Tooltip 浮框渲染数据
   const renderTooltip = () => {
-    const hasProjections = chartType === "kline" && quantData.projections && quantData.projections.length > 0;
-    const len = chartType === "worth" 
-      ? history.length 
-      : currentCandles.length + (hasProjections ? quantData.projections!.length : 0);
+    const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
+    const len = chartParams.type === "worth" 
+      ? chartParams.slicedHistory.length 
+      : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
     const idx = hoveredIdx !== null ? hoveredIdx : len - 1;
 
-    if (chartType === "kline") {
-      const histLen = currentCandles.length;
+    if (chartParams.type === "kline") {
+      const histLen = chartParams.slicedCandles.length;
       if (idx >= histLen && quantData.projections) {
         // 渲染未来预测数据
         const p = quantData.projections[idx - histLen];
@@ -612,7 +892,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
         );
       }
 
-      const c = currentCandles[idx];
+      const c = chartParams.slicedCandles[idx];
       if (!c) return null;
       return (
         <div className="text-[10px] font-mono text-[var(--text)] flex flex-wrap gap-x-4 gap-y-1 py-1 px-2.5 bg-[var(--inset)] border border-[var(--border)] rounded-[2px] select-none">
@@ -621,19 +901,19 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
           <span>高: <b className="font-semibold">{c.high.toFixed(2)}</b></span>
           <span>低: <b className="font-semibold">{c.low.toFixed(2)}</b></span>
           <span>收: <b className="font-semibold text-emerald-400">{c.close.toFixed(2)}</b></span>
-          {showMA5 && ma5List[idx] && <span>MA5: <span style={{ color: "#fef08a" }}>{ma5List[idx].toFixed(2)}</span></span>}
-          {showMA10 && ma10List[idx] && <span>MA10: <span style={{ color: "#c084fc" }}>{ma10List[idx].toFixed(2)}</span></span>}
-          {showMA20 && ma20List[idx] && <span>MA20: <span style={{ color: "#4ade80" }}>{ma20List[idx].toFixed(2)}</span></span>}
-          {showMA60 && ma60List[idx] && <span>MA60: <span style={{ color: "#fb923c" }}>{ma60List[idx].toFixed(2)}</span></span>}
-          {showMA120 && ma120List[idx] && <span>MA120: <span style={{ color: "#a855f7" }}>{ma120List[idx].toFixed(2)}</span></span>}
-          {showMA250 && ma250List[idx] && <span>MA250: <span style={{ color: "#ef4444" }}>{ma250List[idx].toFixed(2)}</span></span>}
+          {showMA5 && chartParams.slicedMa5[idx] && <span>MA5: <span style={{ color: "#fef08a" }}>{chartParams.slicedMa5[idx].toFixed(2)}</span></span>}
+          {showMA10 && chartParams.slicedMa10[idx] && <span>MA10: <span style={{ color: "#c084fc" }}>{chartParams.slicedMa10[idx].toFixed(2)}</span></span>}
+          {showMA20 && chartParams.slicedMa20[idx] && <span>MA20: <span style={{ color: "#4ade80" }}>{chartParams.slicedMa20[idx].toFixed(2)}</span></span>}
+          {showMA60 && chartParams.slicedMa60[idx] && <span>MA60: <span style={{ color: "#fb923c" }}>{chartParams.slicedMa60[idx].toFixed(2)}</span></span>}
+          {showMA120 && chartParams.slicedMa120[idx] && <span>MA120: <span style={{ color: "#a855f7" }}>{chartParams.slicedMa120[idx].toFixed(2)}</span></span>}
+          {showMA250 && chartParams.slicedMa250[idx] && <span>MA250: <span style={{ color: "#ef4444" }}>{chartParams.slicedMa250[idx].toFixed(2)}</span></span>}
           <span>量: <b className="text-sky-400">{formatVolume(c.volume)}</b></span>
           <span>额: <b className="text-sky-400">{formatAmount(c.amount)}</b></span>
           <span>换手: <b>{c.turnoverPct}%</b></span>
         </div>
       );
     } else {
-      const h = history[idx];
+      const h = chartParams.slicedHistory[idx];
       if (!h) return null;
       const excess = ((h.strategyWorth - h.stockWorth) / 1000).toFixed(1);
       return (
@@ -648,22 +928,22 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
   };
 
   const getCrosshairY = () => {
-    const hasProjections = chartType === "kline" && quantData.projections && quantData.projections.length > 0;
-    const len = chartType === "worth" 
-      ? history.length 
-      : currentCandles.length + (hasProjections ? quantData.projections!.length : 0);
+    const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
+    const len = chartParams.type === "worth" 
+      ? chartParams.slicedHistory.length 
+      : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
     const idx = hoveredIdx !== null ? hoveredIdx : len - 1;
 
-    if (chartType === "kline") {
-      const histLen = currentCandles.length;
+    if (chartParams.type === "kline") {
+      const histLen = chartParams.slicedCandles.length;
       if (idx >= histLen && quantData.projections) {
         const p = quantData.projections[idx - histLen];
         return p ? chartParams.getY(p.base) : padding;
       }
-      const c = currentCandles[idx];
+      const c = chartParams.slicedCandles[idx];
       return c ? chartParams.getY(c.close) : padding;
     } else {
-      const h = history[idx];
+      const h = chartParams.slicedHistory[idx];
       return h ? chartParams.getY(h.strategyWorth) : padding;
     }
   };
@@ -803,7 +1083,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
         </div>
 
         {/* 周期切换 */}
-        {chartType === "kline" && (
+        {chartType === "kline" && !externalPeriod && (
           <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px] font-mono">
             <button
               onClick={() => setPeriodMode("1D")}
@@ -821,6 +1101,14 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
             >
               1W (周K)
             </button>
+            <button
+              onClick={() => setPeriodMode("1M")}
+              className={`px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer transition rounded-[1px] ${
+                periodMode === "1M" ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+              }`}
+            >
+              1M (月K)
+            </button>
           </div>
         )}
       </div>
@@ -836,7 +1124,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
           <div className="text-[9px] font-mono text-[var(--faint)] uppercase tracking-wider mb-2 flex justify-between">
             <span>
               {chartType === "kline" 
-                ? `[${periodMode === "1W" ? "周K线" : "日K线"} 股价回归走势图]` 
+                ? `[${periodMode === "1W" ? "周K线" : periodMode === "1M" ? "月K线" : "日K线"} 股价回归走势图]` 
                 : "[120日 策略资产总净值模拟回测曲线]"}
             </span>
             <span className="text-[9.5px] text-[var(--muted)] font-normal hidden md:inline">
@@ -851,6 +1139,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
             </div>
 
             <svg
+              ref={svgRef}
               viewBox={`0 0 ${mainChartWidth} ${totalSvgHeight}`}
               className="w-full h-auto block select-none"
               onMouseMove={handleMouseMove}
@@ -858,6 +1147,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
               onTouchCancel={handleTouchEnd}
+              onWheel={handleWheel}
             >
               {/* 背景网格线 */}
               {Array.from({ length: 5 }).map((_, i) => {
@@ -891,7 +1181,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
               {showChannel && chartParams.channelAreaPath && (
                 <path
                   d={chartParams.channelAreaPath}
-                  fill={technical?.trendChannel.type === "up" ? "rgba(239,68,68,0.03)" : "rgba(16,185,129,0.03)"}
+                  fill={technical?.trendChannel.type === "up" ? "rgba(239,68,68,0.08)" : "rgba(16,185,129,0.08)"}
                   stroke="none"
                 />
               )}
@@ -924,6 +1214,34 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
                 />
               )}
 
+              {/* 历史趋势回归通道渲染 (自动拼接历史上所有的上升、下降和横盘通道) */}
+              {showChannel && chartParams.type === "kline" && chartParams.histChannelPaths && (
+                <g>
+                  {chartParams.histChannelPaths.map((chan, cIdx) => {
+                    const isUp = chan.type === "up";
+                    const isDown = chan.type === "down";
+                    const areaColor = isUp 
+                      ? "rgba(239, 68, 68, 0.08)" 
+                      : isDown 
+                        ? "rgba(16, 185, 129, 0.08)" 
+                        : "rgba(148, 163, 184, 0.04)";
+                    const strokeColor = isUp 
+                      ? "rgba(239, 68, 68, 0.18)" 
+                      : isDown 
+                        ? "rgba(16, 185, 129, 0.18)" 
+                        : "rgba(148, 163, 184, 0.12)";
+                    return (
+                      <g key={`hist-chan-${cIdx}`}>
+                        {chan.areaPath && <path d={chan.areaPath} fill={areaColor} stroke="none" />}
+                        {chan.upperPath && <path d={chan.upperPath} fill="none" stroke={strokeColor} strokeWidth="1" strokeDasharray="1 3" />}
+                        {chan.lowerPath && <path d={chan.lowerPath} fill="none" stroke={strokeColor} strokeWidth="1" strokeDasharray="1 3" />}
+                        {chan.midPath && <path d={chan.midPath} fill="none" stroke="var(--faint)" strokeWidth="0.6" strokeDasharray="1 4" opacity="0.4" />}
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
+
               {/* === A. 股价 K 线渲染模式 === */}
               {chartParams.type === "kline" && (
                 <g>
@@ -936,7 +1254,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
                   {showMA250 && <path d={chartParams.ma250Path} fill="none" stroke="#ef4444" strokeWidth="1.5" opacity="0.85" />}
 
                   {/* K线蜡烛线绘制 */}
-                  {currentCandles.map((c, idx) => {
+                  {chartParams.slicedCandles.map((c, idx) => {
                     const x = chartParams.getX(idx);
                     const yOpen = chartParams.getY(c.open);
                     const yClose = chartParams.getY(c.close);
@@ -947,7 +1265,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
                     const strokeColor = isUp ? "#ef4444" : "#10b981"; // 阳红阴绿
                     const fillColor = isUp ? "#ef4444" : "#10b981";
                     
-                    const len = currentCandles.length;
+                    const len = chartParams.slicedCandles.length;
                     const candleWidth = Math.max(1.5, ((mainChartWidth - 2 * padding) / len) * 0.65);
 
                     return (
@@ -1020,13 +1338,13 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
                   </text>
 
                   {/* 成交量柱状图 */}
-                  {currentCandles.map((c, idx) => {
+                  {chartParams.slicedCandles.map((c, idx) => {
                     const x = chartParams.getX(idx);
                     const isUp = c.close >= c.open;
                     const fillColor = isUp ? "#ef4444" : "#10b981"; // 阳红阴绿
                     
                     const h = ((c.volume || 0) / chartParams.maxVolume) * volumeDrawHeight;
-                    const candleWidth = Math.max(1.5, ((mainChartWidth - 2 * padding) / currentCandles.length) * 0.65);
+                    const candleWidth = Math.max(1.5, ((mainChartWidth - 2 * padding) / chartParams.slicedCandles.length) * 0.65);
                     
                     return (
                       <rect
@@ -1045,14 +1363,14 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
 
               {/* === D. X轴日期时间刻度标注 === */}
               {(() => {
-                const len = chartType === "worth" ? history.length : currentCandles.length;
+                const len = chartParams.type === "worth" ? chartParams.slicedHistory.length : chartParams.slicedCandles.length;
                 if (len <= 5) return null;
                 const indices = [0, Math.floor(len / 4), Math.floor(len / 2), Math.floor(3 * len / 4), len - 1];
                 return (
                   <g>
                     {indices.map((idx) => {
                       const x = chartParams.getX(idx);
-                      const date = chartType === "worth" ? history[idx].date : currentCandles[idx].date;
+                      const date = chartParams.type === "worth" ? chartParams.slicedHistory[idx].date : chartParams.slicedCandles[idx].date;
                       return (
                         <text
                           key={`x-label-${idx}`}
@@ -1075,7 +1393,7 @@ export default function QuantChart({ quantData, currentPrice }: QuantChartProps)
               {chartParams.type === "kline" && chartParams.hasProjections && quantData.projections && (() => {
                 const len = chartParams.len;
                 const totalLen = len + quantData.projections.length;
-                const lastCandle = currentCandles[len - 1];
+                const lastCandle = chartParams.slicedCandles[len - 1];
                 const lastPrice = lastCandle.close;
                 
                 const stopLoss = technical?.actionAdvice.stopLoss || lastPrice * 0.94;

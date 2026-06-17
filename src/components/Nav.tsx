@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/map", label: "趋势→产业链" },
   { href: "/analyze", label: "个股分析" },
   { href: "/scanner", label: "热门股扫描" },
+  { href: "/sectors", label: "板块热力" },
   { href: "/settings", label: "设置" },
 ];
 

@@ -60,9 +60,11 @@ export default function MapPage() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "拆解失败");
       }
+      setRetryCount(1);
       let gotResult = false;
       let streamError = "";
       await readNdjson(res, (ev) => {
+        setRetryCount(1);
         switch (ev.type as string) {
           case "stage":
             setStages((prev) => applyStageEvent(prev, ev.key as string, ev.status as "start" | "done"));

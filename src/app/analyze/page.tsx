@@ -34,6 +34,12 @@ interface AnalyzeResponse {
     tweets: { date: string; text: string }[];
   } | null;
   quant?: any;
+  timings?: {
+    quoteMs: number;
+    reasonMs: number;
+    summaryMs: number;
+    totalMs: number;
+  };
 }
 
 type Stats = AnalyzeResponse["stats"];
@@ -49,6 +55,11 @@ function yi(n: number): string {
   return (n / 1e8).toFixed(1) + " 亿";
 }
 
+interface RecentStock {
+  code: string;
+  name: string;
+}
+
 function AnalyzeInner() {
   const params = useSearchParams();
   const [query, setQuery] = useState("");
@@ -62,7 +73,34 @@ function AnalyzeInner() {
   const [structured, setStructured] = useState("");
   const [preview, setPreview] = useState<{ quote: StockQuote; stats: Stats } | null>(null);
   const [retryCount, setRetryCount] = useState(1);
+  const [recentStocks, setRecentStocks] = useState<RecentStock[]>([]);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("serenity_recent_stocks");
+    if (stored) {
+      try {
+        setRecentStocks(JSON.parse(stored));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, []);
+
+  const saveToRecent = (code: string, name: string) => {
+    if (!code || !name) return;
+    setRecentStocks((prev) => {
+      const filtered = prev.filter((item) => item.code !== code);
+      const updated = [{ code, name }, ...filtered].slice(0, 10);
+      localStorage.setItem("serenity_recent_stocks", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const clearRecent = () => {
+    localStorage.removeItem("serenity_recent_stocks");
+    setRecentStocks([]);
+  };
 
   async function analyze(code: string, attempt = 1) {
     setLoading(true);
@@ -91,12 +129,14 @@ function AnalyzeInner() {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error || "分析失败");
       }
+      setRetryCount(1);
       let gotResult = false;
       let streamError = "";
       await readNdjson(res, (ev) => {
+        setRetryCount(1);
         switch (ev.type as string) {
           case "stage":
-            setStages((prev) => applyStageEvent(prev, ev.key as string, ev.status as "start" | "done"));
+            setStages((prev) => applyStageEvent(prev, ev.key as string, ev.status as "start" | "done", ev.elapsedMs as number | undefined));
             break;
           case "token":
             if (ev.kind === "reasoning") setReasoning((r) => r + (ev.text as string));
@@ -104,7 +144,11 @@ function AnalyzeInner() {
             else setContent((c) => c + (ev.text as string));
             break;
           case "quote":
-            setPreview({ quote: ev.quote as StockQuote, stats: ev.stats as Stats });
+            {
+              const q = ev.quote as StockQuote;
+              setPreview({ quote: q, stats: ev.stats as Stats });
+              saveToRecent(q.code, q.name);
+            }
             break;
           case "result":
             setData({
@@ -112,6 +156,7 @@ function AnalyzeInner() {
               stats: ev.stats as Stats,
               assessment: ev.assessment as ChokepointAssessment,
               quant: ev.quant,
+              timings: ev.timings as any,
             });
             gotResult = true;
             break;
@@ -221,6 +266,33 @@ function AnalyzeInner() {
         )}
       </div>
 
+      {/* 最近搜索历史 */}
+      {recentStocks.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs select-none">
+          <span className="text-[var(--faint)] font-mono uppercase tracking-wider">最近搜索：</span>
+          <div className="flex flex-wrap gap-1.5 items-center flex-1">
+            {recentStocks.map((s) => (
+              <button
+                key={s.code}
+                onClick={() => {
+                  setQuery(s.code);
+                  analyze(s.code);
+                }}
+                className="px-2 py-1 rounded-[2px] bg-[var(--inset)] border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[var(--muted)] font-mono cursor-pointer transition text-[10.5px] font-semibold"
+              >
+                {s.name} ({s.code})
+              </button>
+            ))}
+            <button
+              onClick={clearRecent}
+              className="ml-1 text-[10px] text-red-400 hover:text-red-300 font-semibold cursor-pointer underline hover:no-underline"
+            >
+              清除历史
+            </button>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
           <p>{error}</p>
@@ -231,7 +303,15 @@ function AnalyzeInner() {
       )}
 
       {(loading || content || reasoning || structured || stages.some((s) => s.status !== "pending")) && (
-        <ProgressTrace stages={stages} reasoning={reasoning} content={content} structured={structured} running={loading} retryCount={retryCount} />
+        <ProgressTrace
+          stages={stages}
+          reasoning={reasoning}
+          content={content}
+          structured={structured}
+          running={loading}
+          retryCount={retryCount}
+          timings={data?.timings}
+        />
       )}
 
       {preview && !data && <PreviewCard quote={preview.quote} stats={preview.stats} />}
@@ -297,6 +377,17 @@ function Result({ data }: { data: AnalyzeResponse }) {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <a
+              href={`/chart?code=${quote.code}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] hover:bg-[var(--hover)] px-3 py-2 text-xs font-semibold tracking-wider text-[var(--text)] transition flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75v4.5m0-4.5h-4.5m4.5 0L15 9m5.25 11.25v-4.5m0 4.5h-4.5m4.5 0l-6-6" />
+              </svg>
+              <span>Full chart</span>
+            </a>
             <button
               onClick={() => setShowPoster(true)}
               className="rounded-[2px] bg-[var(--accent)] px-4 py-2 text-xs font-semibold tracking-wider text-[var(--accent-fg)] hover:opacity-90 transition cursor-pointer"
@@ -454,9 +545,22 @@ function Result({ data }: { data: AnalyzeResponse }) {
 
       {data.quant && (
         <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
-          <div className="text-[9.5px] font-mono text-[var(--accent)] font-extrabold uppercase tracking-widest mb-3 flex items-center gap-1.5 border-b border-[var(--border)] pb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-            [Serenity Quant Engine / 均线量化与筹码图谱诊断]
+          <div className="flex justify-between items-center border-b border-[var(--border)] pb-2 mb-3">
+            <div className="text-[9.5px] font-mono text-[var(--accent)] font-extrabold uppercase tracking-widest flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+              [Serenity Quant Engine / 均线量化与筹码图谱诊断]
+            </div>
+            <a
+              href={`/chart?code=${quote.code}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] hover:bg-[var(--hover)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text)] transition flex items-center gap-1.5 font-mono cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5 text-[var(--accent)]" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75v4.5m0-4.5h-4.5m4.5 0L15 9m5.25 11.25v-4.5m0 4.5h-4.5m4.5 0l-6-6" />
+              </svg>
+              <span>Full chart</span>
+            </a>
           </div>
           <QuantChart
             quantData={data.quant}

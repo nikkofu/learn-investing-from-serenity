@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 // 基于股票代码/名称，从本地知识库中动态匹配 Serenity 关联主题与一手推文
 async function findSerenityKnowledge(code: string, name: string) {
-  const cacheKey = `knowledge:match:${code}:${name}`;
+  const cacheKey = `knowledge:match_v2:${code}:${name}`;
   return globalCache.getOrCreate(
     cacheKey,
     async () => {
@@ -133,7 +133,10 @@ export async function POST(req: Request) {
   }
 
   return ndjsonStream(async (send) => {
+    const tStart = performance.now();
+
     // Stage 1: fetch market data (the "tool call").
+    const tQuoteStart = performance.now();
     send({ type: "stage", key: "quote", status: "start" });
     let quote, candles, stats;
     try {
@@ -144,7 +147,8 @@ export async function POST(req: Request) {
       return;
     }
     send({ type: "quote", quote, stats });
-    send({ type: "stage", key: "quote", status: "done" });
+    const quoteElapsed = performance.now() - tQuoteStart;
+    send({ type: "stage", key: "quote", status: "done", elapsedMs: quoteElapsed });
 
     // Stage 1.5: 检索匹配 Serenity 本地知识库
     const matchedKnowledge = await findSerenityKnowledge(code, quote.name);
@@ -157,15 +161,18 @@ export async function POST(req: Request) {
       extraContext: body.context,
       matchedKnowledge,
     });
+    const tReasonStart = performance.now();
     send({ type: "stage", key: "reason", status: "start" });
     const splitter = new NarrativeJsonSplitter();
     // Advance reason -> summary as soon as the (hidden) JSON phase begins, so the
     // UI never looks stuck while the model silently writes the structured result.
     let advanced = false;
+    let reasonElapsed = 0;
     const advanceToSummary = () => {
       if (advanced) return;
       advanced = true;
-      send({ type: "stage", key: "reason", status: "done" });
+      reasonElapsed = performance.now() - tReasonStart;
+      send({ type: "stage", key: "reason", status: "done", elapsedMs: reasonElapsed });
       send({ type: "stage", key: "summary", status: "start" });
     };
     try {
@@ -195,6 +202,7 @@ export async function POST(req: Request) {
     advanceToSummary();
 
     // Stage 3: parse + normalize into the structured assessment.
+    const tSummaryStart = performance.now();
     try {
       const raw = parseJsonObject<Partial<ChokepointAssessment>>(splitter.jsonText);
       const assessment = finalizeAssessment(raw);
@@ -225,6 +233,10 @@ export async function POST(req: Request) {
       const chokepointBacktest = runChokepointMomentumBacktest(candles, assessment.totalScore);
       const technical = analyzeTechnicalPatterns(candles, quote.price, chips);
       const projections = generatePriceProjection(candles, assessment.totalScore);
+      
+      const summaryElapsed = performance.now() - tSummaryStart;
+      const totalElapsed = performance.now() - tStart;
+
       send({ 
         type: "result", 
         quote, 
@@ -241,9 +253,15 @@ export async function POST(req: Request) {
           technical, 
           candles,
           projections
+        },
+        timings: {
+          quoteMs: quoteElapsed,
+          reasonMs: reasonElapsed,
+          summaryMs: summaryElapsed,
+          totalMs: totalElapsed
         }
       });
-      send({ type: "stage", key: "summary", status: "done" });
+      send({ type: "stage", key: "summary", status: "done", elapsedMs: summaryElapsed });
       send({ type: "done" });
     } catch {
       send({

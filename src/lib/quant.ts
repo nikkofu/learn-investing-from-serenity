@@ -19,6 +19,7 @@ export interface TradeAction {
   date: string;
   price: number;
   reason: string;
+  profitPct?: number;
 }
 
 export interface BacktestResult {
@@ -36,7 +37,8 @@ export interface BacktestResult {
  */
 export function calculateChipDistribution(
   candles: Candle[],
-  currentPrice: number
+  currentPrice: number,
+  fastMode = false
 ): ChipDistributionResult {
   if (candles.length === 0) {
     return { bins: [], profitRatio: 0, avgCost: currentPrice, concentration: 0, priceLow70: currentPrice, priceHigh70: currentPrice };
@@ -49,10 +51,13 @@ export function calculateChipDistribution(
   const BINS_COUNT = 40;
   const binWidth = (maxPrice - minPrice) / BINS_COUNT;
 
-  const bins: ChipBin[] = Array.from({ length: BINS_COUNT }).map((_, i) => ({
-    price: Number((minPrice + i * binWidth + binWidth / 2).toFixed(2)),
-    volume: 0,
-  }));
+  const bins: ChipBin[] = [];
+  for (let i = 0; i < BINS_COUNT; i++) {
+    bins.push({
+      price: Math.round((minPrice + i * binWidth + binWidth / 2) * 100) / 100,
+      volume: 0,
+    });
+  }
 
   // 2. 迭代 K 线，注入并衰减筹码
   for (const c of candles) {
@@ -79,21 +84,20 @@ export function calculateChipDistribution(
     if (span <= 1) {
       bins[midIdx].volume += todayVol;
     } else {
-      // 简单三角权重概率分布
+      // 简单三角权重概率分布：两次循环避免临时数组分配
       let totalWeight = 0;
-      const weights: number[] = [];
       for (let i = lowIdx; i <= highIdx; i++) {
-        // 距离收盘价越近，权重越大
         const dist = Math.abs(i - midIdx);
         const weight = Math.max(0.1, 1 - dist / span);
-        weights.push(weight);
         totalWeight += weight;
       }
-      // 归一化注入体积
-      weights.forEach((w, offset) => {
-        const idx = lowIdx + offset;
-        bins[idx].volume += todayVol * (w / totalWeight);
-      });
+      if (totalWeight > 0) {
+        for (let i = lowIdx; i <= highIdx; i++) {
+          const dist = Math.abs(i - midIdx);
+          const weight = Math.max(0.1, 1 - dist / span);
+          bins[i].volume += todayVol * (weight / totalWeight);
+        }
+      }
     }
   }
 
@@ -113,7 +117,7 @@ export function calculateChipDistribution(
   if (totalVolume === 0) totalVolume = 1;
 
   const profitRatio = profitVolume / totalVolume;
-  const avgCost = Number((costSum / totalVolume).toFixed(2));
+  const avgCost = Math.round((costSum / totalVolume) * 100) / 100;
 
   // 4. 计算 70% 筹码集中度
   // 找出包含总筹码 70% 的最窄价格区间
@@ -133,11 +137,11 @@ export function calculateChipDistribution(
   const priceDiff = priceHigh70 - priceLow70;
   const priceSum = priceHigh70 + priceLow70;
   // 集中度 = 价格宽度 / 价格均值
-  const concentration = priceSum > 0 ? Number((priceDiff / (priceSum / 2)).toFixed(3)) : 0;
+  const concentration = priceSum > 0 ? Math.round((priceDiff / (priceSum / 2)) * 1000) / 1000 : 0;
 
   return {
-    bins: bins.map(b => ({ ...b, volume: Number(b.volume.toFixed(0)) })),
-    profitRatio: Number(profitRatio.toFixed(3)),
+    bins: fastMode ? [] : bins.map(b => ({ price: b.price, volume: Math.round(b.volume) })),
+    profitRatio: Math.round(profitRatio * 1000) / 1000,
     avgCost,
     concentration,
     priceLow70,
@@ -266,6 +270,7 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
           date,
           price: close,
           reason,
+          profitPct: ((close - buyPrice) / buyPrice) * 100,
         });
       }
     }
@@ -378,7 +383,7 @@ export function runChokepointMomentumBacktest(
 
     // 计算当前的筹码分布（回看 120 天）
     const subHistory = candles.slice(Math.max(0, i - 120), i + 1);
-    const chipDist = calculateChipDistribution(subHistory, close);
+    const chipDist = calculateChipDistribution(subHistory, close, true);
     const supportPrice = chipDist.priceLow70; // 70% 筹码支撑区下轨
     const avgCost = chipDist.avgCost;
 
@@ -457,6 +462,7 @@ export function runChokepointMomentumBacktest(
           date,
           price: close,
           reason,
+          profitPct: ((close - buyPrice) / buyPrice) * 100,
         });
       }
     }
@@ -603,6 +609,18 @@ export interface TechnicalAssessment {
     takeProfit: number;
     positionAdvice: string;
   };
+  // ===== 新增 SMC 与 斐波那契 字段 =====
+  smc?: {
+    bosList: { date: string; price: number; type: "bullish" | "bearish"; label: "BOS" | "CHoCH" }[];
+    demandZones: { low: number; high: number; label: string }[];
+    supplyZones: { low: number; high: number; label: string }[];
+  };
+  fibonacci?: {
+    low: number;
+    high: number;
+    isUp: boolean; // 最低点是否在最高点左侧（上升波段）
+    levels: { ratio: number; price: number; color: string; label: string }[];
+  };
 }
 
 export function analyzeTechnicalPatterns(
@@ -619,7 +637,9 @@ export function analyzeTechnicalPatterns(
       patterns: [],
       candlesticks: [],
       vrvp: { poc: currentPrice, supportZone: { low: currentPrice, high: currentPrice, price: currentPrice }, resistanceZone: { low: currentPrice, high: currentPrice, price: currentPrice }, lvnPrice: null },
-      actionAdvice: { action: "暂无数据", stopLoss: currentPrice * 0.95, takeProfit: currentPrice * 1.1, positionAdvice: "观望" }
+      actionAdvice: { action: "暂无数据", stopLoss: currentPrice * 0.95, takeProfit: currentPrice * 1.1, positionAdvice: "观望" },
+      smc: { bosList: [], demandZones: [], supplyZones: [] },
+      fibonacci: { low: currentPrice, high: currentPrice, isUp: true, levels: [] }
     };
   }
 
@@ -888,7 +908,160 @@ export function analyzeTechnicalPatterns(
   if (takeProfit <= currentPrice) {
     takeProfit = Number((currentPrice * 1.25).toFixed(2));
   }
-  
+
+  // ==========================================
+  // ===== 新增 SMC（BOS/CHoCH、需求/供给区）计算 =====
+  // ==========================================
+  // 1. Swing Highs and Swing Lows 识别 (窗口 k = 3)
+  const kWindow = 3;
+  const swingHighs: { idx: number; price: number; candle: Candle }[] = [];
+  const swingLows: { idx: number; price: number; candle: Candle }[] = [];
+
+  for (let i = kWindow; i < channelLen - kWindow; i++) {
+    const c = subCandles[i];
+    let isHigh = true;
+    let isLow = true;
+
+    for (let j = 1; j <= kWindow; j++) {
+      if (subCandles[i - j].high >= c.high || subCandles[i + j].high > c.high) {
+        isHigh = false;
+      }
+      if (subCandles[i - j].low <= c.low || subCandles[i + j].low < c.low) {
+        isLow = false;
+      }
+    }
+
+    if (isHigh) {
+      swingHighs.push({ idx: i, price: c.high, candle: c });
+    }
+    if (isLow) {
+      swingLows.push({ idx: i, price: c.low, candle: c });
+    }
+  }
+
+  // 2. 扫描 60 天以跟踪 BOS / CHoCH 突破
+  const bosList: { date: string; price: number; type: "bullish" | "bearish"; label: "BOS" | "CHoCH" }[] = [];
+  let currentTrend: "bullish" | "bearish" = channelType === "up" ? "bullish" : "bearish";
+  let lastActiveHigh = swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].price : currentPrice;
+  let lastActiveLow = swingLows.length > 0 ? swingLows[swingLows.length - 1].price : currentPrice;
+
+  for (let i = kWindow; i < channelLen; i++) {
+    const c = subCandles[i];
+    
+    // 价格收盘向上突破前高
+    if (currentTrend === "bearish" && c.close > lastActiveHigh) {
+      bosList.push({ date: c.date, price: lastActiveHigh, type: "bullish", label: "CHoCH" });
+      currentTrend = "bullish";
+      lastActiveHigh = c.high;
+    } else if (currentTrend === "bullish" && c.close > lastActiveHigh) {
+      bosList.push({ date: c.date, price: lastActiveHigh, type: "bullish", label: "BOS" });
+      lastActiveHigh = c.high;
+    }
+
+    // 价格收盘向下跌破前低
+    if (currentTrend === "bullish" && c.close < lastActiveLow) {
+      bosList.push({ date: c.date, price: lastActiveLow, type: "bearish", label: "CHoCH" });
+      currentTrend = "bearish";
+      lastActiveLow = c.low;
+    } else if (currentTrend === "bearish" && c.close < lastActiveLow) {
+      bosList.push({ date: c.date, price: lastActiveLow, type: "bearish", label: "BOS" });
+      lastActiveLow = c.low;
+    }
+
+    // 动态更新 Swing 级参考高低位
+    const sh = swingHighs.find(h => h.idx === i);
+    if (sh) lastActiveHigh = sh.price;
+    const sl = swingLows.find(l => l.idx === i);
+    if (sl) lastActiveLow = sl.price;
+  }
+
+  // 3. 供给与需求区 (Demand / Supply Zones) 确定
+  const demandZones: { low: number; high: number; label: string }[] = [];
+  const supplyZones: { low: number; high: number; label: string }[] = [];
+
+  // 寻找暴涨 CHoCH/BOS 前的最后一根阴线 (需求区)
+  const lastBullishBreak = [...bosList].reverse().find(b => b.type === "bullish");
+  if (lastBullishBreak) {
+    const breakIdx = subCandles.findIndex(c => c.date === lastBullishBreak.date);
+    if (breakIdx !== -1) {
+      const lookback = subCandles.slice(Math.max(0, breakIdx - 8), breakIdx);
+      const bearishCandles = lookback.filter(c => c.close < c.open);
+      if (bearishCandles.length > 0) {
+        const baseCandle = bearishCandles.reduce((min, c) => c.low < min.low ? c : min, bearishCandles[0]);
+        demandZones.push({
+          low: Number(baseCandle.low.toFixed(2)),
+          high: Number(baseCandle.open.toFixed(2)),
+          label: "DEMAND ZONE (主力需求吸筹区 / 强支撑)"
+        });
+      }
+    }
+  }
+
+  // 寻找暴跌 CHoCH/BOS 前的最后一根阳线 (供给区)
+  const lastBearishBreak = [...bosList].reverse().find(b => b.type === "bearish");
+  if (lastBearishBreak) {
+    const breakIdx = subCandles.findIndex(c => c.date === lastBearishBreak.date);
+    if (breakIdx !== -1) {
+      const lookback = subCandles.slice(Math.max(0, breakIdx - 8), breakIdx);
+      const bullishCandles = lookback.filter(c => c.close > c.open);
+      if (bullishCandles.length > 0) {
+        const baseCandle = bullishCandles.reduce((max, c) => c.high > max.high ? c : max, bullishCandles[0]);
+        supplyZones.push({
+          low: Number(baseCandle.open.toFixed(2)),
+          high: Number(baseCandle.high.toFixed(2)),
+          label: "SUPPLY ZONE (主力供给套牢区 / 强压力)"
+        });
+      }
+    }
+  }
+
+  // 兜底密集区计算
+  if (demandZones.length === 0 && N >= 10) {
+    const sortedLow = [...subCandles].sort((a, b) => a.low - b.low);
+    demandZones.push({
+      low: Number(sortedLow[0].low.toFixed(2)),
+      high: Number((sortedLow[0].low * 1.022).toFixed(2)),
+      label: "DEMAND ZONE (低位吸筹支撑带)"
+    });
+  }
+  if (supplyZones.length === 0 && N >= 10) {
+    const sortedHigh = [...subCandles].sort((a, b) => b.high - a.high);
+    supplyZones.push({
+      low: Number((sortedHigh[0].high * 0.978).toFixed(2)),
+      high: Number(sortedHigh[0].high.toFixed(2)),
+      label: "SUPPLY ZONE (高位压力回落带)"
+    });
+  }
+
+  // 4. 斐波那契回调线计算 (最近 60 天极值)
+  const fibLow = Math.min(...subCandles.map(c => c.low));
+  const fibHigh = Math.max(...subCandles.map(c => c.high));
+  const lowIdx = subCandles.findIndex(c => c.low === fibLow);
+  const highIdx = subCandles.findIndex(c => c.high === fibHigh);
+  const fibIsUp = lowIdx < highIdx;
+
+  const fibRatios = [
+    { ratio: 0.0, color: "rgba(239, 68, 68, 0.07)", label: "0.0% (极点起点)" },
+    { ratio: 0.236, color: "rgba(249, 115, 22, 0.07)", label: "23.6% (浅度阻力)" },
+    { ratio: 0.382, color: "rgba(234, 179, 8, 0.07)", label: "38.2% (均线防守)" },
+    { ratio: 0.5, color: "rgba(34, 197, 94, 0.07)", label: "50.0% (多空平衡位)" },
+    { ratio: 0.618, color: "rgba(20, 184, 166, 0.12)", label: "61.8% (Golden Pocket 黄金口袋)" },
+    { ratio: 0.786, color: "rgba(59, 130, 246, 0.07)", label: "78.6% (超跌强撑)" },
+    { ratio: 1.0, color: "rgba(168, 85, 247, 0.07)", label: "100.0% (极限底防)" }
+  ];
+
+  const fibLevels = fibRatios.map(fr => {
+    const price = fibIsUp 
+      ? fibHigh - fr.ratio * (fibHigh - fibLow)
+      : fibLow + fr.ratio * (fibHigh - fibLow);
+    return {
+      ratio: fr.ratio,
+      price: Number(price.toFixed(2)),
+      color: fr.color,
+      label: fr.label
+    };
+  });
+
   return {
     trendChannel: {
       type: channelType,
@@ -912,5 +1085,16 @@ export function analyzeTechnicalPatterns(
       takeProfit,
       positionAdvice,
     },
+    smc: {
+      bosList: bosList.slice(-4),
+      demandZones,
+      supplyZones
+    },
+    fibonacci: {
+      low: Number(fibLow.toFixed(2)),
+      high: Number(fibHigh.toFixed(2)),
+      isUp: fibIsUp,
+      levels: fibLevels
+    }
   };
 }
