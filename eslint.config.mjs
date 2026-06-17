@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Project local cache, temp data and scraped profile:
+    ".data/**",
+    "scripts/output/**",
+    "scratch/**",
   ]),
 ]);
 
