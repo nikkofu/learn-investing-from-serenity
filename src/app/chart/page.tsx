@@ -58,6 +58,20 @@ function ChartInner() {
   
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<HTMLDivElement>(null);
+
+  // 推理日志流式输出时自动滚动到底部
+  useEffect(() => {
+    if (activeTab === "terminal" && aiLoading) {
+      if (terminalRef.current) {
+        terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+      }
+      if (sidebarRef.current) {
+        sidebarRef.current.scrollTop = sidebarRef.current.scrollHeight;
+      }
+    }
+  }, [aiLogText, aiLoading, activeTab]);
 
   // 动态监听视口高度，计算最适宜的 K 线高度
   useEffect(() => {
@@ -417,7 +431,7 @@ function ChartInner() {
             </div>
 
             {/* 侧栏滚动容器 */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+            <div ref={sidebarRef} className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
               
               {/* 终端日志面板 */}
               {activeTab === "terminal" && (
@@ -431,7 +445,7 @@ function ChartInner() {
                     </span>
                   </div>
                   {aiLogText ? (
-                    <div className="flex-1 min-h-[350px] overflow-y-auto p-3 bg-[var(--bg)] border border-[var(--border)] rounded-[2px] text-[10px] font-mono text-emerald-500/90 whitespace-pre-wrap leading-relaxed shadow-inner">
+                    <div ref={terminalRef} className="flex-1 min-h-[350px] overflow-y-auto p-3 bg-[var(--bg)] border border-[var(--border)] rounded-[2px] text-[10px] font-mono text-emerald-500/90 whitespace-pre-wrap leading-relaxed shadow-inner">
                       {aiLogText}
                       {aiLoading && <span className="inline-block w-1.5 h-3 bg-emerald-400 animate-ping ml-0.5" />}
                     </div>

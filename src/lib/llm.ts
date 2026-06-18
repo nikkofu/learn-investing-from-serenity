@@ -103,6 +103,8 @@ export async function* chatStream(
       { role: "system", content: system },
       { role: "user", content: user },
     ],
+    // 提供充足的 Token 额度限制，防止由于思考字数多且最终JSON庞大导致被提前截断
+    max_tokens: 8192,
     // `reasoning` is an OpenRouter extension not in the base SDK params type.
     ...reasoningParam(config.baseURL),
   } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
