@@ -213,7 +213,7 @@ const calculateMA = (data: Candle[], period: number): number[] => {
   return ma;
 };
 
-export default function QuantChart({ quantData, currentPrice, height, externalPeriod }: QuantChartProps) {
+export default function QuantChart({ quantData, currentPrice, height: _height, externalPeriod }: QuantChartProps) {
   const { chips, technical, candles } = quantData;
 
   const [activeStrategy, setActiveStrategy] = useState<"chokepoint" | "traditional">("chokepoint");
@@ -671,11 +671,10 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
         slicedHistory
       };
     }
-  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showChannel, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount]);
+  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showMA120, showMA250, showChannel, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount, ma5List, ma10List, ma20List, ma60List, ma120List, ma250List, quantData.projections]);
 
   // 3. 筹码分布直方图的渲染映射计算
   const chipChartWidth = 140;
-  const chipChartHeight = totalSvgHeight;
 
   // 联动筹码数据源：当 hoveredIdx 不为空且在 K 线范围内，实时计算当前日期的筹码分布；否则使用最新筹码
   const activeChips = useMemo(() => {
@@ -695,6 +694,16 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
     }
     return currentCandles[hoveredIdx].close;
   }, [currentCandles, currentPrice, hoveredIdx]);
+
+  // 计算 hovered 价格下的累计获利盘比例 (小于等于此价格的筹码量 / 总筹码量)
+  const hoveredProfitRatio = useMemo(() => {
+    if (!hoveredChip || !activeChips || !activeChips.bins) return 0;
+    const total = activeChips.bins.reduce((sum, b) => sum + b.volume, 0) || 1;
+    const profit = activeChips.bins
+      .filter((b) => b.price <= hoveredChip.price)
+      .reduce((sum, b) => sum + b.volume, 0);
+    return (profit / total) * 100;
+  }, [hoveredChip, activeChips]);
 
   const totalChipVolume = useMemo(() => {
     if (!activeChips || !activeChips.bins) return 1;
@@ -727,20 +736,52 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
     const clientX = e.clientX - rect.left;
-    const svgX = (clientX / rect.width) * mainChartWidth;
+    const svgX = (clientX / rect.width) * 760; // 映射到合并后的 760px 总宽度
 
-    const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
-    const len = chartParams.type === "worth" 
-      ? chartParams.slicedHistory.length 
-      : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
-    if (len <= 1) return;
+    if (svgX < 620) {
+      setHoveredChip(null);
 
-    const graphWidth = mainChartWidth - 2 * padding;
-    const relativeX = svgX - padding;
-    const idx = Math.round((relativeX / graphWidth) * (len - 1));
+      const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
+      const len = chartParams.type === "worth" 
+        ? chartParams.slicedHistory.length 
+        : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
+      if (len <= 1) return;
 
-    if (idx >= 0 && idx < len) {
-      setHoveredIdx(idx);
+      const graphWidth = 620 - 2 * padding; // K线主图绘图区宽度
+      const relativeX = svgX - padding;
+      const idx = Math.round((relativeX / graphWidth) * (len - 1));
+
+      if (idx >= 0 && idx < len) {
+        setHoveredIdx(idx);
+      }
+    } else {
+      setHoveredIdx(null);
+
+      if (chartParams.type !== "kline" || !activeChips || !activeChips.bins || activeChips.bins.length === 0) return;
+
+      const clientY = e.clientY - rect.top;
+      const svgY = (clientY / rect.height) * 300;
+
+      let closestBin = null;
+      let minDistance = Infinity;
+      for (const b of activeChips.bins) {
+        if (b.price < chartParams.minWorth || b.price > chartParams.maxWorth) continue;
+        const y = chartParams.getY(b.price);
+        const dist = Math.abs(y - svgY);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestBin = b;
+        }
+      }
+
+      if (closestBin) {
+        const ratio = closestBin.volume / totalChipVolume;
+        setHoveredChip({
+          price: closestBin.price,
+          volume: closestBin.volume,
+          ratio,
+        });
+      }
     }
   };
 
@@ -751,20 +792,52 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
     const clientX = touch.clientX - rect.left;
-    const svgX = (clientX / rect.width) * mainChartWidth;
+    const svgX = (clientX / rect.width) * 760;
 
-    const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
-    const len = chartParams.type === "worth" 
-      ? chartParams.slicedHistory.length 
-      : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
-    if (len <= 1) return;
+    if (svgX < 620) {
+      setHoveredChip(null);
 
-    const graphWidth = mainChartWidth - 2 * padding;
-    const relativeX = svgX - padding;
-    const idx = Math.round((relativeX / graphWidth) * (len - 1));
+      const hasProjections = chartParams.type === "kline" && chartParams.hasProjections;
+      const len = chartParams.type === "worth" 
+        ? chartParams.slicedHistory.length 
+        : chartParams.slicedCandles.length + (hasProjections ? quantData.projections!.length : 0);
+      if (len <= 1) return;
 
-    if (idx >= 0 && idx < len) {
-      setHoveredIdx(idx);
+      const graphWidth = 620 - 2 * padding;
+      const relativeX = svgX - padding;
+      const idx = Math.round((relativeX / graphWidth) * (len - 1));
+
+      if (idx >= 0 && idx < len) {
+        setHoveredIdx(idx);
+      }
+    } else {
+      setHoveredIdx(null);
+
+      if (chartParams.type !== "kline" || !activeChips || !activeChips.bins || activeChips.bins.length === 0) return;
+
+      const clientY = touch.clientY - rect.top;
+      const svgY = (clientY / rect.height) * 300;
+
+      let closestBin = null;
+      let minDistance = Infinity;
+      for (const b of activeChips.bins) {
+        if (b.price < chartParams.minWorth || b.price > chartParams.maxWorth) continue;
+        const y = chartParams.getY(b.price);
+        const dist = Math.abs(y - svgY);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestBin = b;
+        }
+      }
+
+      if (closestBin) {
+        const ratio = closestBin.volume / totalChipVolume;
+        setHoveredChip({
+          price: closestBin.price,
+          volume: closestBin.volume,
+          ratio,
+        });
+      }
     }
   };
 
@@ -891,6 +964,7 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
 
       const c = chartParams.slicedCandles[idx];
       if (!c) return null;
+      const currentProfitRatio = activeChips ? (activeChips.profitRatio * 100).toFixed(1) : "0.0";
       return (
         <div className="text-[10px] font-mono text-[var(--text)] flex flex-wrap gap-x-4 gap-y-1 py-1 px-2.5 bg-[var(--inset)] border border-[var(--border)] rounded-[2px] select-none">
           <span className="text-amber-500 font-bold">{c.date}</span>
@@ -898,6 +972,7 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
           <span>高: <b className="font-semibold">{c.high.toFixed(2)}</b></span>
           <span>低: <b className="font-semibold">{c.low.toFixed(2)}</b></span>
           <span>收: <b className="font-semibold text-emerald-400">{c.close.toFixed(2)}</b></span>
+          <span>获利比例: <b className="font-semibold text-red-400">{currentProfitRatio}%</b></span>
           {showMA5 && chartParams.slicedMa5[idx] && <span>MA5: <span style={{ color: "#fef08a" }}>{chartParams.slicedMa5[idx].toFixed(2)}</span></span>}
           {showMA10 && chartParams.slicedMa10[idx] && <span>MA10: <span style={{ color: "#c084fc" }}>{chartParams.slicedMa10[idx].toFixed(2)}</span></span>}
           {showMA20 && chartParams.slicedMa20[idx] && <span>MA20: <span style={{ color: "#4ade80" }}>{chartParams.slicedMa20[idx].toFixed(2)}</span></span>}
@@ -1114,19 +1189,34 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
       <div className="min-h-[24px] flex items-center">{renderTooltip()}</div>
 
       {/* 4. 主画板区域 */}
-      <div className="flex flex-col lg:flex-row items-stretch gap-6">
+      <div className="relative">
         
         {/* 左侧走势图 */}
-        <div className="flex-1 min-w-0">
-          <div className="text-[9px] font-mono text-[var(--faint)] uppercase tracking-wider mb-2 flex justify-between">
+        <div className="w-full">
+          <div className="text-[9px] font-mono text-[var(--faint)] uppercase tracking-wider mb-2 flex justify-between items-center font-bold">
             <span>
               {chartType === "kline" 
                 ? `[${periodMode === "1W" ? "周K线" : periodMode === "1M" ? "月K线" : "日K线"} 股价回归走势图]` 
                 : "[120日 策略资产总净值模拟回测曲线]"}
             </span>
-            <span className="text-[9.5px] text-[var(--muted)] font-normal hidden md:inline">
-              (提示：点击图表后可使用键盘 ← / → 左右键切换查看详情)
-            </span>
+            {chartType === "kline" && (
+              <div className="flex items-center gap-4 text-[9.5px] normal-case font-normal text-[var(--muted)]">
+                <span className="hidden md:inline">
+                  (提示：点击图表后可使用键盘 ← / → / ↑ / ↓ 缩放与切换)
+                </span>
+                <span className="border-l border-[var(--border)] pl-4 font-mono">
+                  {hoveredChip ? (
+                    <span className="text-[var(--accent)] font-semibold">
+                      筹码定位: {hoveredChip.price.toFixed(2)}元 | 获利: {hoveredProfitRatio.toFixed(1)}% (占比: {(hoveredChip.ratio * 100).toFixed(1)}%)
+                    </span>
+                  ) : (
+                    <span className="text-[var(--text)] font-semibold">
+                      筹码集中度: {(activeChips.concentration * 100).toFixed(1)}%
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="relative border border-[var(--border)] bg-[var(--inset)] overflow-hidden rounded-none p-1">
@@ -1137,7 +1227,7 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
 
             <svg
               ref={svgRef}
-              viewBox={`0 0 ${mainChartWidth} ${totalSvgHeight}`}
+              viewBox={`0 0 760 ${totalSvgHeight}`}
               className="w-full h-auto block select-none"
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
@@ -1621,7 +1711,7 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
                   <line
                     x1={padding}
                     y1={getCrosshairY()}
-                    x2={mainChartWidth - padding}
+                    x2={740}
                     y2={getCrosshairY()}
                     stroke="var(--faint)"
                     strokeWidth="0.6"
@@ -1638,7 +1728,7 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
                   <line
                     x1={padding}
                     y1={chartParams.getY(hoveredChip.price)}
-                    x2={mainChartWidth - padding}
+                    x2={740}
                     y2={chartParams.getY(hoveredChip.price)}
                     stroke="var(--accent)"
                     strokeWidth="1.2"
@@ -1666,6 +1756,204 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
                   </text>
                 </g>
               )}
+
+              {/* 垂直分割线，分割 K 线区与筹码分布区 */}
+              {chartType === "kline" && (
+                <line
+                  x1={620}
+                  y1={padding}
+                  x2={620}
+                  y2={totalSvgHeight - padding}
+                  stroke="var(--border)"
+                  strokeWidth="1"
+                  strokeDasharray="2 3"
+                />
+              )}
+
+              {/* 筹码横向分布图，与主图合并对齐 */}
+              {chartType === "kline" && chipParams && (
+                <g transform="translate(620, 0)">
+                  {/* 支撑阻力带半透明背景区 */}
+                  {technical && (() => {
+                    const minY = padding;
+                    const maxY = padding + mainDrawHeight;
+                    const yLowSupport = chartParams.getY(technical.vrvp.supportZone.low);
+                    const yHighSupport = chartParams.getY(technical.vrvp.supportZone.high);
+                    const yLowResistance = chartParams.getY(technical.vrvp.resistanceZone.low);
+                    const yHighResistance = chartParams.getY(technical.vrvp.resistanceZone.high);
+
+                    const supportTop = Math.max(minY, Math.min(maxY, Math.min(yLowSupport, yHighSupport)));
+                    const supportBottom = Math.max(minY, Math.min(maxY, Math.max(yLowSupport, yHighSupport)));
+                    const supportHeight = Math.max(0, supportBottom - supportTop);
+
+                    const resistanceTop = Math.max(minY, Math.min(maxY, Math.min(yLowResistance, yHighResistance)));
+                    const resistanceBottom = Math.max(minY, Math.min(maxY, Math.max(yLowResistance, yHighResistance)));
+                    const resistanceHeight = Math.max(0, resistanceBottom - resistanceTop);
+                    
+                    return (
+                      <g>
+                        {supportHeight > 0.5 && (
+                          <rect
+                            x={0}
+                            y={supportTop}
+                            width={chipChartWidth}
+                            height={supportHeight}
+                            fill="rgba(16,185,129,0.06)"
+                            stroke="rgba(16,185,129,0.15)"
+                            strokeWidth="0.5"
+                            strokeDasharray="2 2"
+                          />
+                        )}
+                        {resistanceHeight > 0.5 && (
+                          <rect
+                            x={0}
+                            y={resistanceTop}
+                            width={chipChartWidth}
+                            height={resistanceHeight}
+                            fill="rgba(239,68,68,0.04)"
+                            stroke="rgba(239,68,68,0.12)"
+                            strokeWidth="0.5"
+                            strokeDasharray="2 2"
+                          />
+                        )}
+                      </g>
+                    );
+                  })()}
+
+                  {/* 收盘价/现价指示线 (横跨 K 线与筹码图) */}
+                  {(() => {
+                    const y = chartParams.getY(activePrice);
+                    const minY = padding;
+                    const maxY = padding + mainDrawHeight;
+                    if (y < minY || y > maxY) return null;
+
+                    const isHoveredPast = hoveredIdx !== null && hoveredIdx < currentCandles.length;
+                    return (
+                      <g>
+                        <line
+                          x1={-600} // 从左侧 K 线图的左边缘拉通
+                          y1={y}
+                          x2={chipChartWidth}
+                          y2={y}
+                          stroke="var(--accent)"
+                          strokeWidth="1.5"
+                          strokeDasharray="2 2"
+                          opacity="0.8"
+                        />
+                        <rect
+                          x={chipChartWidth - 48}
+                          y={y - 6}
+                          width="46"
+                          height="12"
+                          fill="var(--accent)"
+                          rx="1"
+                        />
+                        <text
+                          x={chipChartWidth - 25}
+                          y={y + 3}
+                          fill="var(--accent-fg)"
+                          fontSize="7.5"
+                          fontFamily="monospace"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                        >
+                          {isHoveredPast ? "收盘" : "现价"}:{activePrice.toFixed(2)}
+                        </text>
+                      </g>
+                    );
+                  })()}
+
+                  {/* 筹码直方柱体 (随日期联动数据源) */}
+                  {activeChips.bins.map((b, idx) => {
+                    const y = chartParams.getY(b.price);
+                    const minY = padding;
+                    const maxY = padding + mainDrawHeight;
+                    
+                    if (b.price < chartParams.minWorth || b.price > chartParams.maxWorth) return null;
+                    if (y < minY || y > maxY) return null;
+
+                    const barWidth = (b.volume / chipParams.maxVol) * (chipChartWidth - 15);
+                    const isProfit = b.price <= activePrice;
+
+                    return (
+                      <g
+                        key={idx}
+                        className="hover:opacity-85 transition-opacity cursor-crosshair"
+                      >
+                        <rect
+                          x={0}
+                          y={y - chipParams.binHeight / 2 - 1}
+                          width={chipChartWidth}
+                          height={chipParams.binHeight + 2}
+                          fill="transparent"
+                        />
+                        <rect
+                          x={0}
+                          y={y - chipParams.binHeight / 2}
+                          width={Math.max(1, barWidth)}
+                          height={chipParams.binHeight}
+                          fill={isProfit ? "var(--accent)" : "#3b82f6"}
+                          opacity={isProfit ? "0.45" : "0.35"}
+                        />
+                        {idx % 8 === 0 && (
+                          <text
+                            x={chipChartWidth - 3}
+                            y={y + 2.5}
+                            fill="var(--faint)"
+                            fontSize="6.5"
+                            fontFamily="monospace"
+                            textAnchor="end"
+                          >
+                            {b.price}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+
+                  {/* POC 控制线 */}
+                  {technical && (() => {
+                    const y = chartParams.getY(technical.vrvp.poc);
+                    const minY = padding;
+                    const maxY = padding + mainDrawHeight;
+                    if (y < minY || y > maxY) return null;
+
+                    return (
+                      <g>
+                        <line
+                          x1={0}
+                          y1={y}
+                          x2={chipChartWidth}
+                          y2={y}
+                          stroke="#f59e0b"
+                          strokeWidth="1.2"
+                          opacity="0.9"
+                        />
+                        <rect
+                          x={2}
+                          y={y - 5}
+                          width="38"
+                          height="10"
+                          fill="#f59e0b"
+                          opacity="0.9"
+                          rx="1"
+                        />
+                        <text
+                          x={21}
+                          y={y + 2.5}
+                          fill="#000"
+                          fontSize="6.5"
+                          fontFamily="monospace"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                        >
+                          POC:{technical.vrvp.poc}
+                        </text>
+                      </g>
+                    );
+                  })()}
+                </g>
+              )}
             </svg>
           </div>
           {chartType === "worth" && (
@@ -1674,271 +1962,6 @@ export default function QuantChart({ quantData, currentPrice, height, externalPe
             </p>
           )}
         </div>
-
-        {/* 右侧：筹码横向分布图 */}
-        {chartType === "kline" && chartParams && (
-          <div className="w-full lg:w-[150px] shrink-0 flex flex-col relative">
-            <div className="text-[9px] font-mono text-[var(--faint)] uppercase tracking-wider mb-2 flex justify-between h-[14px] items-center">
-              <span>[主力筹码沉淀堆积]</span>
-              {hoveredChip ? (
-                <span className="text-[var(--accent)] font-semibold font-mono">
-                  {hoveredChip.price.toFixed(2)}元: {(hoveredChip.ratio * 100).toFixed(1)}%
-                </span>
-              ) : (
-                <span className="text-[var(--text)] font-semibold">
-                  集中度: {(activeChips.concentration * 100).toFixed(1)}%
-                </span>
-              )}
-            </div>
-
-            <div className="border border-[var(--border)] bg-[var(--inset)] overflow-hidden rounded-none p-1 flex-1 relative min-h-[140px]">
-              {/* 股价单位标注 */}
-              <div className="absolute right-2 top-1.5 z-10 text-[7.5px] font-mono text-[var(--faint)] uppercase tracking-wider scale-90 origin-top-right">
-                Y轴: 价格(元)
-              </div>
-
-              <svg
-                viewBox={`0 0 ${chipChartWidth} ${chipChartHeight}`}
-                className="w-full h-full block select-none"
-              >
-                {/* 支撑阻力带半透明背景区 */}
-                {technical && (() => {
-                  const minY = padding;
-                  const maxY = padding + mainDrawHeight;
-                  const yLowSupport = chartParams.getY(technical.vrvp.supportZone.low);
-                  const yHighSupport = chartParams.getY(technical.vrvp.supportZone.high);
-                  const yLowResistance = chartParams.getY(technical.vrvp.resistanceZone.low);
-                  const yHighResistance = chartParams.getY(technical.vrvp.resistanceZone.high);
-
-                  // 限制绘制范围在主绘图区内
-                  const supportTop = Math.max(minY, Math.min(maxY, Math.min(yLowSupport, yHighSupport)));
-                  const supportBottom = Math.max(minY, Math.min(maxY, Math.max(yLowSupport, yHighSupport)));
-                  const supportHeight = Math.max(0, supportBottom - supportTop);
-
-                  const resistanceTop = Math.max(minY, Math.min(maxY, Math.min(yLowResistance, yHighResistance)));
-                  const resistanceBottom = Math.max(minY, Math.min(maxY, Math.max(yLowResistance, yHighResistance)));
-                  const resistanceHeight = Math.max(0, resistanceBottom - resistanceTop);
-                  
-                  return (
-                    <g>
-                      {/* 支撑带：淡绿色 */}
-                      {supportHeight > 0.5 && (
-                        <rect
-                          x={0}
-                          y={supportTop}
-                          width={chipChartWidth}
-                          height={supportHeight}
-                          fill="rgba(16,185,129,0.06)"
-                          stroke="rgba(16,185,129,0.15)"
-                          strokeWidth="0.5"
-                          strokeDasharray="2 2"
-                        />
-                      )}
-                      {/* 阻力带：淡红色 */}
-                      {resistanceHeight > 0.5 && (
-                        <rect
-                          x={0}
-                          y={resistanceTop}
-                          width={chipChartWidth}
-                          height={resistanceHeight}
-                          fill="rgba(239,68,68,0.04)"
-                          stroke="rgba(239,68,68,0.12)"
-                          strokeWidth="0.5"
-                          strokeDasharray="2 2"
-                        />
-                      )}
-                    </g>
-                  );
-                })()}
-
-                {/* 收盘价/现价指示线 (随日期联动) */}
-                {(() => {
-                  const y = chartParams.getY(activePrice);
-                  const minY = padding;
-                  const maxY = padding + mainDrawHeight;
-                  // 若超出当前可视价格区间，则不绘制
-                  if (y < minY || y > maxY) return null;
-
-                  const isHoveredPast = hoveredIdx !== null && hoveredIdx < currentCandles.length;
-                  return (
-                    <g>
-                      <line
-                        x1={0}
-                        y1={y}
-                        x2={chipChartWidth}
-                        y2={y}
-                        stroke="var(--accent)"
-                        strokeWidth="1.5"
-                        strokeDasharray="2 2"
-                        opacity="0.8"
-                      />
-                      <rect
-                        x={chipChartWidth - 48}
-                        y={y - 6}
-                        width="46"
-                        height="12"
-                        fill="var(--accent)"
-                        rx="1"
-                      />
-                      <text
-                        x={chipChartWidth - 25}
-                        y={y + 3}
-                        fill="var(--accent-fg)"
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        fontWeight="bold"
-                        textAnchor="middle"
-                      >
-                        {isHoveredPast ? "收盘" : "现价"}:{activePrice.toFixed(2)}
-                      </text>
-                    </g>
-                  );
-                })()}
-
-                {/* 筹码直方柱体 (随日期联动数据源) */}
-                {chipParams && activeChips.bins.map((b, idx) => {
-                  const y = chartParams.getY(b.price);
-                  const minY = padding;
-                  const maxY = padding + mainDrawHeight;
-                  
-                  // 过滤可视区间以外的价格，防止超出主图绘制区域
-                  if (b.price < chartParams.minWorth || b.price > chartParams.maxWorth) return null;
-                  if (y < minY || y > maxY) return null;
-
-                  const barWidth = (b.volume / chipParams.maxVol) * (chipChartWidth - 15);
-                  const isProfit = b.price <= activePrice;
-                  const ratio = b.volume / totalChipVolume;
-
-                  return (
-                    <g
-                      key={idx}
-                      className="hover:opacity-85 transition-opacity cursor-crosshair"
-                      onMouseEnter={() => setHoveredChip({ price: b.price, volume: b.volume, ratio })}
-                      onMouseLeave={() => setHoveredChip(null)}
-                    >
-                      {/* 全宽交互感应矩形 */}
-                      <rect
-                        x={0}
-                        y={y - chipParams.binHeight / 2 - 1}
-                        width={chipChartWidth}
-                        height={chipParams.binHeight + 2}
-                        fill="transparent"
-                      />
-                      <rect
-                        x={0}
-                        y={y - chipParams.binHeight / 2}
-                        width={Math.max(1, barWidth)}
-                        height={chipParams.binHeight}
-                        fill={isProfit ? "var(--accent)" : "#3b82f6"}
-                        opacity={isProfit ? "0.45" : "0.35"}
-                      />
-                      {idx % 8 === 0 && (
-                        <text
-                          x={chipChartWidth - 3}
-                          y={y + 2.5}
-                          fill="var(--faint)"
-                          fontSize="6.5"
-                          fontFamily="monospace"
-                          textAnchor="end"
-                        >
-                          {b.price}
-                        </text>
-                      )}
-                    </g>
-                  );
-                })}
-
-                {/* POC 控制线 */}
-                {technical && (() => {
-                  const y = chartParams.getY(technical.vrvp.poc);
-                  const minY = padding;
-                  const maxY = padding + mainDrawHeight;
-                  // 若超出当前可视价格区间，则不绘制
-                  if (y < minY || y > maxY) return null;
-
-                  return (
-                    <g>
-                      <line
-                        x1={0}
-                        y1={y}
-                        x2={chipChartWidth}
-                        y2={y}
-                        stroke="#f59e0b"
-                        strokeWidth="1.2"
-                        opacity="0.9"
-                      />
-                      <rect
-                        x={2}
-                        y={y - 5}
-                        width="38"
-                        height="10"
-                        fill="#f59e0b"
-                        opacity="0.9"
-                        rx="1"
-                      />
-                      <text
-                        x={21}
-                        y={y + 2.5}
-                        fill="#000"
-                        fontSize="6.5"
-                        fontFamily="monospace"
-                        fontWeight="bold"
-                        textAnchor="middle"
-                      >
-                        POC:{technical.vrvp.poc}
-                      </text>
-                    </g>
-                  );
-                })()}
-
-                {/* 联动：筹码图上的鼠标实时价格定位虚线与标签 */}
-                {hoveredChip !== null && chipParams && (() => {
-                  const y = chartParams.getY(hoveredChip.price);
-                  const minY = padding;
-                  const maxY = padding + mainDrawHeight;
-                  // 若超出当前可视价格区间，则不绘制
-                  if (y < minY || y > maxY) return null;
-
-                  return (
-                    <g>
-                      <line
-                        x1={0}
-                        y1={y}
-                        x2={chipChartWidth}
-                        y2={y}
-                        stroke="var(--accent)"
-                        strokeWidth="1.2"
-                        strokeDasharray="2 2"
-                        opacity="0.9"
-                      />
-                      <rect
-                        x={2}
-                        y={y - 6}
-                        width="34"
-                        height="12"
-                        fill="var(--accent)"
-                        opacity="0.95"
-                        rx="1"
-                      />
-                      <text
-                        x={19}
-                        y={y + 2.5}
-                        fill="var(--accent-fg)"
-                        fontSize="7"
-                        fontFamily="monospace"
-                        fontWeight="bold"
-                        textAnchor="middle"
-                      >
-                        {hoveredChip.price.toFixed(2)}
-                      </text>
-                    </g>
-                  );
-                })()}
-              </svg>
-            </div>
-          </div>
-        )}
-
       </div>
 
       {/* 5. 交易动作历史与规则展示 */}

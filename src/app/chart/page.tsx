@@ -257,10 +257,10 @@ function ChartInner() {
   const up = data ? data.quote.changePct >= 0 : true;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#090b10] text-[#e2e8f0] font-sans overflow-hidden select-none">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--bg)] text-[var(--text)] font-sans overflow-hidden select-none">
       
-      {/* 顶部 TradingView 极简黑深工具栏 */}
-      <header className="h-[48px] bg-[#0f111a] border-b border-[#1f2233] px-3 flex items-center justify-between shrink-0">
+      {/* 顶部 TradingView 极简自适应工具栏 */}
+      <header className="h-[48px] bg-[var(--surface)] border-b border-[var(--border)] px-3 flex items-center justify-between shrink-0">
         
         {/* 左侧：搜索与切换 */}
         <div className="flex items-center gap-3">
@@ -277,19 +277,19 @@ function ChartInner() {
                 }
               }}
               placeholder="🔍 搜索个股代码/名称..."
-              className="bg-[#181a26] border border-[#2e324d] text-xs px-2.5 py-1 w-48 rounded-[2px] text-white focus:outline-none focus:border-[var(--accent)] font-mono placeholder:text-[var(--faint)]"
+              className="bg-[var(--bg)] border border-[var(--border)] text-xs px-2.5 py-1 w-48 rounded-[2px] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] font-mono placeholder:text-[var(--faint)]"
             />
             
             {/* 搜索结果浮层 */}
             {searchFocused && searchResults.length > 0 && (
-              <div className="absolute left-0 mt-1 w-64 bg-[#131622] border border-[#2e324d] z-50 max-h-60 overflow-y-auto rounded-[2px] shadow-2xl">
+              <div className="absolute left-0 mt-1 w-64 bg-[var(--popover-bg)] border border-[var(--border)] z-50 max-h-60 overflow-y-auto rounded-[2px] shadow-2xl">
                 {searchResults.map((r) => (
                   <button
                     key={`${r.code}-${r.market}`}
                     onMouseDown={() => handleSelectStock(r.code)}
-                    className="w-full text-left px-3 py-2 text-xs font-mono hover:bg-[#1c2035] flex items-center justify-between border-b border-[#1f2233]"
+                    className="w-full text-left px-3 py-2 text-xs font-mono hover:bg-[var(--hover)] flex items-center justify-between border-b border-[var(--border)]"
                   >
-                    <span className="font-bold text-gray-200">{r.name}</span>
+                    <span className="font-bold text-[var(--text)]">{r.name}</span>
                     <span className="text-[var(--faint)]">{r.code}.{r.market}</span>
                   </button>
                 ))}
@@ -298,7 +298,7 @@ function ChartInner() {
           </div>
 
           {/* 周期切换按钮 */}
-          <div className="flex items-center gap-1 border-l border-[#2e324d] pl-3 ml-1">
+          <div className="flex items-center gap-1 border-l border-[var(--border)] pl-3 ml-1">
             {(["1D", "1W", "1M"] as const).map((p) => (
               <button
                 key={p}
@@ -309,8 +309,8 @@ function ChartInner() {
                 }}
                 className={`px-2 py-0.5 text-[10px] font-bold font-mono rounded-[1px] transition cursor-pointer ${
                   period === p
-                    ? "bg-[var(--accent)] text-white"
-                    : "bg-[#181a26] border border-[#2e324d] text-[var(--muted)] hover:text-white"
+                    ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                    : "bg-[var(--bg)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]"
                 }`}
               >
                 {p === "1D" ? "日线" : p === "1W" ? "周线" : "月线"}
@@ -319,8 +319,8 @@ function ChartInner() {
           </div>
 
           {data && (
-            <div className="flex items-baseline gap-2 border-l border-[#2e324d] pl-3">
-              <span className="text-xs font-bold text-gray-100 font-mono">{data.quote.name}</span>
+            <div className="flex items-baseline gap-2 border-l border-[var(--border)] pl-3">
+              <span className="text-xs font-bold text-[var(--text)] font-mono">{data.quote.name}</span>
               <span className="text-[10px] font-mono text-[var(--muted)]">{data.quote.code}</span>
               <span className="text-xs font-black font-mono ml-1">{data.quote.price.toFixed(2)}</span>
               <span className={`text-[10px] font-mono font-bold ${up ? "text-red-500" : "text-emerald-500"}`}>
@@ -334,7 +334,7 @@ function ChartInner() {
         <div className="flex items-center gap-3">
           <a
             href={data ? `/analyze?code=${data.quote.code}` : "/analyze"}
-            className="px-3 py-1 bg-[#1c2035] hover:bg-[#282d4a] text-xs font-bold text-gray-200 rounded-[2px] transition flex items-center gap-1"
+            className="px-3 py-1 border border-[var(--border)] bg-[var(--hover)] hover:bg-[var(--border)] text-xs font-bold text-[var(--text)] rounded-[2px] transition flex items-center gap-1"
           >
             <span>返回分析 ↵</span>
           </a>
@@ -345,7 +345,7 @@ function ChartInner() {
       <div className="flex-1 flex overflow-hidden relative">
         
         {/* 左侧大图表工作区 */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#0c0d15] p-3">
+        <div className="flex-1 flex flex-col overflow-hidden bg-[var(--bg)] p-3">
           {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-[var(--muted)] font-mono text-xs">
               <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-[var(--accent)] border-t-transparent mb-3" />
@@ -378,41 +378,41 @@ function ChartInner() {
 
         {/* 右侧综合面板 (长驻) */}
         {data && (
-          <div className="w-[380px] shrink-0 bg-[#0f111a] border-l border-[#1f2233] flex flex-col overflow-hidden">
+          <div className="w-[380px] shrink-0 bg-[var(--surface)] border-l border-[var(--border)] flex flex-col overflow-hidden">
             {/* 侧栏功能切换 Tab */}
-            <div className="h-[40px] bg-[#131622] border-b border-[#1f2233] flex items-stretch shrink-0 overflow-x-auto select-none">
+            <div className="h-[40px] bg-[var(--bg)] border-b border-[var(--border)] flex items-stretch shrink-0 overflow-x-auto select-none">
               <button
                 onClick={() => setActiveTab("ai")}
-                className={`flex-1 px-2.5 text-[10px] font-bold font-mono transition cursor-pointer border-r border-[#1f2233] flex items-center justify-center gap-1 ${
+                className={`flex-1 px-2.5 text-[11px] font-bold transition cursor-pointer border-r border-[var(--border)] flex items-center justify-center gap-1 ${
                   activeTab === "ai"
-                    ? "bg-[#181a26] text-[var(--accent)] font-extrabold border-b border-b-[var(--accent)]"
-                    : "text-[var(--muted)] hover:text-white"
+                    ? "bg-[var(--surface)] text-[var(--accent)] font-black border-b-2 border-b-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--hover)]"
                 }`}
               >
-                <span>⚡ AI 研判</span>
+                <span>AI 研判</span>
               </button>
               
               <button
                 onClick={() => setActiveTab("trades")}
-                className={`flex-1 px-2.5 text-[10px] font-bold font-mono transition cursor-pointer border-r border-[#1f2233] flex items-center justify-center gap-1 ${
+                className={`flex-1 px-2.5 text-[11px] font-bold transition cursor-pointer border-r border-[var(--border)] flex items-center justify-center gap-1 ${
                   activeTab === "trades"
-                    ? "bg-[#181a26] text-[var(--accent)] font-extrabold border-b border-b-[var(--accent)]"
-                    : "text-[var(--muted)] hover:text-white"
+                    ? "bg-[var(--surface)] text-[var(--accent)] font-black border-b-2 border-b-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--hover)]"
                 }`}
               >
-                <span>📊 交易信号</span>
+                <span>交易信号</span>
               </button>
 
               <button
                 onClick={() => setActiveTab("terminal")}
-                className={`flex-1 px-2.5 text-[10px] font-bold font-mono transition cursor-pointer flex items-center justify-center gap-1 ${
+                className={`flex-1 px-2.5 text-[11px] font-bold transition cursor-pointer flex items-center justify-center gap-1 ${
                   activeTab === "terminal"
-                    ? "bg-[#181a26] text-[var(--accent)] font-extrabold border-b border-b-[var(--accent)]"
-                    : "text-[var(--muted)] hover:text-white"
+                    ? "bg-[var(--surface)] text-[var(--accent)] font-black border-b-2 border-b-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--hover)]"
                 }`}
               >
                 <span className={`w-1 h-1 rounded-full ${aiLoading ? "bg-[var(--accent)] animate-pulse" : "bg-[var(--faint)]"}`} />
-                <span>💻 推理终端</span>
+                <span>推理终端</span>
               </button>
             </div>
 
@@ -431,7 +431,7 @@ function ChartInner() {
                     </span>
                   </div>
                   {aiLogText ? (
-                    <div className="h-[420px] overflow-y-auto p-3 bg-black border border-neutral-800 rounded-[2px] text-[10px] font-mono text-emerald-500/90 whitespace-pre-wrap leading-relaxed shadow-inner">
+                    <div className="flex-1 min-h-[350px] overflow-y-auto p-3 bg-[var(--bg)] border border-[var(--border)] rounded-[2px] text-[10px] font-mono text-emerald-500/90 whitespace-pre-wrap leading-relaxed shadow-inner">
                       {aiLogText}
                       {aiLoading && <span className="inline-block w-1.5 h-3 bg-emerald-400 animate-ping ml-0.5" />}
                     </div>
@@ -461,20 +461,20 @@ function ChartInner() {
               {activeTab === "ai" && !aiError && (
                 <>
                   {/* Verdict Card */}
-                  <div className="border border-[#2e324d] bg-[#181a26] p-3 rounded-[2px] space-y-2">
+                  <div className="border border-[var(--border)] bg-[var(--bg)] p-3 rounded-[2px] space-y-2">
                     <div className="flex justify-between items-center text-[9px] text-[var(--faint)] font-mono">
                       <span>研判等级 (VERDICT)</span>
                       <span className="text-red-400 font-bold">{data.assessment.verdict}</span>
                     </div>
-                    <p className="font-semibold text-gray-200 leading-relaxed italic text-[11px] border-t border-[#1f2233] pt-1.5 mt-1">
+                    <p className="font-semibold text-[var(--text)] leading-relaxed italic text-[11px] border-t border-[var(--border)] pt-1.5 mt-1">
                       “ {data.assessment.thesis} ”
                     </p>
                   </div>
 
                   {/* 五因子雷达图 */}
                   {data.assessment.factors && data.assessment.factors.length > 0 ? (
-                    <div className="border border-[#1f2233] bg-[#131622] p-3 rounded-[2px] space-y-3">
-                      <h4 className="font-bold text-gray-200 border-b border-[#1f2233] pb-1.5 text-[10.5px]">五因子雷达图谱</h4>
+                    <div className="border border-[var(--border)] bg-[var(--bg)] p-3 rounded-[2px] space-y-3">
+                      <h4 className="font-bold text-[var(--text)] border-b border-[var(--border)] pb-1.5 text-[10.5px]">五因子雷达图谱</h4>
                       <div className="py-2">
                         <RadarChart
                           size={140}
@@ -488,10 +488,10 @@ function ChartInner() {
                         {data.assessment.factors.map((f) => (
                           <div key={f.key} className="space-y-0.5">
                             <div className="flex justify-between text-[10px]">
-                              <span className="text-gray-300 font-semibold">{FACTOR_LABELS[f.key] || f.key}</span>
+                              <span className="text-[var(--text)] font-semibold">{FACTOR_LABELS[f.key] || f.key}</span>
                               <span className="font-mono text-[var(--accent)]">{f.score.toFixed(1)}</span>
                             </div>
-                            <div className="h-[3px] bg-neutral-900 rounded-none overflow-hidden">
+                            <div className="h-[3px] bg-[var(--border)] rounded-none overflow-hidden">
                               <div
                                 className="h-full bg-[var(--accent)] transition-all"
                                 style={{ width: `${(f.score / 5) * 100}%` }}
@@ -509,8 +509,8 @@ function ChartInner() {
 
                   {/* BOM 拆解与卡脖子 */}
                   {data.assessment.bomPosition && (
-                    <div className="border border-[#1f2233] bg-[#131622] p-3 rounded-[2px] space-y-2">
-                      <h4 className="font-bold text-gray-200 border-b border-[#1f2233] pb-1.5 text-[10.5px] flex justify-between items-center">
+                    <div className="border border-[var(--border)] bg-[var(--bg)] p-3 rounded-[2px] space-y-2">
+                      <h4 className="font-bold text-[var(--text)] border-b border-[var(--border)] pb-1.5 text-[10.5px] flex justify-between items-center">
                         <span>BOM 成本链定位</span>
                         <span className="text-[9.5px] font-mono text-[var(--accent)] bg-[var(--accent-soft)] border border-[var(--accent-line)] px-1 rounded-[1px]">
                           BOM占比: {data.assessment.bomPosition.bomRatio}
@@ -518,7 +518,7 @@ function ChartInner() {
                       </h4>
                       <div className="space-y-1 text-[11px]">
                         <div className="text-[var(--faint)] font-semibold">主研节点：</div>
-                        <div className="font-mono font-bold text-gray-300">{data.assessment.bomPosition.nodeName}</div>
+                        <div className="font-mono font-bold text-[var(--text)]">{data.assessment.bomPosition.nodeName}</div>
                         <div className="text-[var(--faint)] font-semibold mt-2">物料作用与瓶颈点验证：</div>
                         <p className="text-[var(--muted)] leading-relaxed text-justify">{data.assessment.bomPosition.role}</p>
                       </div>
@@ -534,7 +534,7 @@ function ChartInner() {
                           {data.assessment.catalysts.map((c, i) => <li key={i}>{c}</li>)}
                         </ul>
                       </div>
-                      <div className="space-y-1.5 border-t border-[#1f2233] pt-2">
+                      <div className="space-y-1.5 border-t border-[var(--border)] pt-2">
                         <h4 className="font-bold text-emerald-400 text-[10.5px]">潜在投资风险</h4>
                         <ul className="list-decimal pl-4 space-y-1 text-[11px] text-[var(--muted)]">
                           {data.assessment.risks.map((r, i) => <li key={i}>{r}</li>)}
@@ -549,17 +549,17 @@ function ChartInner() {
               {activeTab === "trades" && data.quant && (
                 <div className="space-y-4">
                   {/* 策略胜率/收益率面板 */}
-                  <div className="border border-[#1f2233] bg-[#131622] p-3 rounded-[2px] space-y-2 font-mono text-[11px]">
-                    <div className="font-bold text-gray-200 border-b border-[#1f2233] pb-1.5 text-[10.5px] uppercase">
+                  <div className="border border-[var(--border)] bg-[var(--bg)] p-3 rounded-[2px] space-y-2 font-mono text-[11px]">
+                    <div className="font-bold text-[var(--text)] border-b border-[var(--border)] pb-1.5 text-[10.5px] uppercase">
                       回测统计 (BACKTEST STATS)
                     </div>
-                    <div className="flex justify-between py-1 border-b border-[#131622]">
+                    <div className="flex justify-between py-1 border-b border-[var(--border)]/20">
                       <span className="text-[var(--faint)]">策略胜率:</span>
                       <span className="font-bold text-[var(--accent)]">
                         {((data.quant.backtest?.winRate || 0.5) * 100).toFixed(1)}%
                       </span>
                     </div>
-                    <div className="flex justify-between py-1 border-b border-[#131622]">
+                    <div className="flex justify-between py-1 border-b border-[var(--border)]/20">
                       <span className="text-[var(--faint)]">策略累计收益:</span>
                       <span className="font-bold text-red-400">
                         +{data.quant.backtest?.strategyReturn.toFixed(1)}%
@@ -579,9 +579,9 @@ function ChartInner() {
                       量化策略历史交易信号明细
                     </div>
                     {data.quant.backtest?.trades && data.quant.backtest.trades.length > 0 ? (
-                      <div className="border border-[#1f2233] bg-[#0f111a] rounded-[2px] overflow-hidden">
-                        <div className="max-h-[380px] overflow-y-auto p-3">
-                          <div className="space-y-3 divide-y divide-[#1f2233]/40">
+                      <div className="border border-[var(--border)] bg-[var(--surface)] rounded-[2px] overflow-hidden">
+                        <div className="p-3">
+                          <div className="space-y-3 divide-y divide-[var(--border)]/40">
                             {[...data.quant.backtest.trades].reverse().map((t: any, i: number) => {
                               const isBuy = t.type === "buy";
                               return (
@@ -593,13 +593,13 @@ function ChartInner() {
                                       }`}>
                                         {isBuy ? "BUY 买入" : "SELL 卖出"}
                                       </span>
-                                      <span className="text-gray-300 font-semibold">{t.date}</span>
+                                      <span className="text-[var(--text)] font-semibold">{t.date}</span>
                                     </div>
                                     <div className="font-bold">
-                                      成交: <span className="text-white">{t.price.toFixed(2)} 元</span>
+                                      成交: <span className="text-[var(--text)]">{t.price.toFixed(2)} 元</span>
                                     </div>
                                   </div>
-                                  <p className="text-[10px] text-[var(--muted)] leading-relaxed bg-[#131622] p-1.5 rounded-[1px] border border-[#1f2233]/30">
+                                  <p className="text-[10px] text-[var(--muted)] leading-relaxed bg-[var(--bg)] p-1.5 rounded-[1px] border border-[var(--border)]/30">
                                     {t.reason}
                                   </p>
                                   {!isBuy && t.profitPct != null && (
@@ -635,7 +635,7 @@ function ChartInner() {
 
 export default function ChartPage() {
   return (
-    <Suspense fallback={<div className="fixed inset-0 z-50 bg-[#090b10] flex items-center justify-center font-mono text-xs text-[var(--muted)]">Loading terminal...</div>}>
+    <Suspense fallback={<div className="fixed inset-0 z-50 bg-[var(--bg)] flex items-center justify-center font-mono text-xs text-[var(--muted)]">Loading terminal...</div>}>
       <ChartInner />
     </Suspense>
   );
