@@ -532,6 +532,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
 
       return {
         type: "kline" as const,
+        sliceStart,
         minWorth: minVal,
         maxWorth: maxVal,
         getX,
@@ -657,6 +658,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
 
       return {
         type: "worth" as const,
+        sliceStart,
         minWorth,
         maxWorth,
         getX: getXWorth,
@@ -678,22 +680,31 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
 
   // 联动筹码数据源：当 hoveredIdx 不为空且在 K 线范围内，实时计算当前日期的筹码分布；否则使用最新筹码
   const activeChips = useMemo(() => {
-    if (hoveredIdx === null || hoveredIdx >= currentCandles.length) {
+    if (hoveredIdx === null || !chartParams) {
       return chips;
     }
-    const idx = hoveredIdx;
-    const subHistory = currentCandles.slice(0, idx + 1);
-    const dayClose = currentCandles[idx].close;
+    const sliceStart = (chartParams as any).sliceStart || 0;
+    const absoluteIdx = sliceStart + hoveredIdx;
+    if (absoluteIdx >= currentCandles.length) {
+      return chips;
+    }
+    const subHistory = currentCandles.slice(0, absoluteIdx + 1);
+    const dayClose = currentCandles[absoluteIdx].close;
     return calculateChipDistribution(subHistory, dayClose);
-  }, [currentCandles, chips, hoveredIdx]);
+  }, [currentCandles, chips, hoveredIdx, chartParams]);
 
   // 联动指示价格：当 hoveredIdx 不为空且在 K 线范围内，使用该天的收盘价，否则使用最新现价
   const activePrice = useMemo(() => {
-    if (hoveredIdx === null || hoveredIdx >= currentCandles.length) {
+    if (hoveredIdx === null || !chartParams) {
       return currentPrice;
     }
-    return currentCandles[hoveredIdx].close;
-  }, [currentCandles, currentPrice, hoveredIdx]);
+    const sliceStart = (chartParams as any).sliceStart || 0;
+    const absoluteIdx = sliceStart + hoveredIdx;
+    if (absoluteIdx >= currentCandles.length) {
+      return currentPrice;
+    }
+    return currentCandles[absoluteIdx].close;
+  }, [currentCandles, currentPrice, hoveredIdx, chartParams]);
 
   // 计算 hovered 价格下的累计获利盘比例 (小于等于此价格的筹码量 / 总筹码量)
   const hoveredProfitRatio = useMemo(() => {
@@ -1827,7 +1838,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                     const maxY = padding + mainDrawHeight;
                     if (y < minY || y > maxY) return null;
 
-                    const isHoveredPast = hoveredIdx !== null && hoveredIdx < currentCandles.length;
+                    const isHoveredPast = hoveredIdx !== null && chartParams && chartParams.type === "kline" && hoveredIdx < chartParams.slicedCandles.length;
                     return (
                       <g>
                         <line

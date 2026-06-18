@@ -4,6 +4,16 @@
 
 ---
 
+## [0.4.2] - 2026-06-18
+
+### 🛠️ 修复与联动优化 (Fixed & Interaction Alignment)
+- **修复切片索引误用导致的价格与筹码严重错位 Bug**：
+  - 修复了在看盘控制台上移动鼠标时，高亮指示线和联动筹码取值错位的硬伤。由于交互中 `hoveredIdx` 保存的是当前可视 K 线切片（`slicedCandles`）的相对索引，而在计算筹码分布 `activeChips` 和现价联动线 `activePrice` 时，误将其作为了包含全部历史数据的 `currentCandles` 绝对索引使用，导致了严重的价格偏差（如在用户鼠标悬浮于收盘价为 `15.06` 的 K 线柱上时，右侧联动虚线却错位指向历史最远端收盘价为 `20.58` 的位置）。
+  - 通过在 `chartParams` 中将当前可视区间起始绝对偏移量 `sliceStart` 作为属性返回，在计算 `activeChips` 和 `activePrice` 时，利用 `absoluteIdx = sliceStart + hoveredIdx` 准确还原了在完整历史数据中的绝对索引，实现左右价格及对应历史筹码切片的完美精确对齐。
+  - 修正了 `isHoveredPast` 的预测区范围拦截判定。限制其只有在 K 线模式且 `hoveredIdx < chartParams.slicedCandles.length` 时才判定为历史走势，避免在悬浮于右侧未来预测区时，界面误显示“收盘: xxx”文本，现在会正确展示为“现价: xxx”。
+
+---
+
 ## [0.4.1] - 2026-06-18
 
 ### ✨ 新增与重构 (Added & Refactored)
