@@ -88,7 +88,7 @@ function ChartInner() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // 执行核心诊断与图表数据载入 (多阶段优化：极速秒开图表 + 后台并发流式 AI 诊断)
+  // 执行核心诊断与图表数据载入 (并行优化：行情秒开 + AI 诊断后台同时并发)
   async function loadStock(code: string, currentPeriod = period) {
     if (!/^\d{6}$/.test(code)) return;
     setLoading(true);
@@ -100,9 +100,17 @@ function ChartInner() {
     setAiLogText("");
     setAiError("");
     
-    // 阶段1：极速载入个股基础 K 线图表和基础数据 (耗时约 300ms)
+    // 同时并发发起行情基础数据与 AI 诊断请求，互不阻塞
+    const chartPromise = fetch(`/api/market/chart-data?code=${code}&period=${currentPeriod}`);
+    const aiPromise = fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+
+    // 阶段1：优先 await 轻量行情数据（~300ms），立即渲染 K 线首屏
     try {
-      const chartRes = await fetch(`/api/market/chart-data?code=${code}&period=${currentPeriod}`);
+      const chartRes = await chartPromise;
       if (!chartRes.ok) {
         throw new Error(`基础行情拉取错误: ${chartRes.status}`);
       }
@@ -137,16 +145,12 @@ function ChartInner() {
       return;
     }
 
-    // 阶段2：后台流式发起 AI 瓶颈研判，输出流展现到右侧侧栏终端
+    // 阶段2：行情已秒开渲染，现在开始消费 AI 诊断流（此请求已与行情同时发出，大幅缩短等待时间）
     setAiLoading(true);
     setAiStageMsg("启动 AI 瓶颈点打分分析...");
     setActiveTab("terminal"); // 自动选定终端显示推理过程
     try {
-      const aiRes = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
+      const aiRes = await aiPromise;
 
       if (!(aiRes.headers.get("content-type") || "").includes("ndjson")) {
         const json = await aiRes.json().catch(() => ({}));

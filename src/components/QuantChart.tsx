@@ -935,7 +935,8 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
     return amtNum.toFixed(0) + " 元";
   };
 
-  if (!chartParams || !chipParams) {
+  // 仅在 chartParams 完全缺失时才显示报错；chipParams 为 null 时（净值模式或筹码异常）只降级隐藏筹码图
+  if (!chartParams) {
     return (
       <div className="py-8 text-center text-xs text-[var(--muted)] font-mono">
         QUANT DATA PROCESSING FAILED.

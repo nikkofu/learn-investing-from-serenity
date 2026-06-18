@@ -4,6 +4,19 @@
 
 ---
 
+## [0.4.4] - 2026-06-18
+
+### 🐛 关键崩溃修复 (Critical Bug Fix)
+- **修复多个股看盘页面 `QUANT DATA PROCESSING FAILED` 崩溃问题**：
+  - **净值模式必崩修复**：在 `QuantChart.tsx` 中，当用户切换为"策略净值对比"视图时，`chipParams` 会正常返回 `null`（因为净值折线图无需筹码直方图），但全局拦截逻辑将其与 `chartParams` 进行了 AND 组合判断，导致必定崩溃。现已修改为仅检查 `chartParams`，`chipParams` 为空时只降级隐藏筹码区。
+  - **VRVP 算术防御加固**：在 `quant.ts` 的 `calculateChipDistribution` 和 `analyzeTechnicalPatterns` 中加入 `safeNum` 辅助函数，全面拦截 `NaN`、`Infinity`、`-Infinity` 等非法浮点运算结果。对 `avgCost`、`profitRatio`、`priceLow70/priceHigh70`、`supportPrice`、`resistancePrice` 等关键指标实施安全回退，确保经 JSON 序列化后不会产生 `null` 值污染前端。
+
+### ⚡ 首屏性能优化 (Performance)
+- **行情与 AI 诊断请求并行化**：
+  - 重构 `chart/page.tsx` 的 `loadStock` 函数。原有逻辑为先 `await` 基础行情接口（~300ms）、再串行发起 AI 流式诊断请求（~15s）。现改为在函数入口同时 `fetch` 两个请求：优先 await 轻量行情响应渲染 K 线首屏（用户秒看到图表），AI 诊断则在后台并发消费流式数据。极速压缩用户等待感知时间。
+
+---
+
 ## [0.4.3] - 2026-06-18
 
 ### ⚡ 交互升级与稳定性增强 (UX Streamlining & Robustness)

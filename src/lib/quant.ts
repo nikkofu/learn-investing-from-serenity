@@ -35,6 +35,11 @@ export interface BacktestResult {
  * 算法原理：基于 120 天日K线，以每日换手率进行筹码历史衰减。
  * 每日新筹码以当天的收盘价为中心，结合最高/最低价进行三角概率分布沉淀。
  */
+// 安全数值校验：确保浮点运算产物不含 NaN / Infinity，污染后回退到指定默认值
+function safeNum(v: number, fallback: number): number {
+  return Number.isFinite(v) ? v : fallback;
+}
+
 export function calculateChipDistribution(
   candles: Candle[],
   currentPrice: number,
@@ -116,8 +121,8 @@ export function calculateChipDistribution(
 
   if (totalVolume === 0) totalVolume = 1;
 
-  const profitRatio = profitVolume / totalVolume;
-  const avgCost = Math.round((costSum / totalVolume) * 100) / 100;
+  const profitRatio = safeNum(profitVolume / totalVolume, 0);
+  const avgCost = safeNum(Math.round((costSum / totalVolume) * 100) / 100, currentPrice);
 
   // 4. 计算 70% 筹码集中度
   // 找出包含总筹码 70% 的最窄价格区间
@@ -132,12 +137,12 @@ export function calculateChipDistribution(
     if (accumulatedVol >= threshold70) break;
   }
 
-  const priceLow70 = Math.min(...selectedPrices);
-  const priceHigh70 = Math.max(...selectedPrices);
+  const priceLow70 = safeNum(selectedPrices.length > 0 ? Math.min(...selectedPrices) : currentPrice, currentPrice);
+  const priceHigh70 = safeNum(selectedPrices.length > 0 ? Math.max(...selectedPrices) : currentPrice, currentPrice);
   const priceDiff = priceHigh70 - priceLow70;
   const priceSum = priceHigh70 + priceLow70;
   // 集中度 = 价格宽度 / 价格均值
-  const concentration = priceSum > 0 ? Math.round((priceDiff / (priceSum / 2)) * 1000) / 1000 : 0;
+  const concentration = priceSum > 0 ? safeNum(Math.round((priceDiff / (priceSum / 2)) * 1000) / 1000, 0) : 0;
 
   return {
     bins: fastMode ? [] : bins.map(b => ({ price: b.price, volume: Math.round(b.volume) })),
@@ -834,18 +839,24 @@ export function analyzeTechnicalPatterns(
     }
   }
   
-  // 支撑带支撑位确定 (下方最邻近的 HVN)
+  // 支撑带支撑位确定 (下方最邻近的 HVN)，附带防御性回退
   const supportPrices = hvnPrices.filter(p => p < currentPrice);
-  const supportPrice = supportPrices.length > 0 ? Math.max(...supportPrices) : Math.min(...bins.map(b => b.price));
+  const rawSupportPrice = supportPrices.length > 0 
+    ? Math.max(...supportPrices) 
+    : (bins.length > 0 ? Math.min(...bins.map(b => b.price)) : currentPrice);
+  const supportPrice = safeNum(rawSupportPrice, currentPrice * 0.95);
   const supportZone = {
     price: supportPrice,
     low: Number((supportPrice - binWidth * 0.8).toFixed(2)),
     high: Number((supportPrice + binWidth * 0.8).toFixed(2)),
   };
   
-  // 阻力带阻力位确定 (上方最邻近的 HVN)
+  // 阻力带阻力位确定 (上方最邻近的 HVN)，附带防御性回退
   const resistancePrices = hvnPrices.filter(p => p > currentPrice);
-  const resistancePrice = resistancePrices.length > 0 ? Math.min(...resistancePrices) : Math.max(...bins.map(b => b.price));
+  const rawResistancePrice = resistancePrices.length > 0 
+    ? Math.min(...resistancePrices) 
+    : (bins.length > 0 ? Math.max(...bins.map(b => b.price)) : currentPrice);
+  const resistancePrice = safeNum(rawResistancePrice, currentPrice * 1.05);
   const resistanceZone = {
     price: resistancePrice,
     low: Number((resistancePrice - binWidth * 0.8).toFixed(2)),
