@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState, useMemo } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import type { ChokepointAssessment, StockQuote, StockSearchResult } from "@/lib/types";
 import { readNdjson } from "@/lib/stream-client";
@@ -52,8 +52,7 @@ function ChartInner() {
   const [aiError, setAiError] = useState("");
 
   // UI 交互控制
-  const [showAiPanel, setShowAiPanel] = useState(true);
-  const [activeTab, setActiveTab] = useState<"ai" | "trades">("ai");
+  const [activeTab, setActiveTab] = useState<"ai" | "trades" | "terminal">("ai");
   const [chartHeight, setChartHeight] = useState(520);
   const [period, setPeriod] = useState<"1D" | "1W" | "1M">("1D");
   
@@ -64,8 +63,8 @@ function ChartInner() {
   useEffect(() => {
     function handleResize() {
       if (typeof window !== "undefined") {
-        // 全屏模式下，K线图占总高约 68% 或固定高度适配
-        const availableHeight = window.innerHeight - 180;
+        // 全屏模式下，K线图占满除顶部工具栏和padding外的全部高度
+        const availableHeight = window.innerHeight - 90;
         setChartHeight(Math.max(380, Math.floor(availableHeight)));
       }
     }
@@ -127,6 +126,7 @@ function ChartInner() {
     // 阶段2：后台流式发起 AI 瓶颈研判，输出流展现到右侧侧栏终端
     setAiLoading(true);
     setAiStageMsg("启动 AI 瓶颈点打分分析...");
+    setActiveTab("terminal"); // 自动选定终端显示推理过程
     try {
       const aiRes = await fetch("/api/analyze", {
         method: "POST",
@@ -175,6 +175,7 @@ function ChartInner() {
               };
             });
             gotResult = true;
+            setActiveTab("ai"); // 推理完成后自动切换回 AI 诊断面板
             break;
           case "error":
             streamError = ev.message as string;
@@ -197,6 +198,7 @@ function ChartInner() {
     const code = params.get("code") || "300308"; // 默认中际旭创
     setCodeQuery(code);
     loadStock(code, period);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
   // 搜索框防抖
@@ -330,20 +332,6 @@ function ChartInner() {
 
         {/* 右侧：功能控制及关闭 */}
         <div className="flex items-center gap-3">
-          {data && (
-            <button
-              onClick={() => setShowAiPanel(prev => !prev)}
-              className={`px-3 py-1 rounded-[2px] text-[10.5px] font-semibold font-mono tracking-wider transition cursor-pointer flex items-center gap-1 ${
-                showAiPanel
-                  ? "bg-[var(--accent-soft)] border border-[var(--accent-line)] text-[var(--accent)]"
-                  : "bg-[#181a26] border border-[#2e324d] text-[var(--muted)] hover:text-white"
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-              <span>AI 诊断面板</span>
-            </button>
-          )}
-
           <a
             href={data ? `/analyze?code=${data.quote.code}` : "/analyze"}
             className="px-3 py-1 bg-[#1c2035] hover:bg-[#282d4a] text-xs font-bold text-gray-200 rounded-[2px] transition flex items-center gap-1"
@@ -357,7 +345,7 @@ function ChartInner() {
       <div className="flex-1 flex overflow-hidden relative">
         
         {/* 左侧大图表工作区 */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#0c0d15] p-3 space-y-3">
+        <div className="flex-1 flex flex-col overflow-hidden bg-[#0c0d15] p-3">
           {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-[var(--muted)] font-mono text-xs">
               <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-[var(--accent)] border-t-transparent mb-3" />
@@ -374,73 +362,12 @@ function ChartInner() {
               </button>
             </div>
           ) : data && data.quant ? (
-            <div className="flex-1 flex flex-col overflow-hidden justify-between">
-              
-              {/* 大画幅图表 */}
-              <div className="flex-1 overflow-hidden" ref={containerRef}>
-                <QuantChart
-                  quantData={data.quant}
-                  currentPrice={data.quote.price}
-                  height={chartHeight}
-                />
-              </div>
-
-              {/* 底部折叠信息栏（显示模拟交易历史） */}
-              <div className="h-[140px] border border-[#1f2233] bg-[#0f111a] p-3 overflow-hidden rounded-[2px] flex flex-col">
-                <div className="flex justify-between items-center border-b border-[#1f2233] pb-1.5 mb-1.5 text-[10px] text-[var(--faint)] font-mono shrink-0">
-                  <span>SERENITY QUANT ENGINE / 量化策略历史交易信号</span>
-                  <div className="flex gap-4">
-                    <span>胜率: <span className="font-bold text-[var(--accent)]">{((data.quant.backtest?.winRate || 0.5) * 100).toFixed(1)}%</span></span>
-                    <span>策略回报: <span className="font-bold text-red-400">+{data.quant.backtest?.strategyReturn.toFixed(1)}%</span></span>
-                    <span>基准涨跌: <span className={data.quant.backtest?.stockReturn >= 0 ? "text-red-500" : "text-emerald-500"}>{data.quant.backtest?.stockReturn >= 0 ? "+" : ""}{data.quant.backtest?.stockReturn.toFixed(1)}%</span></span>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto min-h-0">
-                  <table className="w-full text-left text-[10px] font-mono leading-relaxed">
-                    <thead>
-                      <tr className="text-[var(--faint)] border-b border-[#1f2233]">
-                        <th className="pb-1">交易日期</th>
-                        <th className="pb-1 text-center">操作</th>
-                        <th className="pb-1 text-right">交易价 (元)</th>
-                        <th className="pb-1 text-left pl-4">信号及原因</th>
-                        <th className="pb-1 text-right">收益率</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-[var(--muted)]">
-                      {data.quant.backtest?.trades.slice(-5).map((t: any, i: number) => {
-                        const isBuy = t.type === "buy";
-                        return (
-                          <tr key={i} className="hover:bg-[#181a26] transition-colors border-b border-[#131622]">
-                            <td className="py-1">{t.date}</td>
-                            <td className="py-1 text-center">
-                              <span className={`px-1 rounded-[1px] font-bold text-[8.5px] ${
-                                isBuy ? "bg-red-500/10 text-red-500 border border-red-500/20" : "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                              }`}>
-                                {isBuy ? "买入 B" : "卖出 S"}
-                              </span>
-                            </td>
-                            <td className="py-1 text-right font-bold">{t.price.toFixed(2)}</td>
-                            <td className="py-1 text-left pl-4 max-w-[320px] truncate" title={t.reason}>
-                              {t.reason}
-                            </td>
-                            <td className="py-1 text-right font-bold">
-                              {!isBuy && t.profitPct != null ? (
-                                <span className={t.profitPct >= 0 ? "text-red-400" : "text-emerald-400"}>
-                                  {t.profitPct >= 0 ? "+" : ""}{t.profitPct.toFixed(2)}%
-                                </span>
-                              ) : (
-                                <span className="text-[var(--faint)]">--</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
+            <div className="flex-1 overflow-hidden" ref={containerRef}>
+              <QuantChart
+                quantData={data.quant}
+                currentPrice={data.quote.price}
+                height={chartHeight}
+              />
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-xs text-[var(--faint)] font-mono">
@@ -449,36 +376,75 @@ function ChartInner() {
           )}
         </div>
 
-        {/* 右侧折叠式 AI 研判详情栏 */}
-        {showAiPanel && data && (
-          <div className="w-[380px] shrink-0 bg-[#0f111a] border-l border-[#1f2233] flex flex-col overflow-hidden animate-slide-in">
-            {/* 侧栏 Tab */}
-            <div className="h-[36px] bg-[#131622] border-b border-[#1f2233] px-3 flex items-center justify-between shrink-0">
-              <span className="text-[10px] font-bold tracking-wider font-mono text-[var(--accent)] uppercase flex items-center gap-1">
-                <span>[Serenity AI 瓶颈评估]</span>
-              </span>
-              <span className="px-1.5 py-0.5 rounded-[1px] bg-[var(--accent-soft)] border border-[var(--accent-line)] text-[9.5px] font-black font-mono text-[var(--accent)]">
-                综合评分: {data.assessment.totalScore}
-              </span>
+        {/* 右侧综合面板 (长驻) */}
+        {data && (
+          <div className="w-[380px] shrink-0 bg-[#0f111a] border-l border-[#1f2233] flex flex-col overflow-hidden">
+            {/* 侧栏功能切换 Tab */}
+            <div className="h-[40px] bg-[#131622] border-b border-[#1f2233] flex items-stretch shrink-0 overflow-x-auto select-none">
+              <button
+                onClick={() => setActiveTab("ai")}
+                className={`flex-1 px-2.5 text-[10px] font-bold font-mono transition cursor-pointer border-r border-[#1f2233] flex items-center justify-center gap-1 ${
+                  activeTab === "ai"
+                    ? "bg-[#181a26] text-[var(--accent)] font-extrabold border-b border-b-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-white"
+                }`}
+              >
+                <span>⚡ AI 研判</span>
+              </button>
+              
+              <button
+                onClick={() => setActiveTab("trades")}
+                className={`flex-1 px-2.5 text-[10px] font-bold font-mono transition cursor-pointer border-r border-[#1f2233] flex items-center justify-center gap-1 ${
+                  activeTab === "trades"
+                    ? "bg-[#181a26] text-[var(--accent)] font-extrabold border-b border-b-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-white"
+                }`}
+              >
+                <span>📊 交易信号</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab("terminal")}
+                className={`flex-1 px-2.5 text-[10px] font-bold font-mono transition cursor-pointer flex items-center justify-center gap-1 ${
+                  activeTab === "terminal"
+                    ? "bg-[#181a26] text-[var(--accent)] font-extrabold border-b border-b-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-white"
+                }`}
+              >
+                <span className={`w-1 h-1 rounded-full ${aiLoading ? "bg-[var(--accent)] animate-pulse" : "bg-[var(--faint)]"}`} />
+                <span>💻 推理终端</span>
+              </button>
             </div>
 
             {/* 侧栏滚动容器 */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
               
-              {aiLoading && !data.assessment.totalScore ? (
-                // 正在执行流式推理时的终端样式
+              {/* 终端日志面板 */}
+              {activeTab === "terminal" && (
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center text-[10.5px]">
-                    <span className="text-[var(--accent)] font-bold animate-pulse">⚡ {aiStageMsg}</span>
-                    <span className="text-[var(--faint)] font-mono text-[9px]">分析中...</span>
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span className={`font-bold font-mono ${aiLoading ? "text-[var(--accent)] animate-pulse" : "text-[var(--muted)]"}`}>
+                      {aiLoading ? `⚡ ${aiStageMsg}` : "✔ 大模型诊断已完成"}
+                    </span>
+                    <span className="text-[var(--faint)] font-mono text-[9px]">
+                      {aiLoading ? "推理中..." : "IDLE"}
+                    </span>
                   </div>
-                  <div className="h-[360px] overflow-y-auto p-3 bg-black border border-neutral-800 rounded-[2px] text-[10px] font-mono text-emerald-500/90 whitespace-pre-wrap leading-relaxed shadow-inner">
-                    {aiLogText}
-                    <span className="inline-block w-1.5 h-3 bg-emerald-400 animate-ping ml-0.5" />
-                  </div>
+                  {aiLogText ? (
+                    <div className="h-[420px] overflow-y-auto p-3 bg-black border border-neutral-800 rounded-[2px] text-[10px] font-mono text-emerald-500/90 whitespace-pre-wrap leading-relaxed shadow-inner">
+                      {aiLogText}
+                      {aiLoading && <span className="inline-block w-1.5 h-3 bg-emerald-400 animate-ping ml-0.5" />}
+                    </div>
+                  ) : (
+                    <div className="py-8 text-center text-[var(--faint)] font-mono text-[10px]">
+                      等待大模型评估流程启动...
+                    </div>
+                  )}
                 </div>
-              ) : aiError ? (
-                // 研判失败展示
+              )}
+
+              {/* 研判失败展示 (全局悬挂) */}
+              {aiError && (
                 <div className="border border-red-500/20 bg-red-950/20 text-red-400 p-4 rounded-[2px] text-xs font-mono space-y-2">
                   <div className="font-bold">❌ AI 评估失败：</div>
                   <div className="leading-relaxed">{aiError}</div>
@@ -489,8 +455,10 @@ function ChartInner() {
                     重试研判 ⚡
                   </button>
                 </div>
-              ) : (
-                // 研判正常展示
+              )}
+
+              {/* AI 研判详情面板 */}
+              {activeTab === "ai" && !aiError && (
                 <>
                   {/* Verdict Card */}
                   <div className="border border-[#2e324d] bg-[#181a26] p-3 rounded-[2px] space-y-2">
@@ -504,34 +472,40 @@ function ChartInner() {
                   </div>
 
                   {/* 五因子雷达图 */}
-                  <div className="border border-[#1f2233] bg-[#131622] p-3 rounded-[2px] space-y-3">
-                    <h4 className="font-bold text-gray-200 border-b border-[#1f2233] pb-1.5 text-[10.5px]">五因子雷达图谱</h4>
-                    <div className="py-2">
-                      <RadarChart
-                        size={140}
-                        factors={data.assessment.factors.map((f) => ({
-                          label: FACTOR_LABELS[f.key] || f.key,
-                          score: f.score,
-                        }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      {data.assessment.factors.map((f) => (
-                        <div key={f.key} className="space-y-0.5">
-                          <div className="flex justify-between text-[10px]">
-                            <span className="text-gray-300 font-semibold">{FACTOR_LABELS[f.key] || f.key}</span>
-                            <span className="font-mono text-[var(--accent)]">{f.score.toFixed(1)}</span>
+                  {data.assessment.factors && data.assessment.factors.length > 0 ? (
+                    <div className="border border-[#1f2233] bg-[#131622] p-3 rounded-[2px] space-y-3">
+                      <h4 className="font-bold text-gray-200 border-b border-[#1f2233] pb-1.5 text-[10.5px]">五因子雷达图谱</h4>
+                      <div className="py-2">
+                        <RadarChart
+                          size={140}
+                          factors={data.assessment.factors.map((f) => ({
+                            label: FACTOR_LABELS[f.key] || f.key,
+                            score: f.score,
+                          }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        {data.assessment.factors.map((f) => (
+                          <div key={f.key} className="space-y-0.5">
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-gray-300 font-semibold">{FACTOR_LABELS[f.key] || f.key}</span>
+                              <span className="font-mono text-[var(--accent)]">{f.score.toFixed(1)}</span>
+                            </div>
+                            <div className="h-[3px] bg-neutral-900 rounded-none overflow-hidden">
+                              <div
+                                className="h-full bg-[var(--accent)] transition-all"
+                                style={{ width: `${(f.score / 5) * 100}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="h-[3px] bg-neutral-900 rounded-none overflow-hidden">
-                            <div
-                              className="h-full bg-[var(--accent)] transition-all"
-                              style={{ width: `${(f.score / 5) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="py-8 text-center text-[var(--faint)] font-mono text-[10px]">
+                      (大模型分析就绪后即展现量化打分图谱)
+                    </div>
+                  )}
 
                   {/* BOM 拆解与卡脖子 */}
                   {data.assessment.bomPosition && (
@@ -552,21 +526,102 @@ function ChartInner() {
                   )}
 
                   {/* 催化剂与风险 */}
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <h4 className="font-bold text-red-400 text-[10.5px]">潜在催化剂</h4>
-                      <ul className="list-decimal pl-4 space-y-1 text-[11px] text-[var(--muted)]">
-                        {data.assessment.catalysts.map((c, i) => <li key={i}>{c}</li>)}
-                      </ul>
+                  {data.assessment.catalysts && data.assessment.catalysts.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <h4 className="font-bold text-red-400 text-[10.5px]">潜在催化剂</h4>
+                        <ul className="list-decimal pl-4 space-y-1 text-[11px] text-[var(--muted)]">
+                          {data.assessment.catalysts.map((c, i) => <li key={i}>{c}</li>)}
+                        </ul>
+                      </div>
+                      <div className="space-y-1.5 border-t border-[#1f2233] pt-2">
+                        <h4 className="font-bold text-emerald-400 text-[10.5px]">潜在投资风险</h4>
+                        <ul className="list-decimal pl-4 space-y-1 text-[11px] text-[var(--muted)]">
+                          {data.assessment.risks.map((r, i) => <li key={i}>{r}</li>)}
+                        </ul>
+                      </div>
                     </div>
-                    <div className="space-y-1.5 border-t border-[#1f2233] pt-2">
-                      <h4 className="font-bold text-emerald-400 text-[10.5px]">潜在投资风险</h4>
-                      <ul className="list-decimal pl-4 space-y-1 text-[11px] text-[var(--muted)]">
-                        {data.assessment.risks.map((r, i) => <li key={i}>{r}</li>)}
-                      </ul>
+                  )}
+                </>
+              )}
+
+              {/* 交易回测与模拟明细面板 */}
+              {activeTab === "trades" && data.quant && (
+                <div className="space-y-4">
+                  {/* 策略胜率/收益率面板 */}
+                  <div className="border border-[#1f2233] bg-[#131622] p-3 rounded-[2px] space-y-2 font-mono text-[11px]">
+                    <div className="font-bold text-gray-200 border-b border-[#1f2233] pb-1.5 text-[10.5px] uppercase">
+                      回测统计 (BACKTEST STATS)
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-[#131622]">
+                      <span className="text-[var(--faint)]">策略胜率:</span>
+                      <span className="font-bold text-[var(--accent)]">
+                        {((data.quant.backtest?.winRate || 0.5) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-[#131622]">
+                      <span className="text-[var(--faint)]">策略累计收益:</span>
+                      <span className="font-bold text-red-400">
+                        +{data.quant.backtest?.strategyReturn.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-[var(--faint)]">个股同期基准:</span>
+                      <span className={`font-bold ${data.quant.backtest?.stockReturn >= 0 ? "text-red-500" : "text-emerald-500"}`}>
+                        {data.quant.backtest?.stockReturn >= 0 ? "+" : ""}{data.quant.backtest?.stockReturn.toFixed(1)}%
+                      </span>
                     </div>
                   </div>
-                </>
+
+                  {/* 交易历史卡片列表 */}
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-bold text-[var(--faint)] uppercase tracking-wider">
+                      量化策略历史交易信号明细
+                    </div>
+                    {data.quant.backtest?.trades && data.quant.backtest.trades.length > 0 ? (
+                      <div className="border border-[#1f2233] bg-[#0f111a] rounded-[2px] overflow-hidden">
+                        <div className="max-h-[380px] overflow-y-auto p-3">
+                          <div className="space-y-3 divide-y divide-[#1f2233]/40">
+                            {[...data.quant.backtest.trades].reverse().map((t: any, i: number) => {
+                              const isBuy = t.type === "buy";
+                              return (
+                                <div key={i} className={`pt-3 first:pt-0 text-[10.5px] font-mono space-y-1.5`}>
+                                  <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`px-1 py-0.5 rounded-[1px] font-bold text-[8px] leading-none ${
+                                        isBuy ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                      }`}>
+                                        {isBuy ? "BUY 买入" : "SELL 卖出"}
+                                      </span>
+                                      <span className="text-gray-300 font-semibold">{t.date}</span>
+                                    </div>
+                                    <div className="font-bold">
+                                      成交: <span className="text-white">{t.price.toFixed(2)} 元</span>
+                                    </div>
+                                  </div>
+                                  <p className="text-[10px] text-[var(--muted)] leading-relaxed bg-[#131622] p-1.5 rounded-[1px] border border-[#1f2233]/30">
+                                    {t.reason}
+                                  </p>
+                                  {!isBuy && t.profitPct != null && (
+                                    <div className="text-right text-[9.5px]">
+                                      单笔盈亏: <span className={`font-bold ${t.profitPct >= 0 ? "text-red-400" : "text-emerald-400"}`}>
+                                        {t.profitPct >= 0 ? "+" : ""}{t.profitPct.toFixed(2)}%
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center text-[var(--faint)] font-mono text-[10px]">
+                        该回测区间内未触发任何策略交易。
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
 
             </div>
