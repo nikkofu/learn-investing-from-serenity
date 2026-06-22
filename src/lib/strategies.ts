@@ -11,6 +11,8 @@ import {
   runChokepointMomentumBacktestV2,
   runChokepointMomentumBacktestV3,
   runChokepointMomentumBacktestV4,
+  runChokepointMomentumBacktestV5,
+  runGridMeanReversionBacktest,
   type BacktestResult,
 } from "./quant";
 
@@ -42,7 +44,7 @@ export interface StrategyBacktest {
 }
 
 /** 默认策略 id（页面首次加载与胜率口径采用此策略）。 */
-export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v4";
+export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v5";
 
 /**
  * 已登记策略。顺序即 UI 下拉顺序（默认策略置顶）。
@@ -50,12 +52,23 @@ export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v4";
 const STRATEGIES: Strategy[] = [
   {
     meta: {
+      id: "chokepoint-momentum-v5",
+      name: "Serenity 瓶颈动量突破",
+      version: "5.0",
+      description:
+        "v4 的 ATR 自适应止损版：入场口径与 v4 完全一致（七类买点 + MA60 中期趋势闸门），并沿用 v4 跟踪止损结构（浮盈 +6% 启动、分段收紧、筹码支撑止损、天量滞涨）。唯一升级：把 v4 的固定回撤百分比（15%/9%）替换为随个股真实波动自适应的回撤距离——跟踪回撤% = clamp(mult×ATR(14)%, 7%, 25%)，mult 随浮盈分段收紧（未到 +20% 用 5.0×、≥ +20% 收紧到 3.0×）。对 3% ATR 的中等波动票回撤≈15%/9%，与 v4 等价；高波动票自动给更宽止损（少被洗）、低波动票自动收紧（少回吐）。因仅改止损距离不改启动条件，换手率与 v4 同量级、可对照。",
+      tags: ["momentum", "reversal", "pattern", "trend-filter", "atr-stop", "default"],
+    },
+    run: (candles, ctx) => runChokepointMomentumBacktestV5(candles, ctx.chokepointScore, { code: ctx.code }),
+  },
+  {
+    meta: {
       id: "chokepoint-momentum-v4",
       name: "Serenity 瓶颈动量突破",
       version: "4.0",
       description:
         "v3 的趋势过滤 + 跟踪止损调优版：①右侧四类动量买点（均线金叉 / VCP 突破 / 强势起爆 / 趋势回踩）新增 MA60 中期趋势闸门——仅在价在 MA60 上或 MA60 近 10 日不下行时才追，压住震荡/下行区追突破的诱多；底部三类买点（放量反包 / W底 / 老鸭头）不加闸门，04-17 漏买修复保持不变。②跟踪止损分段：浮盈 +6% 启动，未到 +20% 用宽松 15% 回撤少被洗、≥ +20% 收紧到 9% 锁利润。",
-      tags: ["momentum", "reversal", "pattern", "trend-filter", "default"],
+      tags: ["momentum", "reversal", "pattern", "trend-filter"],
     },
     run: (candles, ctx) => runChokepointMomentumBacktestV4(candles, ctx.chokepointScore, { code: ctx.code }),
   },
@@ -91,6 +104,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["momentum", "legacy"],
     },
     run: (candles, ctx) => runChokepointMomentumBacktest(candles, ctx.chokepointScore, { code: ctx.code }),
+  },
+  {
+    meta: {
+      id: "grid-mean-reversion",
+      name: "网格·均值回归（regime 门控）",
+      version: "1.0",
+      description:
+        "震荡区专用模块，与动量内核互补：仅在「确认的箱体震荡」（MA60 走平 + 布林带宽适中 + 近 40 日价格被上下沿包住）才启用：触及布林下沿且当日企稳时低吸、回升至上沿高抛止盈；强制带破箱止损（跌破开仓下沿 3% 立即出局、不补仓不马丁格尔），箱体被向上突破则交回趋势策略。高胜率低盈亏比的均值回归口径，仅作震荡行情对照。",
+      tags: ["mean-reversion", "grid", "regime-gated"],
+    },
+    run: (candles) => runGridMeanReversionBacktest(candles),
   },
   {
     meta: {

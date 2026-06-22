@@ -104,6 +104,39 @@ export interface SymbolTradeStats {
   buyHoldPct: number; // 该票测试窗口内全程买入持有收益 %
 }
 
+/** 单个时间折的统计（Purged + Embargo K-Fold 用）。 */
+export interface CVFold {
+  index: number;       // 1 起的折号（按时间从早到晚）
+  startDate: string;
+  endDate: string;
+  trades: number;
+  winRatePct: number;
+  avgReturnPct: number;
+}
+
+/**
+ * Purged + Embargo K-Fold 时间分折交叉验证（López de Prado）。
+ *
+ * 把所有完成交易按「买入日」切成 K 个连续时间折，逐折独立统计胜率/每笔均值，
+ * 用「各折是否都站得住」回答稳健性——而非只看一次全样本汇总（易被某一段行情主导）。
+ * - **Purge（净化）**：丢弃持仓窗口跨越折边界的交易（其收益在下一折才兑现，会造成标签泄漏）；
+ * - **Embargo（隔离带）**：再丢弃每折起始 embargo 天内开仓的交易（与上一折尾部高度相关，避免序列相关泄漏）。
+ */
+export interface CrossValidation {
+  folds: number;             // 请求的 K
+  usedFolds: number;         // 净化/隔离后仍有交易的折数
+  embargoDays: number;       // 隔离带天数
+  purgedTrades: number;      // 被 purge+embargo 丢弃的交易数
+  foldStats: CVFold[];
+  meanWinRatePct: number;    // 各折胜率均值
+  stdWinRatePct: number;     // 各折胜率标准差（离散度，越小越稳健）
+  worstFoldWinRatePct: number;
+  worstFoldAvgReturnPct: number;
+  positiveFolds: number;     // 每笔均值 > 0 的折数
+  /** 是否跨时间稳健：≥3 折有数据 且 正期望折占多数（≥60%）。 */
+  holdsOutOfSample: boolean;
+}
+
 export interface RecommendationBacktestStats {
   symbols: number;
   totalTrades: number;
@@ -150,6 +183,8 @@ export interface RecommendationBacktestStats {
   avgAtrPctAtEntry: number;
   /** 波动率目标仓位（按 1/ATR 调仓）后的对照指标。 */
   volTargeted: VolTargetResult;
+  /** Purged + Embargo K-Fold 时间分折交叉验证（样本外稳健性）。 */
+  crossValidation: CrossValidation;
   verdict: string;
 }
 
@@ -310,8 +345,12 @@ function simulateSymbol(
 /** 从策略生成的卖出原因里提炼一个简短的离场标签（用于交易流水展示）。 */
 function shortExitReason(reason: string): string {
   if (!reason) return "策略卖出";
-  if (reason.includes("支撑") || reason.includes("止损")) return "跌破筹码支撑止损";
+  if (reason.includes("破箱")) return "破箱止损";
+  if (reason.includes("趋势突破")) return "趋势突破离场";
+  if (reason.includes("高抛")) return "网格高抛止盈";
+  if (reason.includes("ATR") || reason.includes("自适应")) return "ATR自适应跟踪止盈";
   if (reason.includes("跟踪")) return "跟踪止盈";
+  if (reason.includes("支撑") || reason.includes("止损")) return "跌破筹码支撑止损";
   if (reason.includes("天量") || reason.includes("滞涨")) return "高位天量滞涨";
   return "策略卖出";
 }
@@ -502,6 +541,7 @@ export function runRecommendationBacktest(
   const dsr = deflatedSharpe(retsByTime, full.numTrials);
   const bonf = bonferroniAlpha(0.05, full.numTrials);
   const significantAfterCorrection = totalTrades >= 30 && z > 0 && pVsCoin < bonf;
+  const crossValidation = purgedKFoldCV(trades, 5);
 
   let verdict: string;
   if (totalTrades < 30) {
@@ -523,6 +563,13 @@ export function runRecommendationBacktest(
         ? `波动率目标仓位（按 1/ATR 调仓，平均杠杆 ${volTargeted.avgLeverage.toFixed(2)}×）把逐笔 Sharpe 从 ${risk.sharpe.toFixed(2)} 提升到 ${volTargeted.sharpe.toFixed(2)}——低波动票多下、高波动票少下能改善风险调整后收益。`
         : `波动率目标仓位（平均杠杆 ${volTargeted.avgLeverage.toFixed(2)}×）未提升逐笔 Sharpe（${volTargeted.sharpe.toFixed(2)} vs ${risk.sharpe.toFixed(2)}），该样本上等权已足够。`;
     verdict += ` 风险调整：Sharpe(逐笔) ${risk.sharpe.toFixed(2)}、年化 ${risk.sharpeAnnualized.toFixed(2)}、Sortino ${risk.sortino.toFixed(2)}、Calmar ${risk.calmarRatio.toFixed(2)}、最大回撤 ${risk.maxDrawdownPct.toFixed(1)}%；PSR ${(psr * 100).toFixed(0)}%、Deflated Sharpe ${(dsr.dsr * 100).toFixed(0)}%（运气门槛 SR≈${dsr.expectedMaxSharpe.toFixed(2)}）。${corr} ${volNote}`;
+    if (crossValidation.usedFolds >= 2) {
+      const cv = crossValidation;
+      const cvNote = cv.holdsOutOfSample
+        ? `跨时间稳健：${cv.usedFolds} 折中 ${cv.positiveFolds} 折正期望。`
+        : `跨时间不稳健：仅 ${cv.positiveFolds}/${cv.usedFolds} 折正期望，最差折胜率 ${cv.worstFoldWinRatePct.toFixed(0)}%——边际收益高度依赖个别行情段，须警惕过拟合。`;
+      verdict += ` Purged+Embargo ${cv.usedFolds} 折交叉验证：各折胜率 ${cv.meanWinRatePct.toFixed(0)}%±${cv.stdWinRatePct.toFixed(0)}%（净化 ${cv.purgedTrades} 笔跨界交易、隔离 ${cv.embargoDays.toFixed(0)} 天）。${cvNote}`;
+    }
   }
   if (strategy) {
     verdict = `【策略：${strategy.meta.name} v${strategy.meta.version}】${verdict}`;
@@ -575,8 +622,106 @@ export function runRecommendationBacktest(
         sortino: Number(volTargeted.sortino.toFixed(3)),
         maxDrawdownPct: Number(volTargeted.maxDrawdownPct.toFixed(1)),
       },
+      crossValidation,
       verdict,
     },
+  };
+}
+
+/**
+ * Purged + Embargo K-Fold 时间分折交叉验证。
+ * 按买入日把交易切成 K 个连续时间折，净化跨边界交易、隔离折首相关交易后，逐折统计胜率/每笔均值。
+ */
+function purgedKFoldCV(trades: ClosedTrade[], folds = 5, embargoFrac = 0.01): CrossValidation {
+  const empty: CrossValidation = {
+    folds,
+    usedFolds: 0,
+    embargoDays: 0,
+    purgedTrades: 0,
+    foldStats: [],
+    meanWinRatePct: 0,
+    stdWinRatePct: 0,
+    worstFoldWinRatePct: 0,
+    worstFoldAvgReturnPct: 0,
+    positiveFolds: 0,
+    holdsOutOfSample: false,
+  };
+  // 折数随样本量自适应，保证每折期望 ≥ 4 笔；不足两折则无意义。
+  const K = Math.max(2, Math.min(folds, Math.floor(trades.length / 4)));
+  if (trades.length < 8 || K < 2) return empty;
+
+  const withTimes = trades
+    .map((t) => ({ t, buy: Date.parse(t.buyDate), sell: Date.parse(t.sellDate) }))
+    .filter((x) => Number.isFinite(x.buy) && Number.isFinite(x.sell))
+    .sort((a, b) => a.buy - b.buy);
+  if (withTimes.length < 8) return empty;
+
+  const minBuy = withTimes[0].buy;
+  const maxBuy = withTimes[withTimes.length - 1].buy;
+  const span = maxBuy - minBuy;
+  if (span <= 0) return empty;
+
+  const foldWidth = span / K;
+  const embargoMs = embargoFrac * span;
+  const embargoDays = embargoMs / 86_400_000;
+  const edges: number[] = [];
+  for (let f = 0; f <= K; f++) edges.push(minBuy + f * foldWidth);
+
+  const buckets: { t: ClosedTrade; buy: number; sell: number }[][] = Array.from({ length: K }, () => []);
+  let purged = 0;
+  for (const x of withTimes) {
+    let f = Math.floor((x.buy - minBuy) / foldWidth);
+    if (f >= K) f = K - 1;
+    const foldStart = edges[f];
+    const foldEnd = edges[f + 1];
+    // Purge：持仓在本折结束后才平仓 → 标签跨折泄漏，丢弃。
+    if (x.sell > foldEnd) { purged++; continue; }
+    // Embargo：非首折，开仓落在折首隔离带内 → 与上一折尾部相关，丢弃。
+    if (f > 0 && x.buy < foldStart + embargoMs) { purged++; continue; }
+    buckets[f].push(x);
+  }
+
+  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const foldStats: CVFold[] = [];
+  const winRates: number[] = [];
+  let positiveFolds = 0;
+  for (let f = 0; f < K; f++) {
+    const b = buckets[f];
+    if (b.length === 0) continue;
+    const rets = b.map((x) => x.t.returnPct);
+    const wins = rets.filter((r) => r > 0).length;
+    const wr = (wins / b.length) * 100;
+    const avg = rets.reduce((s, r) => s + r, 0) / b.length;
+    foldStats.push({
+      index: foldStats.length + 1,
+      startDate: iso(edges[f]),
+      endDate: iso(edges[f + 1]),
+      trades: b.length,
+      winRatePct: Number(wr.toFixed(1)),
+      avgReturnPct: Number(avg.toFixed(2)),
+    });
+    winRates.push(wr);
+    if (avg > 0) positiveFolds++;
+  }
+
+  const usedFolds = foldStats.length;
+  if (usedFolds === 0) return { ...empty, purgedTrades: purged, embargoDays: Number(embargoDays.toFixed(1)) };
+  const meanWr = winRates.reduce((s, x) => s + x, 0) / usedFolds;
+  const variance = usedFolds > 1 ? winRates.reduce((s, x) => s + (x - meanWr) ** 2, 0) / (usedFolds - 1) : 0;
+  const worst = foldStats.reduce((m, f) => (f.winRatePct < m.winRatePct ? f : m), foldStats[0]);
+
+  return {
+    folds: K,
+    usedFolds,
+    embargoDays: Number(embargoDays.toFixed(1)),
+    purgedTrades: purged,
+    foldStats,
+    meanWinRatePct: Number(meanWr.toFixed(1)),
+    stdWinRatePct: Number(Math.sqrt(variance).toFixed(1)),
+    worstFoldWinRatePct: worst.winRatePct,
+    worstFoldAvgReturnPct: worst.avgReturnPct,
+    positiveFolds,
+    holdsOutOfSample: usedFolds >= 3 && positiveFolds >= Math.ceil(usedFolds * 0.6),
   };
 }
 

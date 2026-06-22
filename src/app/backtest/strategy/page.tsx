@@ -52,6 +52,27 @@ interface VolTargeted {
   sortino: number;
   maxDrawdownPct: number;
 }
+interface CVFold {
+  index: number;
+  startDate: string;
+  endDate: string;
+  trades: number;
+  winRatePct: number;
+  avgReturnPct: number;
+}
+interface CrossValidation {
+  folds: number;
+  usedFolds: number;
+  embargoDays: number;
+  purgedTrades: number;
+  foldStats: CVFold[];
+  meanWinRatePct: number;
+  stdWinRatePct: number;
+  worstFoldWinRatePct: number;
+  worstFoldAvgReturnPct: number;
+  positiveFolds: number;
+  holdsOutOfSample: boolean;
+}
 interface Stats {
   symbols: number;
   totalTrades: number;
@@ -80,6 +101,7 @@ interface Stats {
   significantAfterCorrection: boolean;
   avgAtrPctAtEntry: number;
   volTargeted: VolTargeted;
+  crossValidation: CrossValidation;
   verdict: string;
 }
 interface Result {
@@ -354,6 +376,70 @@ export default function StrategyBacktestPage() {
                 <StatCard label="目标化后最大回撤" value={`-${result.stats.volTargeted.maxDrawdownPct.toFixed(1)}%`} cls="text-emerald-500" />
               </div>
             </div>
+            {result.stats.crossValidation.usedFolds >= 2 && (
+              <div className="mt-3 border-t border-[var(--border)] pt-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-medium text-[var(--muted)]">
+                  <span>
+                    Purged + Embargo {result.stats.crossValidation.usedFolds} 折时间分折交叉验证（净化{" "}
+                    {result.stats.crossValidation.purgedTrades} 笔跨界交易 · 隔离{" "}
+                    {result.stats.crossValidation.embargoDays.toFixed(0)} 天）
+                  </span>
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                      result.stats.crossValidation.holdsOutOfSample
+                        ? "bg-emerald-500/15 text-emerald-500"
+                        : "bg-red-500/15 text-red-500"
+                    }`}
+                  >
+                    {result.stats.crossValidation.holdsOutOfSample ? "跨时间稳健" : "跨时间不稳健"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  <StatCard
+                    label="各折胜率 mean±std"
+                    value={`${result.stats.crossValidation.meanWinRatePct.toFixed(0)}±${result.stats.crossValidation.stdWinRatePct.toFixed(0)}%`}
+                  />
+                  <StatCard
+                    label="最差折胜率"
+                    value={`${result.stats.crossValidation.worstFoldWinRatePct.toFixed(0)}%`}
+                    cls={result.stats.crossValidation.worstFoldWinRatePct >= 45 ? "text-rose-500" : "text-emerald-500"}
+                  />
+                  <StatCard
+                    label="正期望折"
+                    value={`${result.stats.crossValidation.positiveFolds}/${result.stats.crossValidation.usedFolds}`}
+                  />
+                  <StatCard
+                    label="最差折每笔均值"
+                    value={fmtPct(result.stats.crossValidation.worstFoldAvgReturnPct)}
+                    cls={signClass(result.stats.crossValidation.worstFoldAvgReturnPct)}
+                  />
+                </div>
+                <div className="mt-2 max-h-44 overflow-auto">
+                  <table className="w-full text-left text-xs tabular-nums">
+                    <thead className="text-[var(--muted)]">
+                      <tr className="border-b border-[var(--border)]">
+                        <th className="py-1 pr-2 font-medium">折</th>
+                        <th className="py-1 pr-2 font-medium">区间</th>
+                        <th className="py-1 pr-2 font-medium">交易</th>
+                        <th className="py-1 pr-2 font-medium">胜率</th>
+                        <th className="py-1 pr-2 font-medium">每笔均值</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.stats.crossValidation.foldStats.map((f) => (
+                        <tr key={f.index} className="border-b border-[var(--border)]/50">
+                          <td className="py-1 pr-2">#{f.index}</td>
+                          <td className="py-1 pr-2 text-[var(--muted)]">{f.startDate}~{f.endDate}</td>
+                          <td className="py-1 pr-2">{f.trades}</td>
+                          <td className="py-1 pr-2">{f.winRatePct.toFixed(0)}%</td>
+                          <td className={`py-1 pr-2 ${signClass(f.avgReturnPct)}`}>{fmtPct(f.avgReturnPct)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             <p className="mt-2 text-xs leading-5 text-[var(--faint)]">
               Sharpe/Sortino/Calmar/最大回撤来自「逐笔等权串行复利」的近似净值曲线（忽略并发持仓），仅作风险量级参考。
               波动率目标仓位按入场 ATR(14)% 反比调仓（低波动多下、高波动少下），目标化后 Sharpe 高于等权即说明该法在本样本上改善了风险调整后收益。
