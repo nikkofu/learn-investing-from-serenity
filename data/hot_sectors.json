@@ -1,0 +1,548 @@
+{
+  "source": "hotSectors",
+  "version": 1,
+  "syncedAt": "2026-06-22T06:34:13.420Z",
+  "count": 60,
+  "list": [
+    {
+      "code": "BK1023",
+      "name": "培育钻石",
+      "changePct": 8.51,
+      "netInflow": 2141462784,
+      "leadStockName": "黄河旋风",
+      "leadStockCode": "600172",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1107",
+      "name": "科创板做市商",
+      "changePct": 6.66,
+      "netInflow": 3907107840,
+      "leadStockName": "中信建投",
+      "leadStockCode": "601066",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0805",
+      "name": "钛白粉概念",
+      "changePct": 6.54,
+      "netInflow": 572214976,
+      "leadStockName": "金浦钛业",
+      "leadStockCode": "000545",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1010",
+      "name": "磷化工",
+      "changePct": 6.39,
+      "netInflow": 4305271296,
+      "leadStockName": "川发龙蟒",
+      "leadStockCode": "002312",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1121",
+      "name": "第四代半导体",
+      "changePct": 6.13,
+      "netInflow": 571290592,
+      "leadStockName": "蓝晓科技",
+      "leadStockCode": "300487",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0711",
+      "name": "券商概念",
+      "changePct": 6.01,
+      "netInflow": 11023981312,
+      "leadStockName": "广发证券",
+      "leadStockCode": "000776",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1637",
+      "name": "东方财富热股",
+      "changePct": 5.38,
+      "netInflow": -10627895296,
+      "leadStockName": "东方锆业",
+      "leadStockCode": "002167",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1717",
+      "name": "题材股",
+      "changePct": 5.11,
+      "netInflow": -13149503488,
+      "leadStockName": "东方锆业",
+      "leadStockCode": "002167",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0949",
+      "name": "氦气概念",
+      "changePct": 4.67,
+      "netInflow": 516779792,
+      "leadStockName": "冰轮环境",
+      "leadStockCode": "000811",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1645",
+      "name": "昨日打二板以上表现",
+      "changePct": 4.59,
+      "netInflow": 193281328,
+      "leadStockName": "旭光电子",
+      "leadStockCode": "600353",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0695",
+      "name": "小金属概念",
+      "changePct": 4.53,
+      "netInflow": 11613628416,
+      "leadStockName": "锌业股份",
+      "leadStockCode": "000751",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0690",
+      "name": "氟化工概念",
+      "changePct": 4.5,
+      "netInflow": 3806566656,
+      "leadStockName": "XD兴发集",
+      "leadStockCode": "600141",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1012",
+      "name": "PVDF概念",
+      "changePct": 4.45,
+      "netInflow": 1328483328,
+      "leadStockName": "多氟多",
+      "leadStockCode": "002407",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0519",
+      "name": "稀缺资源",
+      "changePct": 4.21,
+      "netInflow": 8979905280,
+      "leadStockName": "锌业股份",
+      "leadStockCode": "000751",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0977",
+      "name": "碳化硅",
+      "changePct": 4.2,
+      "netInflow": 1586261248,
+      "leadStockName": "柘中股份",
+      "leadStockCode": "002346",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1190",
+      "name": "虚拟机器人",
+      "changePct": 4.19,
+      "netInflow": 3644144384,
+      "leadStockName": "大智慧",
+      "leadStockCode": "601519",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0981",
+      "name": "工业气体",
+      "changePct": 4.08,
+      "netInflow": 1559392256,
+      "leadStockName": "三孚股份",
+      "leadStockCode": "603938",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0512",
+      "name": "化工原料",
+      "changePct": 3.57,
+      "netInflow": 3282077184,
+      "leadStockName": "川发龙蟒",
+      "leadStockCode": "002312",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0674",
+      "name": "蓝宝石",
+      "changePct": 3.48,
+      "netInflow": -2921742336,
+      "leadStockName": "三安光电",
+      "leadStockCode": "600703",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0524",
+      "name": "参股期货",
+      "changePct": 3.47,
+      "netInflow": 7193028096,
+      "leadStockName": "中科金财",
+      "leadStockCode": "002657",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1050",
+      "name": "昨日涨停_含一字",
+      "changePct": 3.41,
+      "netInflow": -2160423680,
+      "leadStockName": "东方锆业",
+      "leadStockCode": "002167",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1639",
+      "name": "周期股",
+      "changePct": 3.38,
+      "netInflow": 4370259968,
+      "leadStockName": "广发证券",
+      "leadStockCode": "000776",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0816",
+      "name": "昨日连板",
+      "changePct": 3.34,
+      "netInflow": -686971648,
+      "leadStockName": "旭光电子",
+      "leadStockCode": "600353",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1714",
+      "name": "金融地产风格",
+      "changePct": 3.32,
+      "netInflow": 11217626624,
+      "leadStockName": "广发证券",
+      "leadStockCode": "000776",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1630",
+      "name": "昨日首板",
+      "changePct": 3.3,
+      "netInflow": -5476096,
+      "leadStockName": "东方锆业",
+      "leadStockCode": "002167",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0637",
+      "name": "互联网金融",
+      "changePct": 3.29,
+      "netInflow": 11985091584,
+      "leadStockName": "中科金财",
+      "leadStockCode": "002657",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1051",
+      "name": "昨日连板_含一字",
+      "changePct": 3.23,
+      "netInflow": -600644608,
+      "leadStockName": "旭光电子",
+      "leadStockCode": "600353",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1632",
+      "name": "昨日高换手",
+      "changePct": 3.22,
+      "netInflow": 727610368,
+      "leadStockName": "江钨装备",
+      "leadStockCode": "600397",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0950",
+      "name": "草甘膦",
+      "changePct": 3.18,
+      "netInflow": 510783632,
+      "leadStockName": "XD兴发集",
+      "leadStockCode": "600141",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0815",
+      "name": "昨日涨停",
+      "changePct": 3.07,
+      "netInflow": -2415933440,
+      "leadStockName": "兴业科技",
+      "leadStockCode": "002674",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1660",
+      "name": "光纤概念",
+      "changePct": 3,
+      "netInflow": 77007616,
+      "leadStockName": "特发信息",
+      "leadStockCode": "000070",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1013",
+      "name": "华为欧拉",
+      "changePct": 2.98,
+      "netInflow": -94062976,
+      "leadStockName": "艾融软件",
+      "leadStockCode": "920799",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0547",
+      "name": "黄金概念",
+      "changePct": 2.94,
+      "netInflow": 5139942400,
+      "leadStockName": "株冶集团",
+      "leadStockCode": "600961",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1173",
+      "name": "锂矿概念",
+      "changePct": 2.92,
+      "netInflow": 433853696,
+      "leadStockName": "川发龙蟒",
+      "leadStockCode": "002312",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1095",
+      "name": "钒电池",
+      "changePct": 2.82,
+      "netInflow": 647162400,
+      "leadStockName": "龙佰集团",
+      "leadStockCode": "002601",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0611",
+      "name": "上证50_",
+      "changePct": 2.75,
+      "netInflow": 3324305408,
+      "leadStockName": "兆易创新",
+      "leadStockCode": "603986",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1052",
+      "name": "动力电池回收",
+      "changePct": 2.74,
+      "netInflow": 2781094656,
+      "leadStockName": "厦门钨业",
+      "leadStockCode": "600549",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0868",
+      "name": "GDR",
+      "changePct": 2.71,
+      "netInflow": 735949472,
+      "leadStockName": "华泰证券",
+      "leadStockCode": "601688",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1000",
+      "name": "宁组合",
+      "changePct": 2.66,
+      "netInflow": 1126472704,
+      "leadStockName": "三安光电",
+      "leadStockCode": "600703",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1011",
+      "name": "环氧丙烷",
+      "changePct": 2.66,
+      "netInflow": 499655072,
+      "leadStockName": "永和股份",
+      "leadStockCode": "605020",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1682",
+      "name": "2026一季报扭亏",
+      "changePct": 2.65,
+      "netInflow": 458850304,
+      "leadStockName": "龙蟠科技",
+      "leadStockCode": "603906",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1152",
+      "name": "高带宽内存",
+      "changePct": 2.58,
+      "netInflow": -1456086528,
+      "leadStockName": "华特气体",
+      "leadStockCode": "688268",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0883",
+      "name": "数字货币",
+      "changePct": 2.55,
+      "netInflow": 939144192,
+      "leadStockName": "中科金财",
+      "leadStockCode": "002657",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1638",
+      "name": "最近多板",
+      "changePct": 2.46,
+      "netInflow": -1519570944,
+      "leadStockName": "东方锆业",
+      "leadStockCode": "002167",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1675",
+      "name": "历史新高",
+      "changePct": 2.38,
+      "netInflow": -12717170688,
+      "leadStockName": "旭光电子",
+      "leadStockCode": "600353",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1674",
+      "name": "近期新高",
+      "changePct": 2.37,
+      "netInflow": -14741245952,
+      "leadStockName": "东方锆业",
+      "leadStockCode": "002167",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0855",
+      "name": "纳米银",
+      "changePct": 2.26,
+      "netInflow": -103387056,
+      "leadStockName": "超声电子",
+      "leadStockCode": "000823",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0612",
+      "name": "上证180_",
+      "changePct": 2.23,
+      "netInflow": 1975459840,
+      "leadStockName": "中信建投",
+      "leadStockCode": "601066",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0500",
+      "name": "HS300_",
+      "changePct": 2.18,
+      "netInflow": -7730929664,
+      "leadStockName": "广发证券",
+      "leadStockCode": "000776",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1110",
+      "name": "Web3.0",
+      "changePct": 2.17,
+      "netInflow": 1362876704,
+      "leadStockName": "中科金财",
+      "leadStockCode": "002657",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0961",
+      "name": "有机硅概念",
+      "changePct": 2.17,
+      "netInflow": 2031011360,
+      "leadStockName": "三孚股份",
+      "leadStockCode": "603938",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK0935",
+      "name": "中芯概念",
+      "changePct": 2.15,
+      "netInflow": -662614528,
+      "leadStockName": "有研新材",
+      "leadStockCode": "600206",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1663",
+      "name": "大盘股",
+      "changePct": 2.15,
+      "netInflow": -8559095808,
+      "leadStockName": "长飞光纤",
+      "leadStockCode": "601869",
+      "leadStockChangePct": 1
+    },
+    {
+      "code": "BK1006",
+      "name": "碳基材料",
+      "changePct": 2.11,
+      "netInflow": -301439296,
+      "leadStockName": "温州宏丰",
+      "leadStockCode": "300283",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK0988",
+      "name": "钠离子电池",
+      "changePct": 2.06,
+      "netInflow": 3517267712,
+      "leadStockName": "多氟多",
+      "leadStockCode": "002407",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1662",
+      "name": "权重股",
+      "changePct": 2.06,
+      "netInflow": 1650216960,
+      "leadStockName": "东方财富",
+      "leadStockCode": "300059",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1680",
+      "name": "2026一季报预增",
+      "changePct": 2.04,
+      "netInflow": -3015787264,
+      "leadStockName": "博云新材",
+      "leadStockCode": "002297",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1676",
+      "name": "百日新高",
+      "changePct": 2.03,
+      "netInflow": -14307913728,
+      "leadStockName": "兴业科技",
+      "leadStockCode": "002674",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1151",
+      "name": "短剧互动游戏",
+      "changePct": 2.02,
+      "netInflow": 450276880,
+      "leadStockName": "天娱数科",
+      "leadStockCode": "002354",
+      "leadStockChangePct": 0
+    },
+    {
+      "code": "BK1088",
+      "name": "F5G概念",
+      "changePct": 2.02,
+      "netInflow": -1431072512,
+      "leadStockName": "特发信息",
+      "leadStockCode": "000070",
+      "leadStockChangePct": 0
+    }
+  ]
+}

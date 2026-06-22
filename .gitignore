@@ -48,4 +48,6 @@ next-env.d.ts
 # 本地备份快照与同步工具（非项目代码）
 /.backup-serenity-*/
 /install-serenity-sync.sh
-/session-transcript.ndjson
+/session-transcript.w
+
+/.sessions/

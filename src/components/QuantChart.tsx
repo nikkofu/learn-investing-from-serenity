@@ -13,6 +13,11 @@ interface QuantChartProps {
       traditional: BacktestResult;
       chokepoint: BacktestResult;
     };
+    strategies?: {
+      meta: { id: string; name: string; version: string; description: string; tags?: string[] };
+      result: BacktestResult;
+    }[];
+    defaultStrategyId?: string;
     technical?: TechnicalAssessment;
     candles?: Candle[];
     projections?: { date: string; bull: number; base: number; bear: number }[];
@@ -216,17 +221,28 @@ const calculateMA = (data: Candle[], period: number): number[] => {
 export default function QuantChart({ quantData, currentPrice, height: _height, externalPeriod }: QuantChartProps) {
   const { chips, technical, candles } = quantData;
 
-  const [activeStrategy, setActiveStrategy] = useState<"chokepoint" | "traditional">("chokepoint");
+  const [activeStrategy, setActiveStrategy] = useState<string>(
+    quantData.defaultStrategyId ?? quantData.strategies?.[0]?.meta.id ?? "chokepoint",
+  );
   const [hoveredTrade, setHoveredTrade] = useState<any | null>(null);
 
   const currentBacktest = useMemo(() => {
+    if (quantData.strategies && quantData.strategies.length > 0) {
+      const found = quantData.strategies.find((s) => s.meta.id === activeStrategy);
+      return (found ?? quantData.strategies[0]).result;
+    }
     if (quantData.backtests) {
-      return activeStrategy === "chokepoint" 
-        ? quantData.backtests.chokepoint 
-        : quantData.backtests.traditional;
+      return activeStrategy === "traditional"
+        ? quantData.backtests.traditional
+        : quantData.backtests.chokepoint;
     }
     return quantData.backtest;
-  }, [quantData.backtests, quantData.backtest, activeStrategy]);
+  }, [quantData.strategies, quantData.backtests, quantData.backtest, activeStrategy]);
+
+  const activeStrategyMeta = useMemo(
+    () => quantData.strategies?.find((s) => s.meta.id === activeStrategy)?.meta,
+    [quantData.strategies, activeStrategy],
+  );
 
   const { history, trades, winRate, strategyReturn, stockReturn } = currentBacktest;
 
@@ -1091,24 +1107,48 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-2">
         <div className="flex flex-wrap items-center gap-3">
           {/* 策略切换 */}
-          <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px]">
-            <button
-              onClick={() => setActiveStrategy("chokepoint")}
-              className={`px-3 py-1 text-[10px] font-bold tracking-wide transition cursor-pointer rounded-[1px] ${
-                activeStrategy === "chokepoint" ? "bg-[var(--accent)] text-[var(--accent-fg)]" : "text-[var(--muted)] hover:text-[var(--text)]"
-              }`}
-            >
-              Serenity 瓶颈动量突破 (默认)
-            </button>
-            <button
-              onClick={() => setActiveStrategy("traditional")}
-              className={`px-3 py-1 text-[10px] font-bold tracking-wide transition cursor-pointer rounded-[1px] ${
-                activeStrategy === "traditional" ? "bg-[var(--accent)] text-[var(--accent-fg)]" : "text-[var(--muted)] hover:text-[var(--text)]"
-              }`}
-            >
-              传统均线突破
-            </button>
-          </div>
+          {quantData.strategies && quantData.strategies.length > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--faint)] select-none">策略</span>
+              <select
+                value={activeStrategy}
+                onChange={(e) => setActiveStrategy(e.target.value)}
+                title={activeStrategyMeta?.description}
+                className="bg-[var(--inset)] border border-[var(--border)] text-[10px] font-bold tracking-wide text-[var(--text)] px-2 py-1 rounded-[1px] cursor-pointer focus:outline-none focus:border-[var(--accent)]"
+              >
+                {quantData.strategies.map((s) => (
+                  <option key={s.meta.id} value={s.meta.id}>
+                    {s.meta.name} v{s.meta.version}
+                    {s.meta.id === quantData.defaultStrategyId ? " · 默认" : ""}
+                  </option>
+                ))}
+              </select>
+              {activeStrategyMeta && (
+                <span className="text-[9px] font-mono text-[var(--accent)] border border-[var(--accent)]/40 rounded-full px-1.5 py-0.5 select-none">
+                  v{activeStrategyMeta.version}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px]">
+              <button
+                onClick={() => setActiveStrategy("chokepoint")}
+                className={`px-3 py-1 text-[10px] font-bold tracking-wide transition cursor-pointer rounded-[1px] ${
+                  activeStrategy === "chokepoint" ? "bg-[var(--accent)] text-[var(--accent-fg)]" : "text-[var(--muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                Serenity 瓶颈动量突破 (默认)
+              </button>
+              <button
+                onClick={() => setActiveStrategy("traditional")}
+                className={`px-3 py-1 text-[10px] font-bold tracking-wide transition cursor-pointer rounded-[1px] ${
+                  activeStrategy === "traditional" ? "bg-[var(--accent)] text-[var(--accent-fg)]" : "text-[var(--muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                传统均线突破
+              </button>
+            </div>
+          )}
 
           {/* 视图切换 */}
           <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px]">
@@ -1196,6 +1236,16 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
           </div>
         )}
       </div>
+
+      {/* 当前策略简介（名称 / 版本 / 介绍） */}
+      {activeStrategyMeta && (
+        <div className="flex items-start gap-2 text-[9.5px] font-mono text-[var(--faint)] leading-relaxed -mt-1">
+          <span className="shrink-0 font-bold text-[var(--muted)]">
+            {activeStrategyMeta.name} v{activeStrategyMeta.version}
+          </span>
+          <span className="text-[var(--faint)]">— {activeStrategyMeta.description}</span>
+        </div>
+      )}
 
       {/* 3. 动态数据详情条 Tooltip */}
       <div className="min-h-[24px] flex items-center">{renderTooltip()}</div>

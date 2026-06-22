@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { deriveStats, getQuoteFailover, getKlineFailover } from "@/lib/sources";
-import { calculateChipDistribution, runTraditionalMaBacktest, runChokepointMomentumBacktest, runWalkForwardWinRate, analyzeTechnicalPatterns, generatePriceProjection } from "@/lib/quant";
+import { calculateChipDistribution, runWalkForwardWinRate, analyzeTechnicalPatterns, generatePriceProjection } from "@/lib/quant";
+import { runAllStrategies, pickDefaultResult, DEFAULT_STRATEGY_ID } from "@/lib/strategies";
 import { buildAnalyzePrompt } from "@/lib/serenity";
 import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
 import { finalizeAssessment } from "@/lib/chokepoint";
@@ -272,10 +273,12 @@ export async function POST(req: Request) {
       }
 
       const chips = calculateChipDistribution(candles, quote.price);
-      const traditionalBacktest = runTraditionalMaBacktest(candles);
-      const chokepointBacktest = runChokepointMomentumBacktest(candles, assessment.totalScore);
+      // 策略注册表：一次跑全部已登记策略，前端可下拉切换；默认策略用于胜率口径与首屏 B/S。
+      const strategies = runAllStrategies(candles, { chokepointScore: assessment.totalScore, code: quote.code });
+      const defaultBacktest = pickDefaultResult(strategies)!;
+      const traditionalBacktest = strategies.find((s) => s.meta.id === "traditional-ma")?.result ?? defaultBacktest;
       const walkForward = runWalkForwardWinRate(candles);
-      assessment.winRate = deriveWinRate(walkForward, chokepointBacktest);
+      assessment.winRate = deriveWinRate(walkForward, defaultBacktest);
       const technical = analyzeTechnicalPatterns(candles, quote.price, chips);
       const projections = generatePriceProjection(candles, assessment.totalScore);
 
@@ -308,11 +311,13 @@ export async function POST(req: Request) {
         calibration,
         quant: { 
           chips, 
-          backtest: chokepointBacktest, 
+          backtest: defaultBacktest, 
           backtests: {
             traditional: traditionalBacktest,
-            chokepoint: chokepointBacktest
+            chokepoint: defaultBacktest
           },
+          strategies,
+          defaultStrategyId: DEFAULT_STRATEGY_ID,
           technical, 
           candles,
           projections

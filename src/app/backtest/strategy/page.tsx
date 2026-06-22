@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+interface StrategyMeta {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+}
 
 interface ClosedTrade {
   code: string;
@@ -13,6 +20,7 @@ interface ClosedTrade {
   returnPct: number;
   holdDays: number;
   exitReason: string;
+  atrPctAtEntry: number;
 }
 interface SymbolTradeStats {
   code: string;
@@ -22,6 +30,27 @@ interface SymbolTradeStats {
   winRatePct: number;
   avgReturnPct: number;
   buyHoldPct: number;
+}
+interface CI {
+  point: number;
+  lo: number;
+  hi: number;
+}
+interface RiskMetrics {
+  sharpe: number;
+  sharpeAnnualized: number;
+  sortino: number;
+  calmarRatio: number;
+  maxDrawdownPct: number;
+  cagrPct: number;
+}
+interface VolTargeted {
+  targetVolPct: number;
+  avgLeverage: number;
+  avgReturnPct: number;
+  sharpe: number;
+  sortino: number;
+  maxDrawdownPct: number;
 }
 interface Stats {
   symbols: number;
@@ -39,14 +68,30 @@ interface Stats {
   edgePct: number;
   zVsCoin: number;
   pVsCoin: number;
+  risk: RiskMetrics;
+  tradesPerYear: number;
+  avgReturnCI: CI;
+  winRateCI: CI;
+  psr: number;
+  dsr: number;
+  dsrExpectedMaxSharpe: number;
+  numTrials: number;
+  bonferroniAlpha: number;
+  significantAfterCorrection: boolean;
+  avgAtrPctAtEntry: number;
+  volTargeted: VolTargeted;
   verdict: string;
 }
 interface Result {
-  config: { feeBps: number; takeProfitPct: number; warmupBars: number; matchedHorizon: number };
+  config: { feeBps: number; takeProfitPct: number; warmupBars: number; matchedHorizon: number; strategyId: string; poolChokepointScore: number };
+  strategy?: { id: string; name: string; version: string };
   perSymbol: SymbolTradeStats[];
   trades: ClosedTrade[];
   stats: Stats;
 }
+
+/** 内置「均线放量」简化口径的伪 id（不传 strategyId）。 */
+const BUILTIN_SIMPLE = "__builtin_simple__";
 
 const PRESET =
   "600519,000858,300750,600036,000333,002594,601318,600276,000651,002415,300059,600887,000001,002475,600009";
@@ -71,13 +116,15 @@ function StatCard({ label, value, cls }: { label: string; value: string; cls?: s
 
 /** 结论横幅：依显著性着色（绿=有据/琥珀=高胜率但无超额/红=不显著或样本不足）。 */
 function VerdictBanner({ s }: { s: Stats }) {
-  const significant = s.totalTrades >= 30 && s.zVsCoin > 1.96;
+  // 绿色仅当：经多重检验校正后仍显著、且择时超额为正——避免被"撞出"的假显著误导。
+  const robustSignificant = s.totalTrades >= 30 && s.significantAfterCorrection;
+  const rawSignificant = s.totalTrades >= 30 && s.zVsCoin > 1.96;
   const tone =
     s.totalTrades < 30
       ? "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)]"
-      : significant && s.edgePct > 0
+      : robustSignificant && s.edgePct > 0
         ? "border-emerald-500/40 bg-emerald-500/10 text-[var(--text)]"
-        : significant
+        : rawSignificant
           ? "border-amber-500/40 bg-amber-500/10 text-[var(--text)]"
           : "border-red-500/40 bg-red-500/10 text-[var(--text)]";
   return (
@@ -99,6 +146,29 @@ export default function StrategyBacktestPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [strategies, setStrategies] = useState<StrategyMeta[]>([]);
+  const [strategyId, setStrategyId] = useState<string>("");
+
+  // 拉取已登记策略列表，默认选中默认策略（当前为 v4）。
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/strategies")
+      .then((r) => r.json())
+      .then((j: { defaultStrategyId?: string; strategies?: StrategyMeta[] }) => {
+        if (!alive) return;
+        setStrategies(j.strategies ?? []);
+        if (j.defaultStrategyId) setStrategyId(j.defaultStrategyId);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const selectedStrategy = useMemo(
+    () => strategies.find((s) => s.id === strategyId),
+    [strategies, strategyId],
+  );
 
   const codes = useMemo(
     () =>
@@ -125,7 +195,14 @@ export default function StrategyBacktestPage() {
       const res = await fetch("/api/backtest/recommendation", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ codes, feeBps, takeProfitPct: takeProfitPct / 100, warmupBars, limit }),
+        body: JSON.stringify({
+          codes,
+          feeBps,
+          takeProfitPct: takeProfitPct / 100,
+          warmupBars,
+          limit,
+          strategyId: strategyId === BUILTIN_SIMPLE ? "" : strategyId,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
@@ -152,7 +229,7 @@ export default function StrategyBacktestPage() {
         </div>
         <h1 className="text-xl font-semibold text-[var(--text)]">建议忠实回测 · 胜率证明</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          在股票池上逐只独立模拟「策略建议」的买卖执行（均线放量突破入场，筹码支撑止损 / +N% 止盈 / 高位天量离场），信号**只用当日之前数据**（无未来函数），含 A 股涨跌停撮合与双边手续费。把所有完成交易**汇总**，对比「同持有期买入持有」基线并做 z 检验，诚实回答「照建议买卖到底有没有较大胜率」。仅供研究，不构成投资建议。
+          选定一个策略，在股票池上逐只独立重放它与个股看盘页**完全同一套**的买卖规则，信号**只用当日之前数据**（无未来函数），含 A 股涨跌停撮合（涨停买不进、跌停卖不出顺延）与双边手续费。把所有完成交易**汇总**，对比「同持有期买入持有」基线并做 z 检验，诚实回答「照该策略买卖到底有没有较大胜率」。池内不带逐股基本面分（给中性瓶颈点分），故不触发依赖高基本面分的「强势起爆」信号。仅供研究，不构成投资建议。
         </p>
       </div>
 
@@ -166,6 +243,27 @@ export default function StrategyBacktestPage() {
             className={`${inputCls} font-mono`}
             placeholder="600519,000858,300750 ..."
           />
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-[var(--muted)]">回测策略（与个股看盘页同一套买卖规则，忠实重放 + 涨跌停撮合 + 手续费）</span>
+          <select
+            value={strategyId}
+            onChange={(e) => setStrategyId(e.target.value)}
+            className={inputCls}
+          >
+            {strategies.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} v{s.version}
+              </option>
+            ))}
+            <option value={BUILTIN_SIMPLE}>内置·均线放量突破（简化对照口径）</option>
+          </select>
+          {selectedStrategy && (
+            <span className="mt-0.5 text-[var(--faint)] leading-4">{selectedStrategy.description}</span>
+          )}
+          {strategyId === BUILTIN_SIMPLE && (
+            <span className="mt-0.5 text-[var(--faint)] leading-4">均线金叉/VCP 平台突破入场，跌破筹码支撑 / +N% 止盈 / 高位天量离场（固定止盈受下方「止盈目标」控制）。</span>
+          )}
         </label>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <label className="flex flex-col gap-1 text-xs">
@@ -221,6 +319,48 @@ export default function StrategyBacktestPage() {
             </div>
             <p className="mt-2 text-xs leading-5 text-[var(--faint)]">
               「基线」= 在同一批票、warmup 后的每个交易日入场并持有 {result.stats.matchedHorizon} 日的随机入场基准；策略每笔均值减去基线均值即「择时超额」。胜率 z 检验对照掷硬币 50%。样本（完成交易）≥30 且 z&gt;1.96 才有统计意义。
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <h2 className="mb-2 text-sm font-semibold text-[var(--text)]">风险调整与稳健性（借鉴顶级量化机构口径）</h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <StatCard label="Sharpe(逐笔)" value={result.stats.risk.sharpe.toFixed(2)} cls={result.stats.risk.sharpe > 0 ? "text-rose-500" : "text-emerald-500"} />
+              <StatCard label="Sharpe(年化)" value={result.stats.risk.sharpeAnnualized.toFixed(2)} />
+              <StatCard label="Sortino" value={result.stats.risk.sortino.toFixed(2)} />
+              <StatCard label="Calmar" value={result.stats.risk.calmarRatio.toFixed(2)} />
+              <StatCard label="最大回撤" value={`-${result.stats.risk.maxDrawdownPct.toFixed(1)}%`} cls="text-emerald-500" />
+              <StatCard label="CAGR(近似)" value={fmtPct(result.stats.risk.cagrPct)} cls={signClass(result.stats.risk.cagrPct)} />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              <StatCard label="胜率 95% CI" value={`${result.stats.winRateCI.lo.toFixed(0)}–${result.stats.winRateCI.hi.toFixed(0)}%`} />
+              <StatCard label="每笔均值 95% CI" value={`${result.stats.avgReturnCI.lo.toFixed(1)}–${result.stats.avgReturnCI.hi.toFixed(1)}%`} />
+              <StatCard label="PSR (真Sharpe>0)" value={`${(result.stats.psr * 100).toFixed(0)}%`} cls={result.stats.psr >= 0.95 ? "text-rose-500" : "text-[var(--text)]"} />
+              <StatCard label={`Deflated Sharpe (N=${result.stats.numTrials})`} value={`${(result.stats.dsr * 100).toFixed(0)}%`} cls={result.stats.dsr >= 0.95 ? "text-rose-500" : "text-[var(--text)]"} />
+            </div>
+            <div className="mt-3 border-t border-[var(--border)] pt-3">
+              <div className="mb-2 text-xs font-medium text-[var(--muted)]">
+                波动率目标仓位（ATR 风险平价 · 目标 {result.stats.volTargeted.targetVolPct}% · 不改买卖点，仅按 1/ATR 调仓）
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <StatCard label="入场平均 ATR%" value={`${result.stats.avgAtrPctAtEntry.toFixed(2)}%`} />
+                <StatCard label="平均杠杆" value={`${result.stats.volTargeted.avgLeverage.toFixed(2)}×`} />
+                <StatCard
+                  label="目标化后 Sharpe"
+                  value={result.stats.volTargeted.sharpe.toFixed(2)}
+                  cls={result.stats.volTargeted.sharpe > result.stats.risk.sharpe ? "text-rose-500" : "text-[var(--text)]"}
+                />
+                <StatCard label="目标化后 Sortino" value={result.stats.volTargeted.sortino.toFixed(2)} />
+                <StatCard label="目标化后最大回撤" value={`-${result.stats.volTargeted.maxDrawdownPct.toFixed(1)}%`} cls="text-emerald-500" />
+              </div>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-[var(--faint)]">
+              Sharpe/Sortino/Calmar/最大回撤来自「逐笔等权串行复利」的近似净值曲线（忽略并发持仓），仅作风险量级参考。
+              波动率目标仓位按入场 ATR(14)% 反比调仓（低波动多下、高波动少下），目标化后 Sharpe 高于等权即说明该法在本样本上改善了风险调整后收益。
+              95% CI 为 bootstrap 重采样区间——区间跨越 50%（胜率）或 0（均值）说明结论受样本运气影响大。
+              PSR = 真实 Sharpe&gt;0 的概率；Deflated Sharpe 在「试过 {result.stats.numTrials} 个策略」的多重检验下抬高门槛（运气门槛 SR≈{result.stats.dsrExpectedMaxSharpe.toFixed(2)}），
+              二者 ≥95% 才算稳健。胜率显著性经 Bonferroni 校正后阈值为 p&lt;{result.stats.bonferroniAlpha.toFixed(4)}，
+              当前{result.stats.significantAfterCorrection ? "仍显著" : "不显著"}。
             </p>
           </div>
 

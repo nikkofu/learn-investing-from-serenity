@@ -40,6 +40,10 @@ export async function POST(req: Request) {
     takeProfitPct: body.takeProfitPct,
     warmupBars: body.warmupBars,
     matchedHorizon: body.matchedHorizon,
+    strategyId: body.strategyId,
+    poolChokepointScore: body.poolChokepointScore,
+    numTrials: body.numTrials,
+    volTargetPct: body.volTargetPct,
   };
 
   try {
@@ -62,7 +66,10 @@ export async function GET() {
       takeProfitPct: 0.35,
       warmupBars: 30,
       limit: 500,
+      strategyId: "",
+      poolChokepointScore: 60,
+      volTargetPct: 3,
     },
-    note: "POST {codes:[...],...} 触发建议忠实回测：在股票池上逐只独立模拟买卖建议的执行（信号因果、含涨跌停与手续费），汇总胜率/期望/盈亏比，并与同持有期买入持有基线对比 + z 检验。",
+    note: "POST {codes:[...], strategyId?, numTrials?, volTargetPct?, ...} 触发建议忠实回测：在股票池上逐只独立模拟买卖建议的执行（信号因果、含涨跌停与手续费），汇总胜率/期望/盈亏比，并与同持有期买入持有基线对比 + z 检验。另输出风险调整指标（Sharpe/Sortino/Calmar/最大回撤）、bootstrap 95% 置信区间、PSR/Deflated Sharpe（按 numTrials 做多重检验缩水，默认=已登记策略数）、Bonferroni 校正显著性，以及按 1/ATR 的波动率目标仓位（volTargetPct，默认 3）对照。指定 strategyId（如 chokepoint-momentum-v4）则按该策略忠实重放买卖点；留空走内置均线放量简化口径。",
   });
 }

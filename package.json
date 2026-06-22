@@ -1,6 +1,6 @@
 {
   "name": "learn-investing-from-serenity",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -26,6 +26,7 @@
     "eslint-config-next": "16.2.9",
     "playwright-core": "^1.60.0",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

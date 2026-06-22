@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/scanner", label: "热门股扫描" },
   { href: "/mining", label: "智能挖掘" },
   { href: "/backtest", label: "回测" },
+  { href: "/strategies", label: "策略市场" },
   { href: "/sectors", label: "板块热力" },
   { href: "/sync", label: "数据同步" },
   { href: "/settings", label: "设置" },

@@ -4,6 +4,48 @@
 
 ---
 
+## [0.7.0] - 2026-06-22
+
+> 引入国际主流量化机构的**诚实评估**通用做法：把「建议忠实回测」从只看胜率/均值，升级为带**风险调整指标 + 多重检验校正 + 波动率目标仓位**的稳健评估，专治小样本 + 多策略反复比较时「撞出假显著」的可信度短板。
+
+### 📐 新增统计库 `src/lib/stats.ts`
+- **风险调整指标**：Sharpe（逐笔 + 年化）、Sortino、Calmar、最大回撤、CAGR，均由逐笔净收益的「等权串行复利」近似净值曲线计算（已注明忽略并发持仓的近似口径）。
+- **Bootstrap 置信区间**：对胜率与每笔均值给出可复现（固定种子）的 95% percentile CI，量化"运气成分"——区间跨越 50%/0 即说明结论脆弱。
+- **PSR / Deflated Sharpe Ratio（López de Prado, 2014）**：PSR 计入收益偏度/峰度（非正态修正）；DSR 用"试过 N 个策略"抬高运气门槛（期望最大 Sharpe），再算真实 Sharpe 超过门槛的概率——比较的策略越多，门槛越高。含 Acklam 逆正态分位数实现。
+- **多重检验校正**：Bonferroni 阈值与 Benjamini-Hochberg（FDR）。
+- **波动率目标仓位**：`volTargetedStats` 按入场 ATR% 反比调仓（风险平价），度量"低波动多下、高波动少下"对风险调整后收益的改善。
+
+### 📊 建议忠实回测接入新指标
+- `recommendationBacktest.ts` 的结果新增 `risk / avgReturnCI / winRateCI / psr / dsr / numTrials / bonferroniAlpha / significantAfterCorrection / avgAtrPctAtEntry / volTargeted` 等字段；`numTrials` 默认取已登记策略数（5），`volTargetPct` 默认 3。每笔交易记录入场 ATR(14)%。
+- 结论文案在 z 检验之外，**追加 Bonferroni 校正后的显著性、风险调整指标摘要与波动率目标仓位效果**，并据此把结论横幅"变绿"的标准提高到**多重检验校正后仍显著**。
+- `/api/backtest/recommendation` 接受 `numTrials / volTargetPct`；`/backtest/strategy` 页新增「风险调整与稳健性」卡片（Sharpe/Sortino/Calmar/最大回撤/CAGR、95% CI、PSR/DSR、Bonferroni）与「波动率目标仓位」对照行。
+
+### ✅ 质量与实测
+- `tsc --noEmit`、`next build`、ESLint 全通过；`scratch/verify-stats.ts` 15 项断言全 PASS（含 normInv↔normCdf 互逆、DSR 随试验次数变严、BH/Bonferroni、bootstrap CI 包含点估计）。
+- 真实数据 15 只池实测：v4 逐笔 Sharpe 0.19 / Sortino 0.55 / Calmar 1.87 / DSR 82%，全面优于 v3（0.17 / 0.46 / 1.22 / 72%）；波动率目标仓位把 v4 Sharpe 提到 0.21（v3 反而下降），结论文案据实自适应。两者经 5 次试验 Bonferroni 校正后胜率均不显著——诚实结论：动量策略胜率本就 <50%，靠盈亏比取正期望，要做显著的胜率证明须扩大样本。
+
+---
+
+## [0.6.0] - 2026-06-22
+
+> 在 v3 底部反转增强之上，新增 **v4 策略（MA60 趋势过滤 + 跟踪止损调优）** 并设为默认；同时把「建议忠实回测」从内置简化口径升级为**按所选策略忠实重放**，使 `/backtest/strategy` 能对 v1/v2/v3/v4 做多股票池显著性对照。
+
+### 📈 新策略 chokepoint-momentum-v4（趋势过滤 + 跟踪止损调优）
+- **MA60 中期趋势闸门（仅作用于右侧动量入场）**：`quant.ts` 新增 `runChokepointMomentumBacktestV4`。右侧四类买点（均线金叉 / VCP 平台突破 / 强势起爆创新高 / 趋势回踩再起）新增闸门——仅在「价在 MA60 之上 **或** MA60 近 10 日不下行」时才允许追入，压住在 MA60 仍向下的震荡/下行区里追突破被诱多。
+- **底部三类买点不加闸门**：放量反包·底部启动 / W底突破 / 老鸭头二次金叉本就发生在 MA60 下方的底部（老鸭头自带 MA60 向上要求），保持原样 → **04-17 漏买修复完全不受影响**（合成数据验证：v4 底部买点与 v3 逐笔一致）。
+- **跟踪止损分段调优**：启动阈值由 +8% 提前到 **+6%**；浮盈未到 +20% 用 **15%** 宽松回撤（少被建仓初期正常震荡洗出，v3 为 12%），峰值浮盈 ≥ +20% 后收紧到 **9%** 锁定大段利润。全部参数（`trailActivate / trailPctBase / trailPctTight / tightenGain / ma60Filter`）可通过 opts 调，便于参数寻优。
+- **登记为默认策略**：`strategies.ts` 中 `DEFAULT_STRATEGY_ID` 改为 `chokepoint-momentum-v4`，v1/v2/v3/传统均线**原样保留**作诚实对照。
+
+### 📊 建议忠实回测接入真实策略（多股票池显著性对照）
+- **按策略忠实重放**：`recommendationBacktest.ts` 重构，新增 `strategyId` 配置。指定策略时，按该策略在每只票上产生的买卖点（与个股看盘页**同一套规则**）叠加 A 股涨跌停撮合（涨停买不进、跌停卖不出顺延）+ 双边手续费成交，再汇总胜率 / 期望 / 盈亏比并对 50% 做 z 检验；留空（`""`）则退回内置「均线放量突破 + 固定止盈」简化口径作历史对照。
+- **池内中性基本面分**：新增 `poolChokepointScore`（默认 60），池内无逐股基本面分，故不触发依赖高基本面分的「强势起爆」信号——诚实的保守口径。
+- **API / UI**：`/api/backtest/recommendation` 接受 `strategyId` / `poolChokepointScore`；`/backtest/strategy` 页新增**策略下拉**（v4/v3/v2/v1/传统均线 + 内置简化口径），结论横幅回显「跑的是哪个策略」。
+
+### ✅ 质量
+- 本地 `tsc --noEmit` 通过；生产 `next build` 通过；合成数据三项断言全 PASS（v4 底部买点与 v3 一致、v4 拦截 MA60 向下区的金叉诱多、策略多股票池回测打通并回显元信息）。
+
+---
+
 ## [0.5.0] - 2026-06-22
 
 > 本次为里程碑级版本：围绕**准确性优先、诚实优先**，把单 Agent 单趟打分升级为多智能体协作工作流，并补齐了组合 / 建议忠实回测、样本外胜率与校准闭环，同时引入全市场智能挖掘的高吞吐数据管线。

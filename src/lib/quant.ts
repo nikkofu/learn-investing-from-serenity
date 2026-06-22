@@ -531,6 +531,746 @@ export function runChokepointMomentumBacktest(
   };
 }
 
+/**
+ * 运行 Serenity 瓶颈动量突破量化策略回测 v2（修复版）。
+ * 相对 v1（runChokepointMomentumBacktest）的三处针对性改进：
+ *   ① 趋势内可再入场：在上升趋势中（MA20 走平向上），价格回踩 MA20 附近后重新放量走强即可再次买入，
+ *      不再只认「昨日≤MA20、今日>MA20」的一次性新鲜上穿——解决单边主升浪里止损出局后整段踏空的问题。
+ *   ② 放开强势起爆的高位区位上限：创新高突破本就是动量的定义，故信号 3 去掉 rangePos≤0.85 上限，
+ *      仅保留下限 0.60，让右侧创新高的放量长阳也能触发买点（v1 在此处把主升浪挡在门外）。
+ *   ④ 跟踪止损替代固定 35% 止盈：浮盈启动后用「自持仓峰值回撤百分比」离场，让利润奔跑、不在 +35% 处截断主升浪。
+ * 其余口径（跌破 70% 筹码支撑止损、量能换手率/成交量代理、整手等）与 v1 保持一致。
+ */
+export function runChokepointMomentumBacktestV2(
+  candles: Candle[],
+  chokepointScore: number,
+  _opts: { code?: string } = {},
+): BacktestResult {
+  const TRAIL_PCT = 0.12; // 跟踪止损：自持仓期间峰值收盘价回撤超过 12% 离场
+  const TRAIL_ACTIVATE = 1.08; // 浮盈 ≥ 8% 后才启用跟踪止损，避免建仓初期正常震荡被洗出
+
+  const history: BacktestResult["history"] = [];
+  const trades: TradeAction[] = [];
+
+  if (candles.length < 25) {
+    return { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+  }
+
+  const prices = candles.map((c) => c.close);
+  const ma20List: number[] = [];
+  const volMa5: number[] = [];
+  const volMa20: number[] = [];
+
+  // 量能代理：换手率优先，无换手率（如腾讯/新浪日K）降级用成交量（比值口径数学等价）。
+  const volProxy = candles.map((c) =>
+    c.turnoverPct && c.turnoverPct > 0 ? c.turnoverPct : c.volume && c.volume > 0 ? c.volume : 1,
+  );
+
+  for (let i = 0; i < candles.length; i++) {
+    if (i < 19) ma20List.push(prices[i]);
+    else ma20List.push(prices.slice(i - 19, i + 1).reduce((s, p) => s + p, 0) / 20);
+
+    if (i < 4) volMa5.push(volProxy[i]);
+    else volMa5.push(volProxy.slice(i - 4, i + 1).reduce((s, t) => s + t, 0) / 5);
+
+    if (i < 19) volMa20.push(volProxy[i]);
+    else volMa20.push(volProxy.slice(i - 19, i + 1).reduce((s, t) => s + t, 0) / 20);
+  }
+
+  let cash = 100000;
+  let shares = 0;
+  let holding = false;
+  let buyPrice = 0;
+  let buyDate = "";
+  let peakClose = 0; // 持仓期间的峰值收盘价（用于跟踪止损）
+  let winCount = 0;
+  let tradeCount = 0;
+
+  const initialStockWorth = prices[20];
+
+  for (let i = 20; i < candles.length; i++) {
+    const c = candles[i];
+    const close = c.close;
+    const date = c.date;
+    const ma20 = ma20List[i];
+    const t5 = volMa5[i];
+    const t20 = volMa20[i];
+
+    const subHistory = candles.slice(Math.max(0, i - 120), i + 1);
+    const chipDist = calculateChipDistribution(subHistory, close, true);
+    const supportPrice = chipDist.priceLow70;
+    const avgCost = chipDist.avgCost;
+
+    const prevWindow = prices.slice(Math.max(0, i - 120), i + 1);
+    const minWin = Math.min(...prevWindow);
+    const maxWin = Math.max(...prevWindow);
+    const rangePos = maxWin > minWin ? (close - minWin) / (maxWin - minWin) : 0.5;
+
+    const recentWindow = prices.slice(Math.max(0, i - 10), i);
+    const isPlateauConsolidation =
+      recentWindow.length >= 5 &&
+      (Math.max(...recentWindow) - Math.min(...recentWindow)) / Math.min(...recentWindow) < 0.08;
+
+    if (!holding) {
+      // 信号 1：新鲜上穿 20 日线且放量（均线筹码金叉）
+      const isBreakoutGoldCross = close > ma20 && prices[i - 1] <= ma20List[i - 1] && t5 > t20 * 1.3;
+      // 信号 2：平台整理后的二次放量突破（VCP）
+      const isVcpBreakout =
+        close > ma20 && isPlateauConsolidation && close > Math.max(...recentWindow) && t5 > t20 * 1.3;
+      // 信号 3（②修复）：强成长股放量创新高起爆——去掉 rangePos≤0.85 上限，仅保留下限 0.60
+      const isStrongHighBreakout =
+        chokepointScore >= 75 && rangePos >= 0.6 && t5 > t20 * 1.6 && close > Math.max(...recentWindow);
+      // 信号 4（①修复）：上升趋势中回踩 MA20 后重新走强 → 趋势内再入场（不需新鲜上穿）
+      const ma20Rising = i >= 25 && ma20List[i] > ma20List[i - 5];
+      const recentLows = candles.slice(Math.max(0, i - 5), i + 1).map((x) => x.low);
+      const pulledBackToMa = recentLows.length > 0 && Math.min(...recentLows) <= ma20 * 1.03;
+      const isTrendResume =
+        close > ma20 && ma20Rising && pulledBackToMa && close > prices[i - 1] && t5 > t20 * 1.1;
+
+      if (isBreakoutGoldCross || isVcpBreakout || isStrongHighBreakout || isTrendResume) {
+        shares = cash / close;
+        cash = 0;
+        holding = true;
+        buyPrice = close;
+        buyDate = date;
+        peakClose = close;
+
+        const cautionTag =
+          chokepointScore < 55 ? "【评分偏低警示】该股基本面综合打分偏低，此处突破交易建议控制仓位偏轻。 " : "";
+        let reason = "";
+        if (isStrongHighBreakout) {
+          reason = `${cautionTag}【Serenity 强成长突破·v2】基本面得分 ${chokepointScore} 分，股价在 ${(rangePos * 100).toFixed(0)}% 区位放量长阳突破前高（量能比 ${(t5 / t20).toFixed(1)}倍），主升浪开启（已放开高位区位上限，创新高亦可入场）。`;
+        } else if (isVcpBreakout) {
+          reason = `${cautionTag}【VCP箱体整理突破】股价在 20日线之上窄幅收缩盘整后，今日放量突破整理平台上轨，二次动量加速起飞。`;
+        } else if (isTrendResume) {
+          reason = `${cautionTag}【趋势回踩再起·v2】上升趋势中股价回踩 20 日均线附近后重新放量走强（量能比 ${(t5 / t20).toFixed(1)}倍），顺势再入场，避免单边主升浪踏空。`;
+        } else {
+          reason = `${cautionTag}【均线筹码共振突破】股价突破 20 日均线，且价格处于主力平均成本线（${avgCost.toFixed(2)}元）附近，5日均换手放大至 ${(t5 / t20).toFixed(1)} 倍。`;
+        }
+
+        trades.push({ type: "buy", date, price: close, reason });
+      }
+    } else {
+      peakClose = Math.max(peakClose, close);
+      // 卖出条件：
+      // 1. 跌破主力筹码成本防线（下方密集筹码下轨 5%）
+      const isSupportBroken = close < supportPrice * 0.95;
+      // 2（④修复）. 跟踪止损：浮盈启动后自峰值回撤超阈值离场（替代固定 35% 止盈，让利润奔跑）
+      const trailingActive = peakClose >= buyPrice * TRAIL_ACTIVATE;
+      const isTrailingStop = trailingActive && close <= peakClose * (1 - TRAIL_PCT);
+      // 3. 超买天量滞涨
+      const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
+
+      if (isSupportBroken || isTrailingStop || isClimaxRun) {
+        cash = shares * close;
+        shares = 0;
+        holding = false;
+        tradeCount++;
+        const profit = close - buyPrice;
+        if (profit > 0) winCount++;
+
+        let reason = "";
+        if (isSupportBroken) {
+          reason = `【主力防线失守止损】日线收盘价 ${close.toFixed(2)} 元跌破主力 70% 筹码密集支撑区下轨（${supportPrice.toFixed(2)}元）的 5% 以上，中期洗盘出局，策略执行逻辑证伪。`;
+        } else if (isTrailingStop) {
+          reason = `【跟踪止盈】持仓峰值 ${peakClose.toFixed(2)} 元后回撤超 ${(TRAIL_PCT * 100).toFixed(0)}%（现价 ${close.toFixed(2)}），锁定波段利润离场（买入价 ${buyPrice.toFixed(2)} 元，让利润奔跑而非固定 35% 截断）。`;
+        } else if (isClimaxRun) {
+          reason = `【高位超买天量滞涨】120日价格区间位置高达 ${(rangePos * 100).toFixed(0)}%，日换手率高达 ${c.turnoverPct.toFixed(1)}% 创天量，呈现高位筹码剧烈松动、主力诱多滞涨信号。`;
+        }
+
+        trades.push({
+          type: "sell",
+          date,
+          price: close,
+          reason,
+          profitPct: ((close - buyPrice) / buyPrice) * 100,
+        });
+      }
+    }
+
+    const currentWorth = holding ? shares * close : cash;
+    const stockWorth = (close / initialStockWorth) * 100000;
+    history.push({
+      date,
+      strategyWorth: Number(currentWorth.toFixed(0)),
+      stockWorth: Number(stockWorth.toFixed(0)),
+    });
+  }
+
+  void buyDate;
+  const finalWorth = holding ? shares * prices[prices.length - 1] : cash;
+  const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
+  const stockReturn = ((prices[prices.length - 1] - initialStockWorth) / initialStockWorth) * 100;
+  const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
+
+  return {
+    winRate: Number(winRate.toFixed(1)),
+    sharpe: annualizedSharpe(history),
+    strategyReturn: Number(strategyReturn.toFixed(2)),
+    stockReturn: Number(stockReturn.toFixed(2)),
+    trades,
+    history,
+  };
+}
+
+/**
+ * 运行 Serenity 瓶颈动量突破量化策略回测 v3（底部反转增强版）。
+ *
+ * 背景：v2 只在「右侧」入场（新鲜上穿放量、VCP 平台突破、高区位创新高、上升趋势回踩再起），
+ * 且量能确认一律用「平滑后的 5 日/20 日量比 t5>1.3·t20」。这导致在「相对低位 + 单日倍量大阳
+ * 反包上穿」这类经典底部启动（如 600703 在 2026-04-17：相对区位 26%、单日量能 2.93 倍、+9.98%
+ * 长阳收复 MA20）完全无法识别——因为单日爆量不足以把 5 日均量比抬过 1.3。
+ *
+ * v3 在保留 v2 全部信号与卖出口径（跌破筹码支撑止损 / 跟踪止损 / 高位天量滞涨）的基础上，
+ * 新增三类「左侧/底部反转」入场信号，全部仅用「截至当日」的数据，无未来函数：
+ *   信号 5【放量反包·底部启动】：相对低位（120 日区位 ≤ 0.45）+ 单日量能既 ≥ 昨日 1.8 倍、
+ *      又 ≥ 近 5 日均量 1.5 倍（捕捉平滑量比抓不到的单日爆量）+ 大阳收复（日涨幅 ≥ 5%、收在
+ *      当日振幅上半部、且收复 MA20 或反包前 5 日实体），并要求出现看涨 K 线形态（大阳/阳包阴
+ *      吞没/低位带量锤子线）。这是直接修复 04-17 漏买的主信号。
+ *   信号 6【W 底/双底突破颈线】：近 45 日内识别两个相近的低点（高度差 ≤ 6%、间隔 ≥ 5 日），
+ *      以两低点之间的高点为颈线，今日带量（量能 > 20 日均量）放量收阳突破颈线即买入。
+ *   信号 7【老鸭头·二次金叉】：MA60 向上且价在其上（趋势在），近 25 日内出现过 MA5 上穿 MA10
+ *      （鸭头顶）后 MA5 回落贴近 MA10（鸭嘴缩量回踩），今日 MA5 重新上穿 MA10 且放量 → 顺势买。
+ *
+ * 其余口径（70% 筹码支撑、量能换手率/成交量代理、整手、跟踪止损参数等）与 v2 完全一致，便于对照。
+ */
+export function runChokepointMomentumBacktestV3(
+  candles: Candle[],
+  chokepointScore: number,
+  _opts: { code?: string } = {},
+): BacktestResult {
+  const TRAIL_PCT = 0.12;
+  const TRAIL_ACTIVATE = 1.08;
+
+  const history: BacktestResult["history"] = [];
+  const trades: TradeAction[] = [];
+
+  if (candles.length < 25) {
+    return { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+  }
+
+  const prices = candles.map((c) => c.close);
+  const ma = (arr: number[], idx: number, w: number): number => {
+    const start = Math.max(0, idx - w + 1);
+    const slice = arr.slice(start, idx + 1);
+    return slice.reduce((s, x) => s + x, 0) / slice.length;
+  };
+  const ma5List = prices.map((_, i) => ma(prices, i, 5));
+  const ma10List = prices.map((_, i) => ma(prices, i, 10));
+  const ma20List = prices.map((_, i) => ma(prices, i, 20));
+  const ma60List = prices.map((_, i) => ma(prices, i, 60));
+
+  const volProxy = candles.map((c) =>
+    c.turnoverPct && c.turnoverPct > 0 ? c.turnoverPct : c.volume && c.volume > 0 ? c.volume : 1,
+  );
+  const volMa5 = volProxy.map((_, i) => ma(volProxy, i, 5));
+  const volMa20 = volProxy.map((_, i) => ma(volProxy, i, 20));
+
+  // —— 看涨 K 线形态（仅用当日及之前的 K，无未来函数）——
+  const bodyOf = (k: Candle) => Math.abs(k.close - k.open);
+  const isBullEngulf = (i: number): boolean => {
+    if (i < 1) return false;
+    const a = candles[i - 1], b = candles[i];
+    const aYin = a.close < a.open;
+    const bYang = b.close > b.open;
+    return aYin && bYang && b.close >= a.open && b.open <= a.close && bodyOf(b) > bodyOf(a) * 0.8;
+  };
+  const isHammer = (i: number): boolean => {
+    const k = candles[i];
+    const range = k.high - k.low;
+    if (range <= 0) return false;
+    const body = bodyOf(k);
+    const lowerShadow = Math.min(k.open, k.close) - k.low;
+    const upperShadow = k.high - Math.max(k.open, k.close);
+    return lowerShadow >= body * 2 && upperShadow <= body && k.close >= k.open;
+  };
+
+  let cash = 100000;
+  let shares = 0;
+  let holding = false;
+  let buyPrice = 0;
+  let peakClose = 0;
+  let winCount = 0;
+  let tradeCount = 0;
+
+  const initialStockWorth = prices[20];
+
+  for (let i = 20; i < candles.length; i++) {
+    const c = candles[i];
+    const close = c.close;
+    const date = c.date;
+    const ma20 = ma20List[i];
+    const t5 = volMa5[i];
+    const t20 = volMa20[i];
+
+    const subHistory = candles.slice(Math.max(0, i - 120), i + 1);
+    const chipDist = calculateChipDistribution(subHistory, close, true);
+    const supportPrice = chipDist.priceLow70;
+    const avgCost = chipDist.avgCost;
+
+    const prevWindow = prices.slice(Math.max(0, i - 120), i + 1);
+    const minWin = Math.min(...prevWindow);
+    const maxWin = Math.max(...prevWindow);
+    const rangePos = maxWin > minWin ? (close - minWin) / (maxWin - minWin) : 0.5;
+
+    const recentWindow = prices.slice(Math.max(0, i - 10), i);
+    const isPlateauConsolidation =
+      recentWindow.length >= 5 &&
+      (Math.max(...recentWindow) - Math.min(...recentWindow)) / Math.min(...recentWindow) < 0.08;
+
+    const dayRet = prices[i - 1] > 0 ? ((close - prices[i - 1]) / prices[i - 1]) * 100 : 0;
+
+    if (!holding) {
+      // —— v2 原有四信号 ——
+      const isBreakoutGoldCross = close > ma20 && prices[i - 1] <= ma20List[i - 1] && t5 > t20 * 1.3;
+      const isVcpBreakout =
+        close > ma20 && isPlateauConsolidation && close > Math.max(...recentWindow) && t5 > t20 * 1.3;
+      const isStrongHighBreakout =
+        chokepointScore >= 75 && rangePos >= 0.6 && t5 > t20 * 1.6 && close > Math.max(...recentWindow);
+      const ma20Rising = i >= 25 && ma20List[i] > ma20List[i - 5];
+      const recentLows = candles.slice(Math.max(0, i - 5), i + 1).map((x) => x.low);
+      const pulledBackToMa = recentLows.length > 0 && Math.min(...recentLows) <= ma20 * 1.03;
+      const isTrendResume =
+        close > ma20 && ma20Rising && pulledBackToMa && close > prices[i - 1] && t5 > t20 * 1.1;
+
+      // —— v3 新增三信号 ——
+      // 信号 5：放量反包·底部启动（单日爆量 + 相对低位 + 大阳收复 + 看涨形态）
+      const volSpike = volProxy[i] >= volProxy[i - 1] * 1.8 && volProxy[i] >= volMa5[i] * 1.5;
+      const lowZone = rangePos <= 0.45;
+      const bigYang = close > c.open && dayRet >= 5;
+      const closeUpperHalf = c.high > c.low ? close - c.low >= 0.5 * (c.high - c.low) : true;
+      const priorBody5 = Math.max(...prices.slice(Math.max(0, i - 5), i));
+      const reclaim = close > ma20 || close > priorBody5;
+      const bullPattern = bigYang || isBullEngulf(i) || (isHammer(i) && close > c.open);
+      const isVolThrustBottom = lowZone && volSpike && closeUpperHalf && reclaim && bullPattern;
+
+      // 信号 6：W 底/双底突破颈线（仅回看，无未来函数）
+      let isDoubleBottomBreak = false;
+      if (i >= 46 && rangePos <= 0.6 && close > c.open && volProxy[i] > volMa20[i]) {
+        const lookback = candles.slice(i - 45, i); // [i-45, i-1]
+        const lows = lookback.map((x) => x.low);
+        // 近端低点（后 20 根内）
+        const recentSeg = lookback.slice(-20);
+        const recentLow = Math.min(...recentSeg.map((x) => x.low));
+        const recentLowAbs = lows.length - 20 + recentSeg.map((x) => x.low).indexOf(recentLow);
+        // 前端低点（近端低点至少 5 根之前）
+        if (recentLowAbs >= 6) {
+          const priorSeg = lookback.slice(0, recentLowAbs - 4);
+          const priorLow = Math.min(...priorSeg.map((x) => x.low));
+          const priorLowAbs = priorSeg.map((x) => x.low).indexOf(priorLow);
+          const similar = priorLow > 0 && Math.abs(recentLow - priorLow) / priorLow <= 0.06;
+          // 颈线 = 两低点之间的最高收盘
+          const between = lookback.slice(priorLowAbs + 1, recentLowAbs);
+          const neckline = between.length > 0 ? Math.max(...between.map((x) => x.close)) : Infinity;
+          if (similar && close > neckline && Number.isFinite(neckline)) isDoubleBottomBreak = true;
+        }
+      }
+
+      // 信号 7：老鸭头·二次金叉（趋势在 + 回踩缩量后再金叉放量）
+      let isOldDuckHead = false;
+      if (i >= 60) {
+        const ma5 = ma5List[i], ma10 = ma10List[i], ma60 = ma60List[i];
+        const upTrend = ma60 > ma60List[i - 5] && close > ma60;
+        const crossUpToday = ma5 > ma10 && ma5List[i - 1] <= ma10List[i - 1];
+        // 近 25 日内出现过「金叉后 MA5 回落贴近/跌破 MA10」的鸭嘴形态
+        let hadBillPullback = false;
+        for (let j = i - 25; j < i; j++) {
+          if (j < 1) continue;
+          const crossedBefore = ma5List[j] > ma10List[j] && ma5List[j - 1] <= ma10List[j - 1];
+          if (crossedBefore) {
+            for (let k = j + 1; k < i; k++) {
+              if (ma5List[k] <= ma10List[k] * 1.01) { hadBillPullback = true; break; }
+            }
+          }
+          if (hadBillPullback) break;
+        }
+        const volOk = volProxy[i] > volMa5[i] * 1.1;
+        if (upTrend && crossUpToday && hadBillPullback && volOk) isOldDuckHead = true;
+      }
+
+      if (
+        isBreakoutGoldCross ||
+        isVcpBreakout ||
+        isStrongHighBreakout ||
+        isTrendResume ||
+        isVolThrustBottom ||
+        isDoubleBottomBreak ||
+        isOldDuckHead
+      ) {
+        shares = cash / close;
+        cash = 0;
+        holding = true;
+        buyPrice = close;
+        peakClose = close;
+
+        const cautionTag =
+          chokepointScore < 55 ? "【评分偏低警示】该股基本面综合打分偏低，此处突破交易建议控制仓位偏轻。 " : "";
+        let reason = "";
+        if (isVolThrustBottom) {
+          reason = `${cautionTag}【放量反包·底部启动·v3】相对低位（区位 ${(rangePos * 100).toFixed(0)}%）今日单日爆量（量能 ${(volProxy[i] / volProxy[i - 1]).toFixed(1)} 倍于昨日）放量长阳（日涨 ${dayRet.toFixed(1)}%）收复 MA20/反包前高，呈底部反转启动。`;
+        } else if (isDoubleBottomBreak) {
+          reason = `${cautionTag}【W底/双底突破·v3】近 45 日构筑双底（两低点高度相近），今日带量收阳向上突破颈线，底部形态确认。`;
+        } else if (isOldDuckHead) {
+          reason = `${cautionTag}【老鸭头·二次金叉·v3】MA60 趋势向上，MA5 回踩贴近 MA10（鸭嘴缩量）后今日重新放量金叉，主升浪二次启动。`;
+        } else if (isStrongHighBreakout) {
+          reason = `${cautionTag}【Serenity 强成长突破·v3】基本面得分 ${chokepointScore} 分，股价在 ${(rangePos * 100).toFixed(0)}% 区位放量长阳突破前高（量能比 ${(t5 / t20).toFixed(1)}倍），主升浪开启。`;
+        } else if (isVcpBreakout) {
+          reason = `${cautionTag}【VCP箱体整理突破】股价在 20日线之上窄幅收缩盘整后，今日放量突破整理平台上轨，二次动量加速起飞。`;
+        } else if (isTrendResume) {
+          reason = `${cautionTag}【趋势回踩再起·v3】上升趋势中股价回踩 20 日均线附近后重新放量走强（量能比 ${(t5 / t20).toFixed(1)}倍），顺势再入场。`;
+        } else {
+          reason = `${cautionTag}【均线筹码共振突破】股价突破 20 日均线，且价格处于主力平均成本线（${avgCost.toFixed(2)}元）附近，5日均换手放大至 ${(t5 / t20).toFixed(1)} 倍。`;
+        }
+
+        trades.push({ type: "buy", date, price: close, reason });
+      }
+    } else {
+      peakClose = Math.max(peakClose, close);
+      const isSupportBroken = close < supportPrice * 0.95;
+      const trailingActive = peakClose >= buyPrice * TRAIL_ACTIVATE;
+      const isTrailingStop = trailingActive && close <= peakClose * (1 - TRAIL_PCT);
+      const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
+
+      if (isSupportBroken || isTrailingStop || isClimaxRun) {
+        cash = shares * close;
+        shares = 0;
+        holding = false;
+        tradeCount++;
+        const profit = close - buyPrice;
+        if (profit > 0) winCount++;
+
+        let reason = "";
+        if (isSupportBroken) {
+          reason = `【主力防线失守止损】日线收盘价 ${close.toFixed(2)} 元跌破主力 70% 筹码密集支撑区下轨（${supportPrice.toFixed(2)}元）的 5% 以上，中期洗盘出局。`;
+        } else if (isTrailingStop) {
+          reason = `【跟踪止盈】持仓峰值 ${peakClose.toFixed(2)} 元后回撤超 ${(TRAIL_PCT * 100).toFixed(0)}%（现价 ${close.toFixed(2)}），锁定波段利润离场。`;
+        } else if (isClimaxRun) {
+          reason = `【高位超买天量滞涨】120日价格区间位置高达 ${(rangePos * 100).toFixed(0)}%，日换手率高达 ${c.turnoverPct!.toFixed(1)}% 创天量，高位筹码剧烈松动。`;
+        }
+
+        trades.push({
+          type: "sell",
+          date,
+          price: close,
+          reason,
+          profitPct: ((close - buyPrice) / buyPrice) * 100,
+        });
+      }
+    }
+
+    const currentWorth = holding ? shares * close : cash;
+    const stockWorth = (close / initialStockWorth) * 100000;
+    history.push({
+      date,
+      strategyWorth: Number(currentWorth.toFixed(0)),
+      stockWorth: Number(stockWorth.toFixed(0)),
+    });
+  }
+
+  const finalWorth = holding ? shares * prices[prices.length - 1] : cash;
+  const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
+  const stockReturn = ((prices[prices.length - 1] - initialStockWorth) / initialStockWorth) * 100;
+  const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
+
+  return {
+    winRate: Number(winRate.toFixed(1)),
+    sharpe: annualizedSharpe(history),
+    strategyReturn: Number(strategyReturn.toFixed(2)),
+    stockReturn: Number(stockReturn.toFixed(2)),
+    trades,
+    history,
+  };
+}
+
+/** v4 可调参数（跟踪止损调优 + MA60 趋势过滤开关）。 */
+export interface ChokepointV4Options {
+  code?: string;
+  /** 浮盈达到该倍数后才启用跟踪止损（默认 1.06，比 v3 的 1.08 更早保护）。 */
+  trailActivate?: number;
+  /** 建仓初期（未达大涨阈值）的宽松跟踪止损回撤比例（默认 0.15，比 v3 的 0.12 给更多波动空间，少被洗）。 */
+  trailPctBase?: number;
+  /** 浮盈超过大涨阈值后收紧的跟踪止损回撤比例（默认 0.09，锁定利润）。 */
+  trailPctTight?: number;
+  /** 峰值浮盈达到该倍数后，跟踪止损从宽松切到收紧（默认 1.20，即 +20%）。 */
+  tightenGain?: number;
+  /** 是否启用 MA60 趋势过滤（默认 true）。关闭后行为退回 v3 的右侧入场口径。 */
+  ma60Filter?: boolean;
+}
+
+/**
+ * 运行 Serenity 瓶颈动量突破量化策略回测 v4（趋势过滤 + 跟踪止损调优版）。
+ *
+ * v4 在 v3「v2 全部信号 + 三类底部反转信号」之上，针对「震荡区右侧诱多」与「跟踪止损过紧/过松」
+ * 两个痛点做两处增强，其余口径（筹码支撑止损、天量滞涨离场、整手、无未来函数）与 v3 完全一致：
+ *
+ *   1) MA60 趋势过滤（仅作用于右侧动量入场，不动底部反转）：
+ *      - 右侧四类信号（均线金叉 / VCP 平台突破 / 强势起爆创新高 / 趋势回踩再起）新增「中期趋势闸门」
+ *        —— 仅在「价在 MA60 之上 或 MA60 近 10 日不下行」时才允许买入，过滤在 MA60 仍向下的震荡/下行
+ *        区里追突破被诱多。
+ *      - 左侧/底部三类信号（放量反包底部启动 / W底突破 / 老鸭头二次金叉）**不加 MA60 闸门**：它们本就
+ *        发生在 MA60 下方的底部，老鸭头自带 MA60 向上要求。这样 04-17 这类底部启动买点与 v3 完全一致、
+ *        不被误杀。
+ *
+ *   2) 跟踪止损调优（让利润奔跑，又不让大利润回吐）：
+ *      - 启动阈值由 +8% 提前到 +6%（trailActivate）；
+ *      - 采用分段回撤：浮盈未到 +20% 时用宽松 15% 回撤（少被建仓初期正常震荡洗出），峰值浮盈 ≥ +20%
+ *        后收紧到 9% 回撤（锁定大段利润）。
+ *
+ * 上述参数全部可通过 opts 调，便于做参数寻优；默认值即调优后口径。
+ */
+export function runChokepointMomentumBacktestV4(
+  candles: Candle[],
+  chokepointScore: number,
+  opts: ChokepointV4Options = {},
+): BacktestResult {
+  const TRAIL_ACTIVATE = opts.trailActivate ?? 1.06;
+  const TRAIL_PCT_BASE = opts.trailPctBase ?? 0.15;
+  const TRAIL_PCT_TIGHT = opts.trailPctTight ?? 0.09;
+  const TIGHTEN_GAIN = opts.tightenGain ?? 1.2;
+  const MA60_FILTER = opts.ma60Filter ?? true;
+
+  const history: BacktestResult["history"] = [];
+  const trades: TradeAction[] = [];
+
+  if (candles.length < 25) {
+    return { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+  }
+
+  const prices = candles.map((c) => c.close);
+  const ma = (arr: number[], idx: number, w: number): number => {
+    const start = Math.max(0, idx - w + 1);
+    const slice = arr.slice(start, idx + 1);
+    return slice.reduce((s, x) => s + x, 0) / slice.length;
+  };
+  const ma5List = prices.map((_, i) => ma(prices, i, 5));
+  const ma10List = prices.map((_, i) => ma(prices, i, 10));
+  const ma20List = prices.map((_, i) => ma(prices, i, 20));
+  const ma60List = prices.map((_, i) => ma(prices, i, 60));
+
+  const volProxy = candles.map((c) =>
+    c.turnoverPct && c.turnoverPct > 0 ? c.turnoverPct : c.volume && c.volume > 0 ? c.volume : 1,
+  );
+  const volMa5 = volProxy.map((_, i) => ma(volProxy, i, 5));
+  const volMa20 = volProxy.map((_, i) => ma(volProxy, i, 20));
+
+  const bodyOf = (k: Candle) => Math.abs(k.close - k.open);
+  const isBullEngulf = (i: number): boolean => {
+    if (i < 1) return false;
+    const a = candles[i - 1], b = candles[i];
+    const aYin = a.close < a.open;
+    const bYang = b.close > b.open;
+    return aYin && bYang && b.close >= a.open && b.open <= a.close && bodyOf(b) > bodyOf(a) * 0.8;
+  };
+  const isHammer = (i: number): boolean => {
+    const k = candles[i];
+    const range = k.high - k.low;
+    if (range <= 0) return false;
+    const body = bodyOf(k);
+    const lowerShadow = Math.min(k.open, k.close) - k.low;
+    const upperShadow = k.high - Math.max(k.open, k.close);
+    return lowerShadow >= body * 2 && upperShadow <= body && k.close >= k.open;
+  };
+
+  let cash = 100000;
+  let shares = 0;
+  let holding = false;
+  let buyPrice = 0;
+  let peakClose = 0;
+  let winCount = 0;
+  let tradeCount = 0;
+
+  const initialStockWorth = prices[20];
+
+  for (let i = 20; i < candles.length; i++) {
+    const c = candles[i];
+    const close = c.close;
+    const date = c.date;
+    const ma20 = ma20List[i];
+    const t5 = volMa5[i];
+    const t20 = volMa20[i];
+
+    const subHistory = candles.slice(Math.max(0, i - 120), i + 1);
+    const chipDist = calculateChipDistribution(subHistory, close, true);
+    const supportPrice = chipDist.priceLow70;
+    const avgCost = chipDist.avgCost;
+
+    const prevWindow = prices.slice(Math.max(0, i - 120), i + 1);
+    const minWin = Math.min(...prevWindow);
+    const maxWin = Math.max(...prevWindow);
+    const rangePos = maxWin > minWin ? (close - minWin) / (maxWin - minWin) : 0.5;
+
+    const recentWindow = prices.slice(Math.max(0, i - 10), i);
+    const isPlateauConsolidation =
+      recentWindow.length >= 5 &&
+      (Math.max(...recentWindow) - Math.min(...recentWindow)) / Math.min(...recentWindow) < 0.08;
+
+    const dayRet = prices[i - 1] > 0 ? ((close - prices[i - 1]) / prices[i - 1]) * 100 : 0;
+
+    if (!holding) {
+      // —— ① MA60 中期趋势闸门（仅作用于右侧动量入场）——
+      const ma60 = ma60List[i];
+      const ma60Ref = ma60List[Math.max(0, i - 10)];
+      const ma60NotFalling = ma60 >= ma60Ref;
+      const aboveMa60 = close > ma60;
+      const regimeOkRight = !MA60_FILTER || aboveMa60 || ma60NotFalling;
+
+      // —— v2 原有四信号（v4 叠加趋势闸门）——
+      const isBreakoutGoldCross =
+        regimeOkRight && close > ma20 && prices[i - 1] <= ma20List[i - 1] && t5 > t20 * 1.3;
+      const isVcpBreakout =
+        regimeOkRight && close > ma20 && isPlateauConsolidation && close > Math.max(...recentWindow) && t5 > t20 * 1.3;
+      const isStrongHighBreakout =
+        regimeOkRight && chokepointScore >= 75 && rangePos >= 0.6 && t5 > t20 * 1.6 && close > Math.max(...recentWindow);
+      const ma20Rising = i >= 25 && ma20List[i] > ma20List[i - 5];
+      const recentLows = candles.slice(Math.max(0, i - 5), i + 1).map((x) => x.low);
+      const pulledBackToMa = recentLows.length > 0 && Math.min(...recentLows) <= ma20 * 1.03;
+      const isTrendResume =
+        regimeOkRight && close > ma20 && ma20Rising && pulledBackToMa && close > prices[i - 1] && t5 > t20 * 1.1;
+
+      // —— v3 三类底部反转信号（v4 保持原样，不加 MA60 闸门）——
+      const volSpike = volProxy[i] >= volProxy[i - 1] * 1.8 && volProxy[i] >= volMa5[i] * 1.5;
+      const lowZone = rangePos <= 0.45;
+      const bigYang = close > c.open && dayRet >= 5;
+      const closeUpperHalf = c.high > c.low ? close - c.low >= 0.5 * (c.high - c.low) : true;
+      const priorBody5 = Math.max(...prices.slice(Math.max(0, i - 5), i));
+      const reclaim = close > ma20 || close > priorBody5;
+      const bullPattern = bigYang || isBullEngulf(i) || (isHammer(i) && close > c.open);
+      const isVolThrustBottom = lowZone && volSpike && closeUpperHalf && reclaim && bullPattern;
+
+      let isDoubleBottomBreak = false;
+      if (i >= 46 && rangePos <= 0.6 && close > c.open && volProxy[i] > volMa20[i]) {
+        const lookback = candles.slice(i - 45, i);
+        const lows = lookback.map((x) => x.low);
+        const recentSeg = lookback.slice(-20);
+        const recentLow = Math.min(...recentSeg.map((x) => x.low));
+        const recentLowAbs = lows.length - 20 + recentSeg.map((x) => x.low).indexOf(recentLow);
+        if (recentLowAbs >= 6) {
+          const priorSeg = lookback.slice(0, recentLowAbs - 4);
+          const priorLow = Math.min(...priorSeg.map((x) => x.low));
+          const priorLowAbs = priorSeg.map((x) => x.low).indexOf(priorLow);
+          const similar = priorLow > 0 && Math.abs(recentLow - priorLow) / priorLow <= 0.06;
+          const between = lookback.slice(priorLowAbs + 1, recentLowAbs);
+          const neckline = between.length > 0 ? Math.max(...between.map((x) => x.close)) : Infinity;
+          if (similar && close > neckline && Number.isFinite(neckline)) isDoubleBottomBreak = true;
+        }
+      }
+
+      let isOldDuckHead = false;
+      if (i >= 60) {
+        const ma5 = ma5List[i], ma10 = ma10List[i], ma60v = ma60List[i];
+        const upTrend = ma60v > ma60List[i - 5] && close > ma60v;
+        const crossUpToday = ma5 > ma10 && ma5List[i - 1] <= ma10List[i - 1];
+        let hadBillPullback = false;
+        for (let j = i - 25; j < i; j++) {
+          if (j < 1) continue;
+          const crossedBefore = ma5List[j] > ma10List[j] && ma5List[j - 1] <= ma10List[j - 1];
+          if (crossedBefore) {
+            for (let k = j + 1; k < i; k++) {
+              if (ma5List[k] <= ma10List[k] * 1.01) { hadBillPullback = true; break; }
+            }
+          }
+          if (hadBillPullback) break;
+        }
+        const volOk = volProxy[i] > volMa5[i] * 1.1;
+        if (upTrend && crossUpToday && hadBillPullback && volOk) isOldDuckHead = true;
+      }
+
+      if (
+        isBreakoutGoldCross ||
+        isVcpBreakout ||
+        isStrongHighBreakout ||
+        isTrendResume ||
+        isVolThrustBottom ||
+        isDoubleBottomBreak ||
+        isOldDuckHead
+      ) {
+        shares = cash / close;
+        cash = 0;
+        holding = true;
+        buyPrice = close;
+        peakClose = close;
+
+        const cautionTag =
+          chokepointScore < 55 ? "【评分偏低警示】该股基本面综合打分偏低，此处突破交易建议控制仓位偏轻。 " : "";
+        let reason = "";
+        if (isVolThrustBottom) {
+          reason = `${cautionTag}【放量反包·底部启动·v4】相对低位（区位 ${(rangePos * 100).toFixed(0)}%）今日单日爆量（量能 ${(volProxy[i] / volProxy[i - 1]).toFixed(1)} 倍于昨日）放量长阳（日涨 ${dayRet.toFixed(1)}%）收复 MA20/反包前高，呈底部反转启动。`;
+        } else if (isDoubleBottomBreak) {
+          reason = `${cautionTag}【W底/双底突破·v4】近 45 日构筑双底（两低点高度相近），今日带量收阳向上突破颈线，底部形态确认。`;
+        } else if (isOldDuckHead) {
+          reason = `${cautionTag}【老鸭头·二次金叉·v4】MA60 趋势向上，MA5 回踩贴近 MA10（鸭嘴缩量）后今日重新放量金叉，主升浪二次启动。`;
+        } else if (isStrongHighBreakout) {
+          reason = `${cautionTag}【Serenity 强成长突破·v4】基本面得分 ${chokepointScore} 分，MA60 趋势在位，股价在 ${(rangePos * 100).toFixed(0)}% 区位放量长阳突破前高（量能比 ${(t5 / t20).toFixed(1)}倍），主升浪开启。`;
+        } else if (isVcpBreakout) {
+          reason = `${cautionTag}【VCP箱体整理突破·v4】MA60 趋势在位，股价在 20日线之上窄幅收缩盘整后，今日放量突破整理平台上轨，二次动量加速起飞。`;
+        } else if (isTrendResume) {
+          reason = `${cautionTag}【趋势回踩再起·v4】MA60 趋势在位，上升趋势中股价回踩 20 日均线附近后重新放量走强（量能比 ${(t5 / t20).toFixed(1)}倍），顺势再入场。`;
+        } else {
+          reason = `${cautionTag}【均线筹码共振突破·v4】MA60 趋势在位，股价突破 20 日均线，且价格处于主力平均成本线（${avgCost.toFixed(2)}元）附近，5日均换手放大至 ${(t5 / t20).toFixed(1)} 倍。`;
+        }
+
+        trades.push({ type: "buy", date, price: close, reason });
+      }
+    } else {
+      peakClose = Math.max(peakClose, close);
+      const isSupportBroken = close < supportPrice * 0.95;
+      // ② 分段跟踪止损：浮盈达大涨阈值后收紧回撤比例
+      const trailPct = peakClose >= buyPrice * TIGHTEN_GAIN ? TRAIL_PCT_TIGHT : TRAIL_PCT_BASE;
+      const trailingActive = peakClose >= buyPrice * TRAIL_ACTIVATE;
+      const isTrailingStop = trailingActive && close <= peakClose * (1 - trailPct);
+      const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
+
+      if (isSupportBroken || isTrailingStop || isClimaxRun) {
+        cash = shares * close;
+        shares = 0;
+        holding = false;
+        tradeCount++;
+        const profit = close - buyPrice;
+        if (profit > 0) winCount++;
+
+        let reason = "";
+        if (isSupportBroken) {
+          reason = `【主力防线失守止损】日线收盘价 ${close.toFixed(2)} 元跌破主力 70% 筹码密集支撑区下轨（${supportPrice.toFixed(2)}元）的 5% 以上，中期洗盘出局。`;
+        } else if (isTrailingStop) {
+          reason = `【分段跟踪止盈·v4】持仓峰值 ${peakClose.toFixed(2)} 元后回撤超 ${(trailPct * 100).toFixed(0)}%（现价 ${close.toFixed(2)}），锁定波段利润离场。`;
+        } else if (isClimaxRun) {
+          reason = `【高位超买天量滞涨】120日价格区间位置高达 ${(rangePos * 100).toFixed(0)}%，日换手率高达 ${c.turnoverPct!.toFixed(1)}% 创天量，高位筹码剧烈松动。`;
+        }
+
+        trades.push({
+          type: "sell",
+          date,
+          price: close,
+          reason,
+          profitPct: ((close - buyPrice) / buyPrice) * 100,
+        });
+      }
+    }
+
+    const currentWorth = holding ? shares * close : cash;
+    const stockWorth = (close / initialStockWorth) * 100000;
+    history.push({
+      date,
+      strategyWorth: Number(currentWorth.toFixed(0)),
+      stockWorth: Number(stockWorth.toFixed(0)),
+    });
+  }
+
+  const finalWorth = holding ? shares * prices[prices.length - 1] : cash;
+  const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
+  const stockReturn = ((prices[prices.length - 1] - initialStockWorth) / initialStockWorth) * 100;
+  const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
+
+  return {
+    winRate: Number(winRate.toFixed(1)),
+    sharpe: annualizedSharpe(history),
+    strategyReturn: Number(strategyReturn.toFixed(2)),
+    stockReturn: Number(stockReturn.toFixed(2)),
+    trades,
+    history,
+  };
+}
+
 /** 样本外滚动命中率结果（无未来函数）。 */
 export interface WalkForwardWinRate {
   winRate: number;   // 命中率 %（前瞻收益 > 阈值的比例）
