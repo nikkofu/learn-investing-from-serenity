@@ -118,6 +118,10 @@ const BUILTIN_SIMPLE = "__builtin_simple__";
 const PRESET =
   "600519,000858,300750,600036,000333,002594,601318,600276,000651,002415,300059,600887,000001,002475,600009";
 
+/** ① 大盘蓝筹 50（按总市值先验选样，剔 ST/科创；不看历史收益，避免数据挖掘）。样本越大胜率证明越站得住。 */
+const BLUECHIP50 =
+  "601939,601398,601288,600941,601988,300750,601857,601138,600519,300308,600938,601628,600036,601318,601088,601899,300502,002594,600900,000333,601328,601658,600028,002371,601728,002475,002384,603986,603993,600183,601869,600030,601998,601166,300476,300394,300274,301666,300059,600276,601211,603259,601319,002916,600000,601601,002415,300408,000858,600487";
+
 function signClass(v: number): string {
   if (v > 0.0001) return "text-rose-500";
   if (v < -0.0001) return "text-emerald-500";
@@ -248,6 +252,9 @@ export default function StrategyBacktestPage() {
           <span className="rounded-md border border-[var(--accent-line)] bg-[var(--accent-soft)] px-3 py-1 font-semibold text-[var(--accent)]">
             建议忠实回测
           </span>
+          <Link href="/backtest/pairs" className="rounded-md border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:text-[var(--text)]">
+            配对交易(统计套利)
+          </Link>
         </div>
         <h1 className="text-xl font-semibold text-[var(--text)]">建议忠实回测 · 胜率证明</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
@@ -265,6 +272,14 @@ export default function StrategyBacktestPage() {
             className={`${inputCls} font-mono`}
             placeholder="600519,000858,300750 ..."
           />
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setCodesText(PRESET)} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">
+              热门 15 只
+            </button>
+            <button type="button" onClick={() => setCodesText(BLUECHIP50)} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">
+              ① 大盘蓝筹 50（总市值先验选样）
+            </button>
+          </div>
         </label>
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-[var(--muted)]">回测策略（与个股看盘页同一套买卖规则，忠实重放 + 涨跌停撮合 + 手续费）</span>

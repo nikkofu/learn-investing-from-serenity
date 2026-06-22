@@ -1312,6 +1312,66 @@ export function atrWilder(candles: Candle[], period = 14): number[] {
   return out;
 }
 
+/**
+ * Wilder ADX（平均趋向指数）。返回与 candles 等长的 ADX 数组（0–100）。
+ *
+ * ADX 是教科书级的「趋势 vs 震荡」判别器：ADX 低（如 <25）= 无明显趋势/箱体震荡，
+ * ADX 高 = 强趋势。配对/网格等均值回归策略只在低 ADX 区有效——故用它做 regime 闸门。
+ * 计算：+DM/-DM → Wilder 平滑的 +DI/-DI → DX=|+DI−−DI|/(+DI+−DI) → ADX=DX 的 Wilder 平滑。
+ */
+export function adxWilder(candles: Candle[], period = 14): number[] {
+  const n = candles.length;
+  const out = new Array<number>(n).fill(0);
+  if (n < 2) return out;
+  const tr = new Array<number>(n).fill(0);
+  const plusDM = new Array<number>(n).fill(0);
+  const minusDM = new Array<number>(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const c = candles[i], p = candles[i - 1];
+    const upMove = c.high - p.high;
+    const downMove = p.low - c.low;
+    plusDM[i] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0;
+    const hl = c.high - c.low;
+    tr[i] = Math.max(hl, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+  }
+  // Wilder 平滑（RMA）。
+  const rma = (arr: number[]): number[] => {
+    const r = new Array<number>(n).fill(0);
+    let prev = 0;
+    for (let i = 1; i < n; i++) {
+      if (i <= period) {
+        const slice = arr.slice(1, i + 1);
+        prev = slice.reduce((s, x) => s + x, 0) / slice.length;
+      } else {
+        prev = (prev * (period - 1) + arr[i]) / period;
+      }
+      r[i] = prev;
+    }
+    return r;
+  };
+  const trS = rma(tr), pS = rma(plusDM), mS = rma(minusDM);
+  const dx = new Array<number>(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const pdi = trS[i] > 0 ? (pS[i] / trS[i]) * 100 : 0;
+    const mdi = trS[i] > 0 ? (mS[i] / trS[i]) * 100 : 0;
+    const sum = pdi + mdi;
+    dx[i] = sum > 0 ? (Math.abs(pdi - mdi) / sum) * 100 : 0;
+  }
+  // ADX = DX 的 Wilder 平滑。
+  let prev = 0;
+  for (let i = 1; i < n; i++) {
+    if (i <= 2 * period) {
+      const slice = dx.slice(1, i + 1);
+      prev = slice.reduce((s, x) => s + x, 0) / Math.max(1, slice.length);
+    } else {
+      prev = (prev * (period - 1) + dx[i]) / period;
+    }
+    out[i] = safeNum(prev, 0);
+  }
+  return out;
+}
+
 /** v5 可调参数（ATR 自适应跟踪止损：把 v4 的固定回撤百分比升级为随波动自适应的回撤距离）。 */
 export interface ChokepointV5Options {
   code?: string;
@@ -1993,6 +2053,8 @@ export interface GridMeanReversionOptions {
   flatSlopeMax?: number;
   /** 破箱止损：收盘价跌破下沿的比例（默认 0.03，即跌破下沿 3% 强制出局）。 */
   breakMargin?: number;
+  /** ADX 趋势强度上限（默认 25）：仅当 ADX < 该值（无明显趋势/箱体震荡）才允许开仓。 */
+  adxMax?: number;
 }
 
 /**
@@ -2016,6 +2078,7 @@ export function runGridMeanReversionBacktest(
   const BB_K = opts.bbK ?? 2.0;
   const FLAT_SLOPE_MAX = opts.flatSlopeMax ?? 0.05;
   const BREAK_MARGIN = opts.breakMargin ?? 0.03;
+  const ADX_MAX = opts.adxMax ?? 25;
 
   const history: BacktestResult["history"] = [];
   const trades: TradeAction[] = [];
@@ -2037,6 +2100,7 @@ export function runGridMeanReversionBacktest(
     return Math.sqrt(v);
   };
   const ma60List = prices.map((_, i) => ma(prices, i, 60));
+  const adxList = adxWilder(candles, 14);
 
   let cash = 100000;
   let shares = 0;
@@ -2067,8 +2131,9 @@ export function runGridMeanReversionBacktest(
     const lo40 = Math.min(...win40);
     const hi40 = Math.max(...win40);
     const contained = lo40 > 0 && (hi40 - lo40) / lo40 < 0.35;
+    const lowAdx = adxList[i] < ADX_MAX;
     const isBoxRegime =
-      Math.abs(ma60Slope) < FLAT_SLOPE_MAX && bandwidth >= 0.04 && bandwidth <= 0.3 && contained;
+      Math.abs(ma60Slope) < FLAT_SLOPE_MAX && bandwidth >= 0.04 && bandwidth <= 0.3 && contained && lowAdx;
 
     if (!holding) {
       const touchLower = close <= lower * 1.01;
@@ -2083,7 +2148,7 @@ export function runGridMeanReversionBacktest(
           type: "buy",
           date,
           price: close,
-          reason: `【箱体低吸·网格均值回归】MA60 近 20 日走平（斜率 ${(ma60Slope * 100).toFixed(1)}%）判定为箱体震荡，价格触及布林下沿（${lower.toFixed(2)} 元）后当日企稳，低吸博弈回归中轨/上沿。破箱止损位 ${(entryLower * (1 - BREAK_MARGIN)).toFixed(2)} 元。`,
+          reason: `【箱体低吸·网格均值回归】MA60 近 20 日走平（斜率 ${(ma60Slope * 100).toFixed(1)}%）+ ADX ${adxList[i].toFixed(0)}<${ADX_MAX}（无明显趋势）判定为箱体震荡，价格触及布林下沿（${lower.toFixed(2)} 元）后当日企稳，低吸博弈回归中轨/上沿。破箱止损位 ${(entryLower * (1 - BREAK_MARGIN)).toFixed(2)} 元。`,
         });
       }
     } else {
