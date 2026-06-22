@@ -348,6 +348,7 @@ function shortExitReason(reason: string): string {
   if (reason.includes("破箱")) return "破箱止损";
   if (reason.includes("趋势突破")) return "趋势突破离场";
   if (reason.includes("高抛")) return "网格高抛止盈";
+  if (reason.includes("分批止盈")) return "分批止盈(留runner)";
   if (reason.includes("ATR") || reason.includes("自适应")) return "ATR自适应跟踪止盈";
   if (reason.includes("跟踪")) return "跟踪止盈";
   if (reason.includes("支撑") || reason.includes("止损")) return "跌破筹码支撑止损";
@@ -396,44 +397,108 @@ function simulateSymbolViaStrategy(
   candles.forEach((c, i) => idxByDate.set(c.date, i));
 
   const out: ClosedTrade[] = [];
-  let pending: { idx: number; price: number; date: string } | null = null;
+  // 分数仓位累加器：支持 v6 的分批建仓/分批止盈，同时对不带 sizePct 的 v1–v5（整仓买、全清卖）
+  // 退化为与旧逻辑完全一致的单仓位行为。手续费按双边计入有效买/卖价，收益按「实际部署资金」口径
+  // （和 v5 整仓单笔的净收益直接可比，不掺未部署现金的拖累）。
+  type Pos = {
+    firstIdx: number;
+    firstDate: string;
+    deployedFrac: number; // 已部署占满仓比例（封顶 1）
+    deployedCash: number; // 含手续费的部署成本（单位：满仓资金的分数）
+    shares: number;       // 持有份额（按含费有效买价折算）
+    proceedsCash: number; // 已实现卖出净收入（含费）
+    buyPxNum: number;     // 加权均价分子（按部署比例加权）
+    buyFracSum: number;
+    sellPxNum: number;    // 加权卖价分子（按卖出份额加权）
+    sellSharesSum: number;
+    lastSellIdx: number;
+  };
+  let pos: Pos | null = null;
 
-  const pushClosed = (sellIdx: number, exitReason: string) => {
-    if (!pending) return;
-    const sellPrice = prices[sellIdx];
-    const net = (sellPrice * (1 - fee)) / (pending.price * (1 + fee)) - 1;
+  const closePosition = (exitReason: string) => {
+    if (!pos) return;
+    const ret = pos.deployedCash > 0 ? pos.proceedsCash / pos.deployedCash - 1 : 0;
+    const avgBuyPx = pos.buyFracSum > 0 ? pos.buyPxNum / pos.buyFracSum : prices[pos.firstIdx];
+    const avgSellPx = pos.sellSharesSum > 0 ? pos.sellPxNum / pos.sellSharesSum : prices[pos.lastSellIdx];
     out.push({
       code: s.code,
       name: s.name,
-      buyDate: pending.date,
-      sellDate: candles[sellIdx].date,
-      buyPrice: pending.price,
-      sellPrice,
-      returnPct: Number((net * 100).toFixed(2)),
-      holdDays: sellIdx - pending.idx,
+      buyDate: pos.firstDate,
+      sellDate: candles[pos.lastSellIdx].date,
+      buyPrice: Number(avgBuyPx.toFixed(4)),
+      sellPrice: Number(avgSellPx.toFixed(4)),
+      returnPct: Number((ret * 100).toFixed(2)),
+      holdDays: pos.lastSellIdx - pos.firstIdx,
       exitReason,
-      atrPctAtEntry: atrPctAt(atr, prices, pending.idx),
+      atrPctAtEntry: atrPctAt(atr, prices, pos.firstIdx),
     });
-    pending = null;
+    pos = null;
   };
 
   for (const tr of res.trades) {
     const i = idxByDate.get(tr.date);
     if (i === undefined) continue;
     if (tr.type === "buy") {
-      if (pending) continue; // 单仓位：已有持仓时忽略多余买点
-      if (atLimitUp(i)) continue; // 涨停买不进，丢弃该买点
-      pending = { idx: i, price: prices[i], date: tr.date };
+      if (atLimitUp(i)) continue; // 涨停买不进，丢弃该（加）仓点
+      const wantFrac = tr.sizePct === undefined ? 1 : Math.max(0, Math.min(1, tr.sizePct));
+      const room = pos ? Math.max(0, 1 - pos.deployedFrac) : 1;
+      const useFrac = Math.min(wantFrac, room);
+      if (useFrac <= 1e-9) continue; // 已满仓或无效买点 → 忽略（v1–v5 整仓后多余买点在此被忽略）
+      const effBuy = prices[i] * (1 + fee);
+      if (effBuy <= 0) continue;
+      const sharesBought = useFrac / effBuy;
+      if (!pos) {
+        pos = {
+          firstIdx: i,
+          firstDate: tr.date,
+          deployedFrac: 0,
+          deployedCash: 0,
+          shares: 0,
+          proceedsCash: 0,
+          buyPxNum: 0,
+          buyFracSum: 0,
+          sellPxNum: 0,
+          sellSharesSum: 0,
+          lastSellIdx: i,
+        };
+      }
+      pos.shares += sharesBought;
+      pos.deployedFrac += useFrac;
+      pos.deployedCash += useFrac;
+      pos.buyPxNum += prices[i] * useFrac;
+      pos.buyFracSum += useFrac;
     } else {
-      if (!pending) continue;
+      if (!pos) continue;
       let j = i;
       while (j < N && atLimitDown(j)) j++; // 跌停卖不出，顺延到可成交日
-      if (j >= N) { pending = null; continue; } // 直到末日仍无法卖出 → 丢弃
-      pushClosed(j, shortExitReason(tr.reason));
+      const sellFracOfHolding = tr.sizePct === undefined ? 1 : Math.max(0, Math.min(1, tr.sizePct));
+      const sellingAll = sellFracOfHolding >= 1;
+      if (j >= N) {
+        // 直到末日仍无法卖出：整仓卖点 → 丢弃该仓位（与旧逻辑一致）；分批卖点 → 跳过本次、留待末日强平
+        if (sellingAll) pos = null;
+        continue;
+      }
+      const sharesSold = sellingAll ? pos.shares : pos.shares * sellFracOfHolding;
+      if (sharesSold <= 1e-12) continue;
+      const effSell = prices[j] * (1 - fee);
+      pos.proceedsCash += sharesSold * effSell;
+      pos.shares -= sharesSold;
+      pos.sellPxNum += prices[j] * sharesSold;
+      pos.sellSharesSum += sharesSold;
+      pos.lastSellIdx = j;
+      if (pos.shares <= 1e-9) closePosition(shortExitReason(tr.reason));
     }
   }
-  // 窗口末仍持仓 → 按末日收盘强制平仓（与内置口径一致）
-  if (pending) pushClosed(N - 1, "窗口末强制平仓");
+  // 窗口末仍持仓 → 按末日收盘强制平仓剩余份额（与内置口径一致）
+  if (pos && pos.shares > 1e-9) {
+    const effSell = prices[N - 1] * (1 - fee);
+    pos.proceedsCash += pos.shares * effSell;
+    pos.sellPxNum += prices[N - 1] * pos.shares;
+    pos.sellSharesSum += pos.shares;
+    pos.shares = 0;
+    pos.lastSellIdx = N - 1;
+    closePosition("窗口末强制平仓");
+  }
 
   return out;
 }

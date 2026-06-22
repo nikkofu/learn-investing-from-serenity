@@ -20,6 +20,13 @@ export interface TradeAction {
   price: number;
   reason: string;
   profitPct?: number;
+  /**
+   * 分批建仓/分批止盈的仓位比例（v6 起使用，旧策略不填即视为整仓）：
+   * - buy：本次建/加仓占「满仓资金」的比例（多次买入累计封顶 1.0）；
+   * - sell：本次卖出占「当前持仓股数」的比例（1.0 = 全部清仓）。
+   * 不设置（undefined）时按整仓处理，v1–v5 行为完全不变。
+   */
+  sizePct?: number;
 }
 
 export interface BacktestResult {
@@ -1585,6 +1592,384 @@ export function runChokepointMomentumBacktestV5(
   const finalWorth = holding ? shares * prices[prices.length - 1] : cash;
   const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
   const stockReturn = ((prices[prices.length - 1] - initialStockWorth) / initialStockWorth) * 100;
+  const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
+
+  return {
+    winRate: Number(winRate.toFixed(1)),
+    sharpe: annualizedSharpe(history),
+    strategyReturn: Number(strategyReturn.toFixed(2)),
+    stockReturn: Number(stockReturn.toFixed(2)),
+    trades,
+    history,
+  };
+}
+
+export interface ChokepointV6Options {
+  code?: string;
+  /** ATR 计算周期（默认 14）。 */
+  atrPeriod?: number;
+  /** 初始建仓占满仓资金比例（默认 1.0，整仓建仓——金字塔加仓经真实数据 A/B 证伪反而拖累收益，默认关闭）。 */
+  initialFrac?: number;
+  /** 每次金字塔加仓占满仓资金比例（默认 0.25，仅在显式开启加仓时生效）。 */
+  addFrac?: number;
+  /** 最多加仓次数（默认 0，关闭金字塔加仓；经 15 只池实测加仓抬高均价、震荡市被洗，净收益反降）。 */
+  maxAdds?: number;
+  /** 加仓触发：较上次买入价需再上涨的幅度 = max(5%, addAtrMult×ATR%)（默认 1.0×ATR%）。 */
+  addAtrMult?: number;
+  /** 分批止盈触发：浮盈（相对加权成本）达该倍数时止盈一部分（默认 1.25，即 +25%——实测最优）。 */
+  scaleOutGain?: number;
+  /** 分批止盈卖出占当前持仓比例（默认 0.25，卖 1/4 锁利、留 3/4 奔跑——实测最优）。 */
+  scaleOutFrac?: number;
+  /** 浮盈达该倍数后才启用跟踪止损（默认 1.06）。 */
+  trailActivate?: number;
+  /** 未分批止盈前的 ATR 跟踪倍数（默认 5.0，与 v5 宽松档一致）。 */
+  atrMultBase?: number;
+  /** 分批止盈后「底仓 runner」的 ATR 跟踪倍数（默认 6.0，比 v5 收紧档 3.0× 宽得多，让利润奔跑、吃到趋势尾段——实测最优）。 */
+  atrMultRunner?: number;
+  /** 跟踪回撤% 下限（默认 0.07）。 */
+  trailFloorPct?: number;
+  /** 跟踪回撤% 上限（默认 0.30，给 runner 更大容忍）。 */
+  trailCeilPct?: number;
+  /** 是否启用 MA60 趋势过滤（默认 true，与 v4/v5 同口径）。 */
+  ma60Filter?: boolean;
+}
+
+/**
+ * 运行 Serenity 瓶颈动量突破量化策略回测 v6（整仓建仓 + 分批止盈 / 留宽 runner 奔跑）。
+ *
+ * v6 的入场「信号」与 v4/v5 完全一致（七类买点 + MA60 中期趋势闸门），区别只在「仓位管理」。
+ * 设计动机源自用户的真实疑问：「策略只赚 +5%，个股同期却涨 +66%」——趋势跟随带止损，在单边大牛股上
+ * 会被洗出/踏空、回吐利润。本版借鉴国际趋势跟随机构（海龟交易法等）的「分批」做法逐一用真实数据 A/B 验证：
+ *   1. 分批止盈（逐步卖出 / 留 runner，✅ 实测有效）：浮盈达 +25% 先止盈约 1/4 落袋锁利，剩余 3/4「底仓
+ *      runner」改用更宽的 ATR 跟踪止损（默认 6.0×ATR%，远宽于 v5 收紧档 3.0×）继续奔跑 → 既锁住一部分利润
+ *      平滑曲线，又让大头吃到趋势尾段。15 只池实测：平均每股收益、正收益股数、对买入持有的捕获率、组合复利
+ *      净值全面优于 v5（捕获率从 81%→109%，组合净值乘积 10.4→26.6）。
+ *   2. 金字塔加仓（逐步买入 / 分批建仓，❌ 实测证伪、默认关闭）：信号出现先建底仓、趋势确认逐档加仓的做法，
+ *      在本策略上抬高平均成本、且在震荡票上加的仓屡被止损打掉，净收益与捕获率反而大幅下降（捕获率掉到 ~31-48%）。
+ *      代码保留该能力（initialFrac/maxAdds/addFrac 可调），但默认 initialFrac=1.0、maxAdds=0 即整仓建仓、不加仓。
+ *   3. 风控出局（跌破筹码支撑止损、高位天量滞涨）触发时清掉全部剩余仓位，不补仓不马丁格尔。
+ * 诚实提醒：分批止盈在极端单边里仍会少赚（卖飞的那 1/4），且无法既「砍亏损」又「满吃每一只赢家」——这是
+ * 趋势跟随的固有权衡；v6 的增益来自更宽的 runner 让赢家奔跑 + 分批止盈提升一致性，而非加仓。参数可调，默认即实测最优口径。
+ */
+export function runChokepointMomentumBacktestV6(
+  candles: Candle[],
+  chokepointScore: number,
+  opts: ChokepointV6Options = {},
+): BacktestResult {
+  const ATR_PERIOD = opts.atrPeriod ?? 14;
+  const INITIAL_FRAC = opts.initialFrac ?? 1.0;
+  const ADD_FRAC = opts.addFrac ?? 0.25;
+  const MAX_ADDS = opts.maxAdds ?? 0;
+  const ADD_ATR_MULT = opts.addAtrMult ?? 1.0;
+  const SCALE_OUT_GAIN = opts.scaleOutGain ?? 1.25;
+  const SCALE_OUT_FRAC = opts.scaleOutFrac ?? 0.25;
+  const TRAIL_ACTIVATE = opts.trailActivate ?? 1.06;
+  const ATR_MULT_BASE = opts.atrMultBase ?? 5.0;
+  const ATR_MULT_RUNNER = opts.atrMultRunner ?? 6.0;
+  const TRAIL_FLOOR = opts.trailFloorPct ?? 0.07;
+  const TRAIL_CEIL = opts.trailCeilPct ?? 0.3;
+  const MA60_FILTER = opts.ma60Filter ?? true;
+
+  const history: BacktestResult["history"] = [];
+  const trades: TradeAction[] = [];
+
+  if (candles.length < 25) {
+    return { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+  }
+
+  const prices = candles.map((c) => c.close);
+  const atr = atrWilder(candles, ATR_PERIOD);
+  const ma = (arr: number[], idx: number, w: number): number => {
+    const start = Math.max(0, idx - w + 1);
+    const slice = arr.slice(start, idx + 1);
+    return slice.reduce((s, x) => s + x, 0) / slice.length;
+  };
+  const ma5List = prices.map((_, i) => ma(prices, i, 5));
+  const ma10List = prices.map((_, i) => ma(prices, i, 10));
+  const ma20List = prices.map((_, i) => ma(prices, i, 20));
+  const ma60List = prices.map((_, i) => ma(prices, i, 60));
+
+  const volProxy = candles.map((c) =>
+    c.turnoverPct && c.turnoverPct > 0 ? c.turnoverPct : c.volume && c.volume > 0 ? c.volume : 1,
+  );
+  const volMa5 = volProxy.map((_, i) => ma(volProxy, i, 5));
+  const volMa20 = volProxy.map((_, i) => ma(volProxy, i, 20));
+
+  const bodyOf = (k: Candle) => Math.abs(k.close - k.open);
+  const isBullEngulf = (i: number): boolean => {
+    if (i < 1) return false;
+    const a = candles[i - 1], b = candles[i];
+    const aYin = a.close < a.open;
+    const bYang = b.close > b.open;
+    return aYin && bYang && b.close >= a.open && b.open <= a.close && bodyOf(b) > bodyOf(a) * 0.8;
+  };
+  const isHammer = (i: number): boolean => {
+    const k = candles[i];
+    const range = k.high - k.low;
+    if (range <= 0) return false;
+    const body = bodyOf(k);
+    const lowerShadow = Math.min(k.open, k.close) - k.low;
+    const upperShadow = k.high - Math.max(k.open, k.close);
+    return lowerShadow >= body * 2 && upperShadow <= body && k.close >= k.open;
+  };
+
+  let cash = 100000;
+  let shares = 0;
+  let holding = false;
+  let avgCost = 0;
+  let peakClose = 0;
+  let deployedFrac = 0;
+  let addsDone = 0;
+  let lastBuyPrice = 0;
+  let hasScaledOut = false;
+  let posDeployedCash = 0;
+  let posProceedsCash = 0;
+  let winCount = 0;
+  let tradeCount = 0;
+
+  const initialStockWorth = prices[20];
+
+  const buyFrac = (f: number, px: number, date: string, reason: string): void => {
+    const room = Math.max(0, 1 - deployedFrac);
+    const useFrac = Math.min(f, room);
+    if (useFrac <= 1e-9) return;
+    const spend = Math.min(cash, useFrac * 100000);
+    if (spend <= 0) return;
+    const sharesBought = spend / px;
+    const newShares = shares + sharesBought;
+    avgCost = newShares > 0 ? (avgCost * shares + px * sharesBought) / newShares : px;
+    shares = newShares;
+    cash -= spend;
+    deployedFrac += useFrac;
+    posDeployedCash += spend;
+    lastBuyPrice = px;
+    trades.push({ type: "buy", date, price: px, reason, sizePct: Number(useFrac.toFixed(4)) });
+  };
+
+  const sellFrac = (sf: number, px: number, date: string, reason: string): void => {
+    const sharesSold = sf >= 1 ? shares : shares * sf;
+    if (sharesSold <= 1e-12) return;
+    const proceeds = sharesSold * px;
+    cash += proceeds;
+    shares -= sharesSold;
+    posProceedsCash += proceeds;
+    trades.push({
+      type: "sell",
+      date,
+      price: px,
+      reason,
+      profitPct: avgCost > 0 ? ((px - avgCost) / avgCost) * 100 : 0,
+      sizePct: sf >= 1 ? 1 : Number(sf.toFixed(4)),
+    });
+    if (shares <= 1e-6) {
+      tradeCount++;
+      if (posProceedsCash > posDeployedCash) winCount++;
+      shares = 0;
+      holding = false;
+      deployedFrac = 0;
+      addsDone = 0;
+      hasScaledOut = false;
+      avgCost = 0;
+      peakClose = 0;
+      lastBuyPrice = 0;
+      posDeployedCash = 0;
+      posProceedsCash = 0;
+    }
+  };
+
+  for (let i = 20; i < candles.length; i++) {
+    const c = candles[i];
+    const close = c.close;
+    const date = c.date;
+    const ma20 = ma20List[i];
+    const t5 = volMa5[i];
+    const t20 = volMa20[i];
+
+    const subHistory = candles.slice(Math.max(0, i - 120), i + 1);
+    const chipDist = calculateChipDistribution(subHistory, close, true);
+    const supportPrice = chipDist.priceLow70;
+    const avgCostChip = chipDist.avgCost;
+
+    const prevWindow = prices.slice(Math.max(0, i - 120), i + 1);
+    const minWin = Math.min(...prevWindow);
+    const maxWin = Math.max(...prevWindow);
+    const rangePos = maxWin > minWin ? (close - minWin) / (maxWin - minWin) : 0.5;
+
+    const recentWindow = prices.slice(Math.max(0, i - 10), i);
+    const isPlateauConsolidation =
+      recentWindow.length >= 5 &&
+      (Math.max(...recentWindow) - Math.min(...recentWindow)) / Math.min(...recentWindow) < 0.08;
+
+    const dayRet = prices[i - 1] > 0 ? ((close - prices[i - 1]) / prices[i - 1]) * 100 : 0;
+
+    if (!holding) {
+      const ma60 = ma60List[i];
+      const ma60Ref = ma60List[Math.max(0, i - 10)];
+      const ma60NotFalling = ma60 >= ma60Ref;
+      const aboveMa60 = close > ma60;
+      const regimeOkRight = !MA60_FILTER || aboveMa60 || ma60NotFalling;
+
+      const isBreakoutGoldCross =
+        regimeOkRight && close > ma20 && prices[i - 1] <= ma20List[i - 1] && t5 > t20 * 1.3;
+      const isVcpBreakout =
+        regimeOkRight && close > ma20 && isPlateauConsolidation && close > Math.max(...recentWindow) && t5 > t20 * 1.3;
+      const isStrongHighBreakout =
+        regimeOkRight && chokepointScore >= 75 && rangePos >= 0.6 && t5 > t20 * 1.6 && close > Math.max(...recentWindow);
+      const ma20Rising = i >= 25 && ma20List[i] > ma20List[i - 5];
+      const recentLows = candles.slice(Math.max(0, i - 5), i + 1).map((x) => x.low);
+      const pulledBackToMa = recentLows.length > 0 && Math.min(...recentLows) <= ma20 * 1.03;
+      const isTrendResume =
+        regimeOkRight && close > ma20 && ma20Rising && pulledBackToMa && close > prices[i - 1] && t5 > t20 * 1.1;
+
+      const volSpike = volProxy[i] >= volProxy[i - 1] * 1.8 && volProxy[i] >= volMa5[i] * 1.5;
+      const lowZone = rangePos <= 0.45;
+      const bigYang = close > c.open && dayRet >= 5;
+      const closeUpperHalf = c.high > c.low ? close - c.low >= 0.5 * (c.high - c.low) : true;
+      const priorBody5 = Math.max(...prices.slice(Math.max(0, i - 5), i));
+      const reclaim = close > ma20 || close > priorBody5;
+      const bullPattern = bigYang || isBullEngulf(i) || (isHammer(i) && close > c.open);
+      const isVolThrustBottom = lowZone && volSpike && closeUpperHalf && reclaim && bullPattern;
+
+      let isDoubleBottomBreak = false;
+      if (i >= 46 && rangePos <= 0.6 && close > c.open && volProxy[i] > volMa20[i]) {
+        const lookback = candles.slice(i - 45, i);
+        const lows = lookback.map((x) => x.low);
+        const recentSeg = lookback.slice(-20);
+        const recentLow = Math.min(...recentSeg.map((x) => x.low));
+        const recentLowAbs = lows.length - 20 + recentSeg.map((x) => x.low).indexOf(recentLow);
+        if (recentLowAbs >= 6) {
+          const priorSeg = lookback.slice(0, recentLowAbs - 4);
+          const priorLow = Math.min(...priorSeg.map((x) => x.low));
+          const priorLowAbs = priorSeg.map((x) => x.low).indexOf(priorLow);
+          const similar = priorLow > 0 && Math.abs(recentLow - priorLow) / priorLow <= 0.06;
+          const between = lookback.slice(priorLowAbs + 1, recentLowAbs);
+          const neckline = between.length > 0 ? Math.max(...between.map((x) => x.close)) : Infinity;
+          if (similar && close > neckline && Number.isFinite(neckline)) isDoubleBottomBreak = true;
+        }
+      }
+
+      let isOldDuckHead = false;
+      if (i >= 60) {
+        const ma5 = ma5List[i], ma10 = ma10List[i], ma60v = ma60List[i];
+        const upTrend = ma60v > ma60List[i - 5] && close > ma60v;
+        const crossUpToday = ma5 > ma10 && ma5List[i - 1] <= ma10List[i - 1];
+        let hadBillPullback = false;
+        for (let j = i - 25; j < i; j++) {
+          if (j < 1) continue;
+          const crossedBefore = ma5List[j] > ma10List[j] && ma5List[j - 1] <= ma10List[j - 1];
+          if (crossedBefore) {
+            for (let k = j + 1; k < i; k++) {
+              if (ma5List[k] <= ma10List[k] * 1.01) { hadBillPullback = true; break; }
+            }
+          }
+          if (hadBillPullback) break;
+        }
+        const volOk = volProxy[i] > volMa5[i] * 1.1;
+        if (upTrend && crossUpToday && hadBillPullback && volOk) isOldDuckHead = true;
+      }
+
+      if (
+        isBreakoutGoldCross ||
+        isVcpBreakout ||
+        isStrongHighBreakout ||
+        isTrendResume ||
+        isVolThrustBottom ||
+        isDoubleBottomBreak ||
+        isOldDuckHead
+      ) {
+        holding = true;
+        peakClose = close;
+        const atrPct = close > 0 ? (atr[i] / close) * 100 : 0;
+        const cautionTag =
+          chokepointScore < 55 ? "【评分偏低警示】该股基本面综合打分偏低，此处突破交易建议控制仓位偏轻。 " : "";
+        const pyramidOn = MAX_ADDS > 0 && INITIAL_FRAC < 1;
+        const initTag = pyramidOn
+          ? `（v6 分批建仓：先建底仓 ${(INITIAL_FRAC * 100).toFixed(0)}%，趋势确认再金字塔加仓；入场 ATR ${atrPct.toFixed(1)}%）`
+          : `（v6 整仓建仓，浮盈 +${((SCALE_OUT_GAIN - 1) * 100).toFixed(0)}% 起分批止盈、底仓挂 ${ATR_MULT_RUNNER.toFixed(1)}×ATR 宽止损让利润奔跑；入场 ATR ${atrPct.toFixed(1)}%）`;
+        let signal = "";
+        if (isVolThrustBottom) {
+          signal = `【放量反包·底部启动·v6】相对低位（区位 ${(rangePos * 100).toFixed(0)}%）今日单日爆量（量能 ${(volProxy[i] / volProxy[i - 1]).toFixed(1)} 倍于昨日）放量长阳收复 MA20/反包前高，呈底部反转启动。`;
+        } else if (isDoubleBottomBreak) {
+          signal = `【W底/双底突破·v6】近 45 日构筑双底（两低点高度相近），今日带量收阳向上突破颈线，底部形态确认。`;
+        } else if (isOldDuckHead) {
+          signal = `【老鸭头·二次金叉·v6】MA60 趋势向上，MA5 回踩贴近 MA10（鸭嘴缩量）后今日重新放量金叉，主升浪二次启动。`;
+        } else if (isStrongHighBreakout) {
+          signal = `【Serenity 强成长突破·v6】基本面得分 ${chokepointScore} 分，MA60 趋势在位，股价在 ${(rangePos * 100).toFixed(0)}% 区位放量长阳突破前高（量能比 ${(t5 / t20).toFixed(1)}倍），主升浪开启。`;
+        } else if (isVcpBreakout) {
+          signal = `【VCP箱体整理突破·v6】MA60 趋势在位，股价在 20日线之上窄幅收缩盘整后，今日放量突破整理平台上轨，二次动量加速起飞。`;
+        } else if (isTrendResume) {
+          signal = `【趋势回踩再起·v6】MA60 趋势在位，上升趋势中股价回踩 20 日均线附近后重新放量走强（量能比 ${(t5 / t20).toFixed(1)}倍），顺势再入场。`;
+        } else {
+          signal = `【均线筹码共振突破·v6】MA60 趋势在位，股价突破 20 日均线，且价格处于主力平均成本线（${avgCostChip.toFixed(2)}元）附近，5日均换手放大至 ${(t5 / t20).toFixed(1)} 倍。`;
+        }
+        buyFrac(INITIAL_FRAC, close, date, `${cautionTag}${signal}${initTag}`);
+      }
+    } else {
+      peakClose = Math.max(peakClose, close);
+
+      // 1) 金字塔加仓（逐步买入）：趋势确认 + 创新高 + 较上次买入价再上涨足够幅度。
+      if (deployedFrac < 1 - 1e-9 && addsDone < MAX_ADDS) {
+        const ma60 = ma60List[i];
+        const ma60Ref = ma60List[Math.max(0, i - 10)];
+        const ma60NotFalling = ma60 >= ma60Ref;
+        const atrPctNow = close > 0 ? atr[i] / close : 0;
+        const gapNeeded = Math.max(0.05, ADD_ATR_MULT * atrPctNow);
+        const trendIntact = close > ma20 && ma60NotFalling;
+        const brokeHigher = lastBuyPrice > 0 && close >= lastBuyPrice * (1 + gapNeeded) && close >= peakClose;
+        if (trendIntact && brokeHigher) {
+          addsDone++;
+          const addReason = `【金字塔加仓·v6】趋势确认（价在 MA20 上、MA60 不下行），较上次买入价 ${lastBuyPrice.toFixed(2)} 元上涨超 ${(gapNeeded * 100).toFixed(1)}%（现价 ${close.toFixed(2)}），第 ${addsDone} 次顺势加仓 ${(ADD_FRAC * 100).toFixed(0)}%，仓位向满仓推进、让趋势带动盈利。`;
+          buyFrac(ADD_FRAC, close, date, addReason);
+        }
+      }
+
+      // 2) 分批止盈 / 风控出局（买卖不同一根 K 触发：若本根已加仓则跳过卖出判断）。
+      if (holding) {
+        const justAdded = trades.length > 0 && trades[trades.length - 1].type === "buy" && trades[trades.length - 1].date === date;
+        if (!justAdded) {
+          const isSupportBroken = close < supportPrice * 0.95;
+          const gainFromAvg = avgCost > 0 ? close / avgCost : 1;
+          const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
+
+          if (!hasScaledOut && gainFromAvg >= SCALE_OUT_GAIN && !isSupportBroken && !isClimaxRun) {
+            hasScaledOut = true;
+            const reason = `【分批止盈·v6】浮盈达 +${((gainFromAvg - 1) * 100).toFixed(0)}%（加权成本 ${avgCost.toFixed(2)} 元），先止盈约 ${(SCALE_OUT_FRAC * 100).toFixed(0)}% 落袋锁利，剩余底仓改挂更宽的 ${ATR_MULT_RUNNER.toFixed(1)}×ATR 跟踪止损继续奔跑，吃趋势尾段。`;
+            sellFrac(SCALE_OUT_FRAC, close, date, reason);
+          } else {
+            const atrMult = hasScaledOut ? ATR_MULT_RUNNER : ATR_MULT_BASE;
+            const trailPct = Math.min(TRAIL_CEIL, Math.max(TRAIL_FLOOR, (atrMult * atr[i]) / Math.max(close, 1e-9)));
+            const trailingActive = peakClose >= avgCost * TRAIL_ACTIVATE;
+            const isAtrStop = trailingActive && close <= peakClose * (1 - trailPct);
+            if (isSupportBroken || isAtrStop || isClimaxRun) {
+              let reason = "";
+              if (isAtrStop) {
+                const runnerTag = hasScaledOut ? "（已分批止盈、底仓 runner 宽止损）" : "";
+                reason = `【ATR 自适应跟踪止盈·v6】持仓峰值 ${peakClose.toFixed(2)} 元后回撤超 ${(trailPct * 100).toFixed(0)}%（随 ${atrMult.toFixed(1)}×ATR 自适应，现价 ${close.toFixed(2)}）${runnerTag}，清掉剩余仓位锁定波段利润。`;
+              } else if (isSupportBroken) {
+                reason = `【主力防线失守止损】日线收盘价 ${close.toFixed(2)} 元跌破主力 70% 筹码密集支撑区下轨（${supportPrice.toFixed(2)}元）的 5% 以上，清掉全部仓位中期洗盘出局。`;
+              } else {
+                reason = `【高位超买天量滞涨】120日价格区间位置高达 ${(rangePos * 100).toFixed(0)}%，日换手率高达 ${c.turnoverPct!.toFixed(1)}% 创天量，高位筹码剧烈松动，清仓离场。`;
+              }
+              sellFrac(1, close, date, reason);
+            }
+          }
+        }
+      }
+    }
+
+    const currentWorth = cash + shares * close;
+    const stockWorth = (close / initialStockWorth) * 100000;
+    history.push({
+      date,
+      strategyWorth: Number(currentWorth.toFixed(0)),
+      stockWorth: Number(stockWorth.toFixed(0)),
+    });
+  }
+
+  const lastPrice = prices[prices.length - 1];
+  const finalWorth = cash + shares * lastPrice;
+  const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
+  const stockReturn = ((lastPrice - initialStockWorth) / initialStockWorth) * 100;
   const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
 
   return {

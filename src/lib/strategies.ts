@@ -12,6 +12,7 @@ import {
   runChokepointMomentumBacktestV3,
   runChokepointMomentumBacktestV4,
   runChokepointMomentumBacktestV5,
+  runChokepointMomentumBacktestV6,
   runGridMeanReversionBacktest,
   type BacktestResult,
 } from "./quant";
@@ -44,7 +45,7 @@ export interface StrategyBacktest {
 }
 
 /** 默认策略 id（页面首次加载与胜率口径采用此策略）。 */
-export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v5";
+export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v6";
 
 /**
  * 已登记策略。顺序即 UI 下拉顺序（默认策略置顶）。
@@ -52,12 +53,23 @@ export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v5";
 const STRATEGIES: Strategy[] = [
   {
     meta: {
+      id: "chokepoint-momentum-v6",
+      name: "Serenity 瓶颈动量突破",
+      version: "6.0",
+      description:
+        "v5 的分批止盈 + 宽 runner 版（仓位管理升级，入场信号与 v4/v5 完全一致）。源自「策略只赚 +5%、个股同期涨 +66%」的真实疑问：趋势跟随带止损会在大牛股上被洗/踏空回吐。①分批止盈（逐步卖出 / 留 runner，实测有效）——浮盈 +25% 先止盈 1/4 落袋锁利，剩余 3/4 底仓改挂更宽的 6.0×ATR 跟踪止损（远宽于 v5 收紧档 3.0×）继续奔跑吃趋势尾段；②金字塔加仓（逐步买入，实测证伪、默认关闭）——加仓抬高均价、震荡票被洗，净收益与捕获率反降，代码保留为可调项但默认整仓建仓不加仓；③跌破筹码支撑 / 高位天量滞涨清掉全部剩余仓位。15 只池真实数据 A/B：平均每股收益、正收益股数、对买入持有捕获率（81%→109%）、组合复利净值（10.4→26.6）全面优于 v5。诚实权衡：分批止盈在极端单边里仍会少赚卖飞的那 1/4。",
+      tags: ["momentum", "reversal", "pattern", "trend-filter", "atr-stop", "scale-out", "default"],
+    },
+    run: (candles, ctx) => runChokepointMomentumBacktestV6(candles, ctx.chokepointScore, { code: ctx.code }),
+  },
+  {
+    meta: {
       id: "chokepoint-momentum-v5",
       name: "Serenity 瓶颈动量突破",
       version: "5.0",
       description:
         "v4 的 ATR 自适应止损版：入场口径与 v4 完全一致（七类买点 + MA60 中期趋势闸门），并沿用 v4 跟踪止损结构（浮盈 +6% 启动、分段收紧、筹码支撑止损、天量滞涨）。唯一升级：把 v4 的固定回撤百分比（15%/9%）替换为随个股真实波动自适应的回撤距离——跟踪回撤% = clamp(mult×ATR(14)%, 7%, 25%)，mult 随浮盈分段收紧（未到 +20% 用 5.0×、≥ +20% 收紧到 3.0×）。对 3% ATR 的中等波动票回撤≈15%/9%，与 v4 等价；高波动票自动给更宽止损（少被洗）、低波动票自动收紧（少回吐）。因仅改止损距离不改启动条件，换手率与 v4 同量级、可对照。",
-      tags: ["momentum", "reversal", "pattern", "trend-filter", "atr-stop", "default"],
+      tags: ["momentum", "reversal", "pattern", "trend-filter", "atr-stop"],
     },
     run: (candles, ctx) => runChokepointMomentumBacktestV5(candles, ctx.chokepointScore, { code: ctx.code }),
   },

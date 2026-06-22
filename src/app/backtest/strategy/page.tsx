@@ -171,7 +171,7 @@ export default function StrategyBacktestPage() {
   const [strategies, setStrategies] = useState<StrategyMeta[]>([]);
   const [strategyId, setStrategyId] = useState<string>("");
 
-  // 拉取已登记策略列表，默认选中默认策略（当前为 v4）。
+  // 拉取已登记策略列表，默认选中默认策略（当前为 v6）。
   useEffect(() => {
     let alive = true;
     fetch("/api/strategies")
