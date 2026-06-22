@@ -5,31 +5,10 @@ import { buildSectorAnalyzePrompt } from "@/lib/serenity";
 import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
 import { ndjsonStream } from "@/lib/stream";
 import { NarrativeJsonSplitter } from "@/lib/split";
-import { globalCache, isAShareActiveTime, getAdaptiveTTL } from "@/lib/cache";
+import { globalCache, getAdaptiveTTL } from "@/lib/cache";
+import { emClist } from "@/lib/sources";
 
 export const dynamic = "force-dynamic";
-
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-
-async function fetchWithRetry(url: string, options: RequestInit, retries = 2, delay = 800): Promise<Response> {
-  let lastError: any;
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(url, options);
-      if (res.ok) {
-        return res;
-      }
-      lastError = new Error(`HTTP 错误: ${res.status}`);
-    } catch (err) {
-      lastError = err;
-    }
-    if (i < retries - 1) {
-      await new Promise((resolve) => setTimeout(resolve, delay * (i + 1)));
-    }
-  }
-  throw lastError || new Error("请求失败且已超过最大重试次数");
-}
 
 // 模糊匹配行业板块在知识库中的关联主题
 async function findSerenitySectorKnowledge(sectorName: string) {
@@ -124,22 +103,17 @@ export async function POST(req: Request) {
 
       try {
         // 1. 获取所有行业板块列表，在其中匹配当前板块以获得 riseCount, fallCount, netInflow 等
-        const listUrl = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=499&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!2&fields=f2,f3,f12,f14,f62,f104,f105,f128,f140,f141";
-        
-        // 缓存所有板块列表 15 秒（盘中）/ 1 小时（休市）
-        const active = isAShareActiveTime();
-        const sectorListTTL = active ? 15 * 1000 : 60 * 60 * 1000;
+        // 统一 clist 接口（push2delay 兜底 + 限流），替代直连 push2。
+        const sectorListTTL = getAdaptiveTTL("sectors");
         
         const allSectors = await globalCache.getOrCreate(
           "market:sectors:all_raw",
-          async () => {
-            const res = await fetchWithRetry(listUrl, {
-              headers: { "User-Agent": UA, Referer: "https://quote.eastmoney.com/" },
-              cache: "no-store",
-            });
-            const json = await res.json();
-            return json.data?.diff ?? [];
-          },
+          async () =>
+            emClist({
+              pn: 1, pz: 499, po: 1, np: 1, fltt: 2, invt: 2, fid: "f3",
+              fs: "m:90 t:2 f:!2",
+              fields: "f2,f3,f12,f14,f62,f104,f105,f128,f140,f141",
+            }),
           sectorListTTL
         );
 
@@ -167,20 +141,17 @@ export async function POST(req: Request) {
           };
         }
 
-        // 2. 获取该板块涨幅居前的前 15 只成分股作为诊断上下文
-        const stocksUrl = `https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=15&po=1&np=1&fltt=2&invt=2&fid=f3&fs=b:${code}&fields=f2,f3,f12,f14,f24`;
-        const stocksTTL = getAdaptiveTTL("quote");
+        // 2. 获取该板块涨幅居前的前 15 只成分股作为诊断上下文——统一 clist 接口。
+        const stocksTTL = getAdaptiveTTL("sector-stocks");
 
         const rawStocks = await globalCache.getOrCreate(
           `market:sector-stocks:top15:${code}`,
-          async () => {
-            const res = await fetchWithRetry(stocksUrl, {
-              headers: { "User-Agent": UA, Referer: "https://quote.eastmoney.com/" },
-              cache: "no-store",
-            });
-            const json = await res.json();
-            return json.data?.diff ?? [];
-          },
+          async () =>
+            emClist({
+              pn: 1, pz: 15, po: 1, np: 1, fltt: 2, invt: 2, fid: "f3",
+              fs: `b:${code}`,
+              fields: "f2,f3,f12,f14,f24",
+            }),
           stocksTTL
         );
 

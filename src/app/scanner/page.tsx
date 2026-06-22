@@ -62,6 +62,7 @@ function ScannerContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [hotRankRetryCount, setHotRankRetryCount] = useState(0); // 记录热榜请求重试次数
+  const [syncingRank, setSyncingRank] = useState(false); // 落盘版本化同步状态
   const [concurrency, setConcurrency] = useState(5); // 并行诊断数量 (默认 5，可配置)
   const [assessments, setAssessments] = useState<Record<string, AssessmentState>>({});
   
@@ -104,6 +105,30 @@ function ScannerContent() {
         setHotRankRetryCount(0);
         setLoading(false);
       }
+    }
+  }
+
+  // 同步热门榜单到本地（落盘版本化，供运营/LLM 使用），完成后刷新展示
+  async function handleSyncRank() {
+    if (syncingRank) return;
+    setSyncingRank(true);
+    try {
+      const res = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "hotRank" }),
+      });
+      const data = await res.json();
+      const result = data.result;
+      if (!res.ok || !result || !result.ok) {
+        throw new Error(result?.error || data.error || `同步失败（${res.status}）`);
+      }
+      alert(`🔥 榜单同步成功！共 ${result.count} 只（v${result.version}${result.changed === false ? "·无变化" : ""}）。`);
+      await fetchList(1);
+    } catch (err) {
+      alert(`❌ 榜单同步失败: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setSyncingRank(false);
     }
   }
 
@@ -436,6 +461,16 @@ function ScannerContent() {
           >
             {isCustomMode ? "刷新行情" : "刷新榜单"}
           </button>
+          {!isCustomMode && (
+            <button
+              onClick={handleSyncRank}
+              disabled={scanning || loading || syncingRank}
+              title="同步人气榜并落盘版本化（供运营/LLM 使用）"
+              className="rounded-[2px] border border-[var(--accent-line)] bg-[var(--accent-soft)] px-4 py-1.5 text-xs font-semibold tracking-wider text-[var(--accent)] hover:bg-[var(--hover)] transition cursor-pointer disabled:opacity-50"
+            >
+              {syncingRank ? "同步中…" : "同步榜单 🔥"}
+            </button>
+          )}
           {scanning ? (
             <button
               onClick={stopScanning}

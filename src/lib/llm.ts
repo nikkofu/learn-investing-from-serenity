@@ -8,26 +8,45 @@ export class LLMNotConfiguredError extends Error {
   }
 }
 
+/** A JSON-Schema constraint for structured outputs (OpenAI `json_schema` mode). */
+export interface JsonSchemaSpec {
+  name: string;
+  schema: Record<string, unknown>;
+  /** Strict mode requires the model to exactly match the schema (default true). */
+  strict?: boolean;
+}
+
 /** Call an OpenAI-compatible chat completion and return the raw text content. */
 export async function chat(
   system: string,
   user: string,
-  opts: { temperature?: number; jsonMode?: boolean } = {}
+  opts: { temperature?: number; jsonMode?: boolean; schema?: JsonSchemaSpec } = {}
 ): Promise<string> {
   const config = await loadConfig();
   if (!config) throw new LLMNotConfiguredError();
 
   const client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL });
 
+  const responseFormat = opts.schema
+    ? {
+        response_format: {
+          type: "json_schema" as const,
+          json_schema: { name: opts.schema.name, schema: opts.schema.schema, strict: opts.schema.strict ?? true },
+        },
+      }
+    : opts.jsonMode
+      ? { response_format: { type: "json_object" as const } }
+      : {};
+
   const completion = await client.chat.completions.create({
     model: config.model,
     temperature: opts.temperature ?? 0.4,
-    ...(opts.jsonMode ? { response_format: { type: "json_object" } } : {}),
+    ...responseFormat,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-  });
+  } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
   return completion.choices[0]?.message?.content ?? "";
 }
@@ -133,15 +152,34 @@ export function parseJsonObject<T>(text: string): T {
   return JSON.parse(s) as T;
 }
 
-/** Try JSON mode first; if the provider/model rejects it, retry without it. */
-export async function chatJson<T>(system: string, user: string): Promise<T> {
+/**
+ * Get a structured JSON object from the model. When a `schema` is supplied,
+ * tries strict `json_schema` mode first (B2: prevents field drift); then falls
+ * back to plain `json_object` mode, then to an unconstrained call — so providers
+ * that don't support the stricter modes still work. Output is always re-parsed
+ * defensively via `parseJsonObject`.
+ */
+export async function chatJson<T>(
+  system: string,
+  user: string,
+  opts: { schema?: JsonSchemaSpec; temperature?: number } = {}
+): Promise<T> {
+  const temperature = opts.temperature ?? 0.4;
+  if (opts.schema) {
+    try {
+      return parseJsonObject<T>(await chat(system, user, { schema: opts.schema, temperature }));
+    } catch (e) {
+      if (e instanceof LLMNotConfiguredError) throw e;
+      // Provider/model rejected json_schema → degrade to json_object below.
+    }
+  }
   let text: string;
   try {
-    text = await chat(system, user, { jsonMode: true, temperature: 0.4 });
+    text = await chat(system, user, { jsonMode: true, temperature });
   } catch (e) {
     if (e instanceof LLMNotConfiguredError) throw e;
     // Some OpenAI-compatible providers don't support response_format.
-    text = await chat(system, user, { temperature: 0.4 });
+    text = await chat(system, user, { temperature });
   }
   return parseJsonObject<T>(text);
 }

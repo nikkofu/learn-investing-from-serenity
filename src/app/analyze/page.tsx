@@ -34,6 +34,7 @@ interface AnalyzeResponse {
     tweets: { date: string; text: string }[];
   } | null;
   quant?: any;
+  calibration?: CalibrationSummary | null;
   timings?: {
     quoteMs: number;
     reasonMs: number;
@@ -42,12 +43,25 @@ interface AnalyzeResponse {
   };
 }
 
+interface CalibrationSummary {
+  total: number;
+  resolved: number;
+  pending: number;
+  brier: number | null;
+  hitRate: number | null;
+  reliability: { lo: number; hi: number; count: number; avgConfidence: number; observedFreq: number }[];
+  note: string;
+}
+
 type Stats = AnalyzeResponse["stats"];
 
 const ANALYZE_STAGES: { key: string; label: string }[] = [
   { key: "quote", label: "获取行情数据（接口调用）" },
   { key: "reason", label: "AI 瓶颈点五因子推理" },
   { key: "summary", label: "结构化汇总与打分" },
+  { key: "vote", label: "自洽投票（多次打分取中位降方差）" },
+  { key: "critic", label: "批判者复核（证伪 / 反方尽调）" },
+  { key: "judge", label: "裁判调和（最终结论与置信度）" },
 ];
 
 function yi(n: number): string {
@@ -156,6 +170,7 @@ function AnalyzeInner() {
               stats: ev.stats as Stats,
               assessment: ev.assessment as ChokepointAssessment,
               quant: ev.quant,
+              calibration: (ev.calibration ?? null) as CalibrationSummary | null,
               timings: ev.timings as any,
             });
             gotResult = true;
@@ -352,7 +367,7 @@ function PreviewCard({ quote, stats }: { quote: StockQuote; stats: Stats }) {
 }
 
 function Result({ data }: { data: AnalyzeResponse }) {
-  const { quote, stats, assessment, matchedKnowledge } = data;
+  const { quote, stats, assessment, matchedKnowledge, calibration } = data;
   const up = quote.changePct >= 0;
   const [showPoster, setShowPoster] = useState(false);
   return (
@@ -433,6 +448,11 @@ function Result({ data }: { data: AnalyzeResponse }) {
                   <div className="h-full rounded-none bg-[var(--accent)]" style={{ width: `${(f.score / 5) * 100}%` }} />
                 </div>
                 <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">{f.rationale}</p>
+                {f.evidence && (
+                  <p className="mt-1 text-[10px] leading-4 text-[var(--faint)]">
+                    <span className="font-semibold">证据：</span>{f.evidence}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -443,6 +463,10 @@ function Result({ data }: { data: AnalyzeResponse }) {
         <h3 className="mb-2 font-bold tracking-wider">Serenity 风格论述</h3>
         <p className="text-sm leading-7 text-[var(--text)] text-justify">{assessment.thesis}</p>
       </div>
+
+      <ReviewCard assessment={assessment} />
+
+      {calibration && <CalibrationCard c={calibration} />}
 
       {/* ============================================================== */}
       {/* 新增：Serenity 投研实战与 BOM 解构面板 */}
@@ -616,6 +640,197 @@ function ListCard({ title, items, tone }: { title: string; items: string[]; tone
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+const SEVERITY_TONE: Record<"high" | "medium" | "low", string> = {
+  high: "text-red-500 border-red-500/40",
+  medium: "text-amber-500 border-amber-500/40",
+  low: "text-[var(--muted)] border-[var(--border)]",
+};
+const SEVERITY_LABEL: Record<"high" | "medium" | "low", string> = { high: "高", medium: "中", low: "低" };
+
+/** AI 复核（Generator→Critic→Judge）面板：展示置信度、回测口径胜率、批判者反证。 */
+function ReviewCard({ assessment }: { assessment: ChokepointAssessment }) {
+  const { critique, finalConfidence, adjusted, winRate, selfConsistency } = assessment;
+  if (!critique && finalConfidence == null && !winRate && !selfConsistency) return null;
+  const confPct = finalConfidence != null ? Math.round(finalConfidence * 100) : null;
+  const confColor =
+    confPct == null ? "text-[var(--muted)]" : confPct >= 60 ? "text-[var(--accent)]" : confPct >= 40 ? "text-amber-400" : "text-red-500";
+  return (
+    <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5 space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="font-bold tracking-wider flex items-center gap-2">
+          AI 复核 · 风控
+          <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--faint)] border border-[var(--border)] rounded-full px-2 py-0.5">
+            生成器 → 批判者 → 裁判
+          </span>
+        </h3>
+        <div className="flex items-center gap-4">
+          {adjusted && (
+            <span className="text-[9px] font-mono uppercase tracking-wider text-amber-500 border border-amber-500/40 rounded-full px-2 py-0.5">
+              已据复核下调
+            </span>
+          )}
+          {confPct != null && (
+            <div className="text-right">
+              <div className={`text-2xl font-mono font-black leading-none ${confColor}`}>{confPct}%</div>
+              <p className="text-[9px] text-[var(--faint)] font-mono uppercase tracking-wider mt-0.5">最终置信度</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {winRate && (
+        <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] p-3 text-xs space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-[var(--text)]">
+              胜率：{winRate.source === "na" ? "样本不足" : `${winRate.value.toFixed(1)}%`}
+            </span>
+            {winRate.source === "walkforward" && (
+              <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--accent)] border border-[var(--accent-line)] rounded-full px-2 py-0.5">
+                样本外 · {winRate.horizon}日前瞻 · {winRate.sampleSize}次信号
+              </span>
+            )}
+            {winRate.source === "backtest" && (
+              <span className="text-[9px] font-mono uppercase tracking-wider text-amber-500 border border-amber-500/40 rounded-full px-2 py-0.5">
+                样本内回测 · {winRate.sampleSize}笔
+              </span>
+            )}
+            {winRate.inSample && winRate.source === "walkforward" && (
+              <span className="text-[var(--faint)]">（样本内对照 {winRate.inSample.value.toFixed(1)}%，通常偏高）</span>
+            )}
+          </div>
+          <p className="text-[var(--faint)]">{winRate.note}</p>
+          {winRate.benchmark && (
+            <div className="mt-1 border-t border-[var(--border)] pt-1.5 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[var(--muted)]">
+                  策略 <b className={winRate.benchmark.strategyReturnPct >= 0 ? "text-rose-500" : "text-emerald-500"}>{winRate.benchmark.strategyReturnPct > 0 ? "+" : ""}{winRate.benchmark.strategyReturnPct.toFixed(2)}%</b>
+                </span>
+                <span className="text-[var(--faint)]">vs 买入持有 <b className={winRate.benchmark.buyHoldReturnPct >= 0 ? "text-rose-500" : "text-emerald-500"}>{winRate.benchmark.buyHoldReturnPct > 0 ? "+" : ""}{winRate.benchmark.buyHoldReturnPct.toFixed(2)}%</b></span>
+                <span className="text-[var(--muted)]">超额 <b className={winRate.benchmark.excessPct >= 0 ? "text-rose-500" : "text-emerald-500"}>{winRate.benchmark.excessPct > 0 ? "+" : ""}{winRate.benchmark.excessPct.toFixed(2)}pp</b></span>
+                <span
+                  className={`text-[9px] font-mono uppercase tracking-wider rounded-full px-2 py-0.5 border ${
+                    winRate.benchmark.significant
+                      ? "text-emerald-500 border-emerald-500/40"
+                      : "text-[var(--faint)] border-[var(--border)]"
+                  }`}
+                >
+                  {winRate.benchmark.significant ? `显著 z=${winRate.benchmark.zVsCoin}` : `不显著 z=${winRate.benchmark.zVsCoin} · n=${winRate.benchmark.sampleSize}`}
+                </span>
+              </div>
+              <p className="text-[var(--faint)]">{winRate.benchmark.note}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {selfConsistency && selfConsistency.runs > 1 && (
+        <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] p-3 text-xs space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-[var(--text)]">自洽投票</span>
+            <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--accent)] border border-[var(--accent-line)] rounded-full px-2 py-0.5">
+              {selfConsistency.runs} 次打分 · 取中位
+            </span>
+            <span className="text-[var(--faint)]">最大因子分歧 {selfConsistency.maxSpread.toFixed(1)} 分</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {selfConsistency.factors.map((f) => (
+              <span key={f.key} className="rounded-[2px] border border-[var(--border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--muted)]">
+                {FACTOR_LABELS[f.key] ?? f.key}: {f.primary.toFixed(1)}→{f.consensus.toFixed(1)}
+                {f.spread > 0 && <span className="text-amber-500"> ±{f.spread.toFixed(1)}</span>}
+              </span>
+            ))}
+          </div>
+          <p className="text-[var(--faint)]">{selfConsistency.note}</p>
+        </div>
+      )}
+
+      {critique?.summary && <p className="text-sm leading-6 text-[var(--text)] text-justify">{critique.summary}</p>}
+
+      {critique && critique.disconfirming.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-[var(--faint)] uppercase tracking-wider">反证 / 证伪点</p>
+          {critique.disconfirming.map((d, i) => (
+            <div key={i} className="flex gap-2 items-start text-xs">
+              <span className={`shrink-0 font-mono border rounded px-1.5 py-0.5 text-[10px] ${SEVERITY_TONE[d.severity]}`}>
+                {SEVERITY_LABEL[d.severity]}
+                {d.factorKey ? `·${FACTOR_LABELS[d.factorKey] || d.factorKey}` : ""}
+                {typeof d.suggestedScoreDelta === "number" ? ` ${d.suggestedScoreDelta > 0 ? "+" : ""}${d.suggestedScoreDelta}` : ""}
+              </span>
+              <span className="text-[var(--muted)] text-justify leading-5">{d.issue}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {critique && critique.unsupportedClaims.length > 0 && (
+        <div>
+          <p className="text-[11px] font-semibold text-[var(--faint)] uppercase tracking-wider mb-1">缺乏证据支撑的论断</p>
+          <ul className="space-y-1 text-xs text-[var(--muted)]">
+            {critique.unsupportedClaims.map((c, i) => (
+              <li key={i} className="flex gap-2"><span className="text-[var(--faint)]">·</span><span className="text-justify">{c}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {critique && critique.overfitWarnings.length > 0 && (
+        <div>
+          <p className="text-[11px] font-semibold text-[var(--faint)] uppercase tracking-wider mb-1">过拟合 / 反身性提示</p>
+          <ul className="space-y-1 text-xs text-[var(--muted)]">
+            {critique.overfitWarnings.map((c, i) => (
+              <li key={i} className="flex gap-2"><span className="text-[var(--faint)]">·</span><span className="text-justify">{c}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 校准闭环（B3）：展示预测落库与事后真实涨跌结算出的 Brier 分 / 可靠性曲线。 */
+function CalibrationCard({ c }: { c: CalibrationSummary }) {
+  return (
+    <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5 space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <h3 className="text-sm font-semibold text-[var(--text)]">校准闭环 · 可靠性</h3>
+        <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--faint)] border border-[var(--border)] rounded-full px-2 py-0.5">
+          预测 {c.total} · 已结算 {c.resolved} · 待结算 {c.pending}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-4 text-xs">
+        <div>
+          <div className="text-[var(--faint)]">Brier 分（越低越准）</div>
+          <div className="font-mono font-bold text-base text-[var(--text)]">{c.brier != null ? c.brier.toFixed(3) : "—"}</div>
+        </div>
+        <div>
+          <div className="text-[var(--faint)]">实际命中率</div>
+          <div className="font-mono font-bold text-base text-[var(--text)]">{c.hitRate != null ? `${c.hitRate}%` : "—"}</div>
+        </div>
+      </div>
+      {c.resolved > 0 && (
+        <div className="space-y-1">
+          <p className="text-[11px] font-semibold text-[var(--faint)] uppercase tracking-wider">可靠性曲线（置信度桶 vs 实际命中）</p>
+          <div className="space-y-1">
+            {c.reliability.filter((b) => b.count > 0).map((b, i) => (
+              <div key={i} className="flex items-center gap-2 text-[10px] font-mono">
+                <span className="w-16 text-[var(--faint)]">{Math.round(b.lo * 100)}–{Math.round(b.hi * 100)}%</span>
+                <div className="flex-1 h-3 rounded-[2px] bg-[var(--inset)] relative overflow-hidden">
+                  <div className="absolute inset-y-0 left-0 bg-[var(--accent-line)]" style={{ width: `${b.observedFreq * 100}%` }} />
+                </div>
+                <span className="w-24 text-right text-[var(--muted)]">实测 {Math.round(b.observedFreq * 100)}% · n={b.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="text-xs text-[var(--faint)]">{c.note}</p>
+      <p className="text-[10px] text-[var(--faint)]">
+        回填真实涨跌：<code className="font-mono">POST /api/calibration/record {`{code, actualReturnPct, horizonDays}`}</code>
+      </p>
     </div>
   );
 }

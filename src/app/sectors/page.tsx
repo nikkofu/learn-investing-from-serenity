@@ -58,6 +58,7 @@ export default function SectorsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [syncingHot, setSyncingHot] = useState(false);
   
   // 筛选与排序状态
   const [searchQuery, setSearchQuery] = useState("");
@@ -79,23 +80,48 @@ export default function SectorsPage() {
   // AI 诊断状态 (每个板块 code 独立缓存)
   const [aiCache, setAiCache] = useState<Record<string, AIState>>({});
 
-  // 一键同步板块与成分股配置到本地
+  // 统一同步通道：先校验、原子写、版本化、防缩水（详见 /api/sync）
+  async function runSyncSource(source: string): Promise<{ count: number; message: string; version?: number; changed?: boolean }> {
+    const res = await fetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source }),
+    });
+    const data = await res.json();
+    const result = data.result;
+    if (!res.ok || !result || !result.ok) {
+      throw new Error(result?.error || data.error || `同步失败（${res.status}）`);
+    }
+    return result;
+  }
+
+  // 一键同步行业板块 + 成分股个股清单到本地（走稳健通道）
   async function handleSync() {
     if (syncing) return;
     setSyncing(true);
     try {
-      const res = await fetch("/api/market/sync-sectors", { method: "POST" });
-      if (!res.ok) {
-        throw new Error(`同步请求失败，状态码: ${res.status}`);
-      }
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      alert(`🎉 同步成功！共拉取 ${data.sectorsCount} 个板块及其成分股静态配置。`);
+      const ind = await runSyncSource("industrySectors");
+      const stk = await runSyncSource("sectorStocks");
+      alert(`🎉 同步成功！行业板块 ${ind.count} 个（v${ind.version}），成分股 ${stk.message}（v${stk.version}）。`);
       await fetchSectors();
     } catch (err) {
       alert(`❌ 同步发生错误: ${err instanceof Error ? err.message : err}`);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  // 同步热门概念板块榜（落盘版本化，供运营/LLM 使用）
+  async function handleSyncHotSectors() {
+    if (syncingHot) return;
+    setSyncingHot(true);
+    try {
+      const r = await runSyncSource("hotSectors");
+      alert(`🔥 概念热榜同步成功！共 ${r.count} 个（v${r.version}${r.changed === false ? "·无变化" : ""}）。`);
+    } catch (err) {
+      alert(`❌ 概念热榜同步失败: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setSyncingHot(false);
     }
   }
 
@@ -311,13 +337,14 @@ export default function SectorsPage() {
 
   // 5. 根据涨跌幅获取热力图块颜色
   const getHeatColorClass = (pct: number) => {
-    if (pct >= 4.0) return "bg-red-950/80 border-red-500/70 text-red-200 shadow-[0_0_12px_rgba(239,68,68,0.2)]";
-    if (pct >= 2.0) return "bg-red-900/40 border-red-500/40 text-red-300";
-    if (pct > 0.0) return "bg-red-950/20 border-red-500/20 text-red-400";
-    if (pct === 0) return "bg-[var(--surface)] border-[var(--border)] text-[var(--muted)]";
-    if (pct > -2.0) return "bg-emerald-950/20 border-emerald-500/20 text-emerald-400";
-    if (pct > -4.0) return "bg-emerald-900/40 border-emerald-500/40 text-emerald-300";
-    return "bg-emerald-950/80 border-emerald-500/70 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.2)]";
+    // 配色定义在 globals.css，随亮/暗模式自适应保证对比度（红=涨 / 绿=跌）。
+    if (pct >= 4.0) return "heat-tile heat-up-3";
+    if (pct >= 2.0) return "heat-tile heat-up-2";
+    if (pct > 0.0) return "heat-tile heat-up-1";
+    if (pct === 0) return "heat-tile heat-flat";
+    if (pct > -2.0) return "heat-tile heat-dn-1";
+    if (pct > -4.0) return "heat-tile heat-dn-2";
+    return "heat-tile heat-dn-3";
   };
 
   // 6. 一键跳转个股并发诊断
@@ -427,6 +454,19 @@ export default function SectorsPage() {
             {syncing ? "同步中..." : "数据同步 🔄"}
           </button>
 
+          <button
+            onClick={handleSyncHotSectors}
+            disabled={syncingHot}
+            title="同步概念板块热榜（落盘版本化，供运营/LLM 使用）"
+            className={`px-3 py-1 cursor-pointer rounded-[2px] text-xs font-semibold font-mono tracking-wider transition ${
+              syncingHot
+                ? "bg-[var(--hover)] text-[var(--faint)] border border-[var(--border)] animate-pulse cursor-not-allowed"
+                : "bg-[var(--accent-soft)] hover:bg-[var(--hover)] text-[var(--accent)] border border-[var(--accent-line)]"
+            }`}
+          >
+            {syncingHot ? "同步中..." : "概念热榜 🔥"}
+          </button>
+
           <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[2px]">
             <button
               onClick={() => setViewMode("grid")}
@@ -464,9 +504,9 @@ export default function SectorsPage() {
               <div className="text-xs font-mono">载入行业行情数据中...</div>
             </div>
           ) : error ? (
-            <div className="border border-red-500/20 bg-red-950/20 text-red-400 p-4 rounded-[2px] text-xs font-mono text-center">
+            <div className="msg-error border p-4 rounded-[2px] text-xs font-mono text-center">
               {error}
-              <button onClick={fetchSectors} className="ml-3 underline cursor-pointer text-red-300">重新加载</button>
+              <button onClick={fetchSectors} className="ml-3 underline cursor-pointer font-semibold">重新加载</button>
             </div>
           ) : (
             <>
@@ -493,12 +533,12 @@ export default function SectorsPage() {
                           </span>
                         </div>
 
-                        <div className="flex justify-between items-end text-[9px] text-white/50 font-mono mt-1">
+                        <div className="heat-sub flex justify-between items-end text-[9px] font-mono mt-1">
                           <div className="truncate max-w-[55%]">
                             领涨: <span className="font-semibold">{item.leadStockName}</span>
                           </div>
                           <div>
-                            比: <span className="font-semibold text-white/70">{Math.round(riseRatio * 100)}%涨</span>
+                            比: <span className="font-semibold">{Math.round(riseRatio * 100)}%涨</span>
                           </div>
                         </div>
                       </div>
@@ -718,7 +758,7 @@ export default function SectorsPage() {
                   )}
 
                   {currentAI.status === "error" && (
-                    <div className="border border-red-500/20 bg-red-950/20 text-red-400 p-4 rounded-[2px] text-xs font-mono space-y-2">
+                    <div className="msg-error border p-4 rounded-[2px] text-xs font-mono space-y-2">
                       <div className="font-bold">❌ 评估接口出错：</div>
                       <div>{currentAI.errorMsg}</div>
                       <button

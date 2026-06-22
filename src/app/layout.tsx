@@ -47,9 +47,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </head>
       <body className="flex min-h-full flex-col">
         <Nav />
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
-        <footer className="border-t border-[var(--border)] px-4 py-4 text-center text-xs text-[var(--faint)]">
-          仅供学习研究，不构成任何投资建议（NFA）。数据来自东方财富/腾讯财经公开接口。
+        <main className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <footer className="border-t border-[var(--border)] px-4 py-4 text-center text-xs leading-5 text-[var(--faint)] sm:px-6 lg:px-8">
+          仅供学习研究，不构成任何投资建议（NFA）。AI 与量化结果均可能出错；历史回测/情景模拟不代表未来收益；股市有风险，决策与盈亏由您自行承担。数据来自东方财富/腾讯财经公开接口。
         </footer>
       </body>
     </html>

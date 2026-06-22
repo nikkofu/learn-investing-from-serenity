@@ -3,6 +3,8 @@
  * 使用进程内内存进行轻量级缓存，并针对高并发批量请求设计 Promise 共享机制，防止瞬间击穿外部 API。
  */
 
+import { getCacheTTL, type CacheCategory } from "./cacheSettings";
+
 interface CacheEntry<T> {
   value: T;
   expiry: number; // 过期时间戳 (ms)
@@ -39,25 +41,39 @@ export function isAShareActiveTime(): boolean {
   }
 }
 
+/** 路由/驱动里使用的数据类别别名 → cacheSettings 内部类别。 */
+const TTL_ALIAS: Record<string, CacheCategory> = {
+  quote: "quote",
+  kline: "kline",
+  "hot-rank": "hotRank",
+  hotRank: "hotRank",
+  sectors: "sectors",
+  "sector-stocks": "sectorStocks",
+  sectorStocks: "sectorStocks",
+  financials: "financials",
+  profile: "profile",
+  analyst: "analyst",
+  search: "search",
+};
+
 /**
  * 根据数据类别，获取自适应交易时间的 TTL 缓存时长（毫秒）。
+ * TTL 默认值与用户覆盖统一来自 cacheSettings（可在 /settings 配置）。
  */
-export function getAdaptiveTTL(dataType: "quote" | "kline" | "hot-rank"): number {
-  const active = isAShareActiveTime();
-
-  switch (dataType) {
-    case "quote":
-      // 实时行情：盘中 8 秒，休市期间 1 小时
-      return active ? 8 * 1000 : 60 * 60 * 1000;
-    case "kline":
-      // K线数据：盘中 15 分钟，休市期间 6 小时
-      return active ? 15 * 60 * 1000 : 6 * 60 * 60 * 1000;
-    case "hot-rank":
-      // 人气榜：盘中 3 分钟，休市期间 2 小时
-      return active ? 3 * 60 * 1000 : 2 * 60 * 60 * 1000;
-    default:
-      return 60 * 1000; // 默认 1 分钟
-  }
+export function getAdaptiveTTL(
+  dataType:
+    | "quote"
+    | "kline"
+    | "hot-rank"
+    | "sectors"
+    | "sector-stocks"
+    | "financials"
+    | "profile"
+    | "analyst"
+    | "search",
+): number {
+  const cat = TTL_ALIAS[dataType] ?? "quote";
+  return getCacheTTL(cat, isAShareActiveTime());
 }
 
 export class MemoryCacheManager {
@@ -103,6 +119,18 @@ export class MemoryCacheManager {
   clear(): void {
     this.cache.clear();
     this.pendingRequests.clear();
+  }
+
+  /**
+   * 当前缓存条目统计（含已过期但尚未惰性删除的条目；valid 为未过期数）。
+   */
+  stats(): { total: number; valid: number; pending: number } {
+    const now = Date.now();
+    let valid = 0;
+    for (const entry of this.cache.values()) {
+      if (now <= entry.expiry) valid++;
+    }
+    return { total: this.cache.size, valid, pending: this.pendingRequests.size };
   }
 
   /**

@@ -1,37 +1,15 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { globalCache, isAShareActiveTime } from "@/lib/cache";
+import { globalCache, getAdaptiveTTL } from "@/lib/cache";
+import { emClist } from "@/lib/sources";
 
 export const dynamic = "force-dynamic";
-
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-
-async function fetchWithRetry(url: string, options: RequestInit, retries = 2, delay = 800): Promise<Response> {
-  let lastError: any;
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(url, options);
-      if (res.ok) {
-        return res;
-      }
-      lastError = new Error(`HTTP 错误: ${res.status}`);
-    } catch (err) {
-      lastError = err;
-    }
-    if (i < retries - 1) {
-      await new Promise((resolve) => setTimeout(resolve, delay * (i + 1)));
-    }
-  }
-  throw lastError || new Error("请求失败且已超过最大重试次数");
-}
 
 export async function GET() {
   try {
     const cacheKey = "market:sectors";
-    const active = isAShareActiveTime();
-    const ttl = active ? 15 * 1000 : 60 * 60 * 1000;
+    const ttl = getAdaptiveTTL("sectors");
 
     // 1. 读取本地静态板块元数据
     let localMeta: Array<{ code: string; name: string }> = [];
@@ -50,17 +28,12 @@ export async function GET() {
         try {
           // f2: 板块点数, f3: 涨跌幅, f12: 板块代码, f14: 板块名称, f62: 主力净流入
           // f104: 上涨数, f105: 下跌数, f128: 领涨个股, f140: 领涨个股代码, f141: 领涨个股涨跌幅
-          const url = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=150&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!2&fields=f2,f3,f12,f14,f62,f104,f105,f128,f140,f141";
-          
-          const res = await fetchWithRetry(url, {
-            headers: {
-              "User-Agent": UA,
-              "Referer": "https://quote.eastmoney.com/",
-            },
-            cache: "no-store",
+          // 统一 clist 接口（push2delay 兜底 + 限流），替代直连 push2。
+          rawList = await emClist({
+            pn: 1, pz: 150, po: 1, np: 1, fltt: 2, invt: 2, fid: "f3",
+            fs: "m:90 t:2 f:!2",
+            fields: "f2,f3,f12,f14,f62,f104,f105,f128,f140,f141",
           });
-          const json = await res.json();
-          rawList = json.data?.diff ?? [];
         } catch (err) {
           console.error("动态拉取东财板块列表实时行情失败:", err);
           // 如果拉取失败，且本地也没有元数据，才抛出错误

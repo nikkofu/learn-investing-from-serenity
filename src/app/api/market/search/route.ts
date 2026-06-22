@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { searchStocks } from "@/lib/market";
+import { searchStocks } from "@/lib/sources";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);

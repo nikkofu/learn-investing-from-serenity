@@ -35,6 +35,55 @@ export interface PostsDigest {
 const CURATED_PATH = path.join(process.cwd(), "data", "serenity_knowledge.json");
 const POSTS_PATH = path.join(process.cwd(), ".data", "x-posts.json");
 
+/** Serenity 数据仓库（可由环境变量覆盖），数据取自其 data/ 目录，由上游每小时定时更新。 */
+export const SERENITY_DATA_REPO = process.env.SERENITY_DATA_REPO?.trim() || "yan-labs/serenity-aleabitoreddit";
+
+/**
+ * 候选下载源（按顺序尝试，前者失败/超时即回退后者）。
+ * - raw.githubusercontent.com：最新、但国内常被限速 → 放第一位但有快速超时兜底；
+ * - jsDelivr / fastly CDN：国内可达、稳定，但分支缓存可能滞后 ~数小时；
+ * - gitmirror：raw 的国内镜像。
+ * 可用环境变量 SERENITY_DATA_BASE 覆盖为单一自定义源（如自建镜像）。
+ */
+export function serenityDataUrls(file: string): string[] {
+  const repo = SERENITY_DATA_REPO;
+  const custom = process.env.SERENITY_DATA_BASE?.trim();
+  if (custom) return [`${custom.replace(/\/$/, "")}/${file}`];
+  return [
+    `https://raw.githubusercontent.com/${repo}/main/data/${file}`,
+    `https://cdn.jsdelivr.net/gh/${repo}@main/data/${file}`,
+    `https://fastly.jsdelivr.net/gh/${repo}@main/data/${file}`,
+    `https://raw.gitmirror.com/${repo}/main/data/${file}`,
+  ];
+}
+
+/**
+ * 依次尝试各候选源拉取并解析 JSON；每个源带独立超时（含 body 读取），
+ * 卡住即快速失败并回退下一个，避免一直拖到 fetch 默认 5 分钟 body 超时。
+ */
+export async function fetchSerenityJson<T>(file: string, timeoutMs = 30000): Promise<{ data: T; source: string }> {
+  const urls = serenityDataUrls(file);
+  let lastErr: unknown;
+  for (const url of urls) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+      if (!res.ok) {
+        lastErr = new Error(`HTTP ${res.status} @ ${url}`);
+        continue;
+      }
+      const data = (await res.json()) as T; // body 读取仍在同一超时窗口内
+      return { data, source: url };
+    } catch (err) {
+      lastErr = err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`无法获取 ${file}（所有候选源均失败）`);
+}
+
 // 内存锁与同步状态
 let isSyncing = false;
 
@@ -75,14 +124,13 @@ export async function syncPostsWithRemote(): Promise<{ newCount: number; totalCo
   try {
     console.log("[Sync] 开始从 GitHub 远程库同步 Serenity 知识库...");
     
-    // 1. 拉取远程最新的 5800+ 纯净推特数据
-    const resTweets = await fetch("https://raw.githubusercontent.com/yan-labs/serenity-aleabitoreddit/main/data/aleabitoreddit_tweets.json", {
-      next: { revalidate: 0 } // 不缓存 HTTP 请求
-    });
-    if (!resTweets.ok) {
-      throw new Error(`无法拉取 GitHub 归档推特: ${resTweets.statusText}`);
+    // 1. 拉取远程最新的 5800+ 纯净推特数据（多源回退 + 快速超时，避免国内 raw 限速卡死）
+    const { data: archiveTweets, source } = await fetchSerenityJson<any[]>("aleabitoreddit_tweets.json");
+    console.log(`[Sync] 推文归档来源: ${source}`);
+    // 校验远端数据正常性：必须为非空数组且数量在合理量级，避免用残缺/空响应覆盖本地良好数据。
+    if (!Array.isArray(archiveTweets) || archiveTweets.length < 100) {
+      throw new Error(`GitHub 归档数据异常（${Array.isArray(archiveTweets) ? archiveTweets.length : "非数组"}），已中止同步以保护本地数据`);
     }
-    const archiveTweets = await resTweets.json() as any[];
 
     // 2. 获取本地已有的数据
     let localData = { handle: "aleabitoreddit", scrapedAt: new Date().toISOString(), count: 0, posts: [] as KnowledgePost[] };
@@ -186,8 +234,11 @@ export async function syncPostsWithRemote(): Promise<{ newCount: number; totalCo
       posts: allPosts
     };
 
+    // 原子写入：先写临时文件再 rename，杜绝写一半导致文件损坏。
     await fs.mkdir(path.dirname(POSTS_PATH), { recursive: true });
-    await fs.writeFile(POSTS_PATH, JSON.stringify(updatedData, null, 2), "utf8");
+    const tmpPath = `${POSTS_PATH}.tmp.${process.pid}.${Date.now()}`;
+    await fs.writeFile(tmpPath, JSON.stringify(updatedData, null, 2), "utf8");
+    await fs.rename(tmpPath, POSTS_PATH);
     
     // 清除内存缓存以刷新前台展示
     globalCache.delete("knowledge:posts_digest");

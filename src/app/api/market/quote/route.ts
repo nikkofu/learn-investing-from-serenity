@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deriveStats, getKlineSafe, getQuote } from "@/lib/market";
+import { deriveStats, getQuoteFailover, getKlineFailover } from "@/lib/sources";
 import { calculateChipDistribution, runSerenityBacktest, analyzeTechnicalPatterns } from "@/lib/quant";
 
 export async function GET(req: Request) {
@@ -9,7 +9,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "请提供 6 位股票代码" }, { status: 400 });
   }
   try {
-    const [quote, candles] = await Promise.all([getQuote(code), getKlineSafe(code, 120)]);
+    const [quote, candles] = await Promise.all([getQuoteFailover(code), getKlineFailover(code, 120)]);
     const stats = deriveStats(candles);
     const chips = calculateChipDistribution(candles, quote.price);
     const backtest = runSerenityBacktest(candles);

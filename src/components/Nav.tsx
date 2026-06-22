@@ -11,7 +11,10 @@ const LINKS = [
   { href: "/map", label: "趋势→产业链" },
   { href: "/analyze", label: "个股分析" },
   { href: "/scanner", label: "热门股扫描" },
+  { href: "/mining", label: "智能挖掘" },
+  { href: "/backtest", label: "回测" },
   { href: "/sectors", label: "板块热力" },
+  { href: "/sync", label: "数据同步" },
   { href: "/settings", label: "设置" },
 ];
 
@@ -20,7 +23,7 @@ export default function Nav() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--nav-bg)] backdrop-blur">
-      <nav className="mx-auto flex max-w-6xl items-center gap-1 px-4 py-3 sm:gap-2">
+      <nav className="flex w-full items-center gap-1 px-4 py-3 sm:gap-2 sm:px-6 lg:px-8">
         <Link href="/" className="mr-3 flex items-center gap-2 font-semibold tracking-tight">
           <span className="grid h-7 w-7 place-items-center rounded-md bg-[var(--accent-soft)] text-[var(--accent)]">瓶</span>
           <span className="hidden sm:inline">Serenity 瓶颈点投研台</span>

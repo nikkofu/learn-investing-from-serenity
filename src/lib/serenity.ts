@@ -1,4 +1,4 @@
-import type { ChokepointFactorKey, Candle, StockQuote } from "./types";
+import type { ChokepointFactorKey, Candle, StockQuote, ChokepointAssessment, CritiqueReport } from "./types";
 
 /**
  * Serenity's "Chokepoint / Bottleneck" investing method (瓶颈点投资法), distilled
@@ -127,6 +127,8 @@ ${knowledgeDoc}
 你要对给定的 A 股标的，按照下面五个因子各打 0.0 - 5.0 分（0.0=完全不符合，5.0=极强符合，最小打分单位可以到 0.1，如：3.5，1.8），并给出一句中文理由（理由要尽量结合公司在产业链中的位置与给定行情数据，不要编造不存在的财务数字）：
 ${factorsDoc}
 
+【强制证据引用】每个因子除 rationale 外，还必须给出 evidence 字段：明确引用下方“行情/统计数据块”里的具体字段与数值作为打分依据（例如「市盈率TTM=45.2、近窗口涨跌+12.3%、区间位置=82%」）。**若该因子找不到可引用的数据支撑，evidence 必须填「无直接数据支撑」，并相应下调该因子分数**——宁可保守，不要无证据地给高分。
+
 【重要推理指令：严格执行六步工作流】
 在第一步的实时推理里，请像投研日记一样有条理、简洁，并且**必须严格按照以下“六步工作流”的六个步骤顺序展开你的深度分析**：
 1. 【找大趋势】：确认个股受益的宏观大趋势（如 AI 算力扩张、半导体国产替代等）。
@@ -139,7 +141,7 @@ ${factorsDoc}
 请在自然语言推理中写明这六个步骤名称，并在此基础上逐个说明五个因子的打分与理由。第二步再汇总成结构化 JSON。verdict 用「隐形冠军 / 值得跟踪 / 一般 / 回避」之一并附半句话，thesis 为120字内的 Serenity 风格瓶颈点论述，risks/catalysts 各 2-4 条，score 为 0.0 - 5.0 之间的数值，最小单位为 0.1（例如：3.5，2.8，1.0）。
 
 ${twoPhaseGuard(`{
-  "factors": [{"key": "demand|supply|attention|valueCapture|catalyst", "score": "0.0-5.0之间的数值，精度0.1，如3.5", "rationale": "..."}],
+  "factors": [{"key": "demand|supply|attention|valueCapture|catalyst", "score": "0.0-5.0之间的数值，精度0.1，如3.5", "rationale": "...", "evidence": "引用数据块中的具体字段与数值；无支撑则填『无直接数据支撑』"}],
   "verdict": "...",
   "thesis": "...",
   "risks": ["..."],
@@ -337,3 +339,150 @@ ${JSON.stringify(dataBlock, null, 2)}
   return { system, user };
 }
 
+
+/** 把行情快照压成紧凑数据块，供 Critic / Judge 复用同一份事实依据。 */
+function factSummary(quote: StockQuote, stats: ReturnType<typeof import("./market").deriveStats>) {
+  return {
+    名称: quote.name,
+    代码: quote.code,
+    最新价: quote.price,
+    涨跌幅百分比: quote.changePct,
+    市盈率TTM: quote.pe,
+    市净率: quote.pb,
+    总市值元: quote.totalMarketCap,
+    换手率百分比: quote.turnoverPct,
+    近窗口统计: stats,
+  };
+}
+
+/** 把生成器的初评压成紧凑文本，供 Critic / Judge 审阅。 */
+function assessmentDigest(a: ChokepointAssessment) {
+  return {
+    totalScore: a.totalScore,
+    verdict: a.verdict,
+    thesis: a.thesis,
+    recommendedBuy: a.recommendedBuy,
+    factors: a.factors.map((f) => ({ key: f.key, score: f.score, rationale: f.rationale, evidence: f.evidence ?? "" })),
+    risks: a.risks,
+    catalysts: a.catalysts,
+  };
+}
+
+/**
+ * 自洽投票（self-consistency）打分器：仅依据数据块对五因子独立二次打分。
+ * 用于多次采样后取每因子中位数，压低单趟 LLM 的随机方差。只输出紧凑 JSON。
+ */
+export function buildVotePrompt(args: {
+  quote: StockQuote;
+  stats: ReturnType<typeof import("./market").deriveStats>;
+}) {
+  const { quote, stats } = args;
+  const factorsDoc = CHOKEPOINT_FACTORS.map(
+    (f) => `- ${f.key} (${f.zh} ${f.en}, 权重 ${f.weight}): ${f.description}`,
+  ).join("\n");
+  const system = `你是 Serenity 瓶颈点投资法(Chokepoint)的打分器。请**仅依据下方数据块**，对五个因子各打 0.0 - 5.0 分（精度 0.1）。这是一次**独立的二次打分**（self-consistency 采样），请基于事实独立判断，不要附和任何先前结论，也不要编造数据块以外的财务数字。每个因子给出 evidence：引用数据块中的具体字段与数值；**若无可引用支撑，evidence 必须填「无直接数据支撑」并相应下调该因子分数**。
+${factorsDoc}
+
+只输出一个 \`\`\`json 代码块，不要任何其它内容：
+\`\`\`json
+{"factors": [{"key": "demand|supply|attention|valueCapture|catalyst", "score": 0.0, "evidence": "引用数据块字段；无则『无直接数据支撑』"}]}
+\`\`\``;
+  const user = `【标的行情/统计数据块（唯一可引用的事实来源）】
+${JSON.stringify(factSummary(quote, stats), null, 2)}
+
+请输出五因子打分 JSON。`;
+  return { system, user };
+}
+
+/**
+ * 批判者（Critic / Reflection 模式）：扮演严苛的“反方/做空尽调”分析师，
+ * 主动寻找初评里缺乏证据支撑的论断、反证、过拟合/反身性/幸存者偏差，
+ * 并给出一个总体置信度折扣。只输出结构化 JSON。
+ */
+export function buildCriticPrompt(args: {
+  quote: StockQuote;
+  stats: ReturnType<typeof import("./market").deriveStats>;
+  assessment: ChokepointAssessment;
+}) {
+  const { quote, stats, assessment } = args;
+  const system = `你是一名极其严苛、以“证伪”为天职的 A 股风控 / 做空尽调分析师，正在复核另一位分析师对某标的的瓶颈点初评。你的唯一目标是找出初评中**站不住脚的地方**，而不是附和它。
+
+请重点审查：
+1. **无证据论断**：哪些因子打分 / 论述没有引用真实数据支撑（evidence 为空、含糊、或与数据块矛盾）？逐条列出。
+2. **反证 / 证伪**：有哪些数据或常识构成对“瓶颈点成立”的反向证据（如：估值已高、换手率显示已被充分关注、区间位置在高位追高、需求其实可被替代、供给并不稀缺）？
+3. **过拟合 / 元层面风险**：是否存在叙事过拟合、反身性追高、幸存者偏差、用结果倒推逻辑？
+4. **置信度折扣 confidenceHaircut（0-1）**：综合上述问题，给出应当下调的总体置信度比例（0=初评很扎实无需下调，1=逻辑基本被证伪）。
+
+对每条反证，尽量标出它针对哪个因子(factorKey)以及建议的打分调整量(suggestedScoreDelta，负数=下调，范围 -3 ~ +1)。不要客气，宁可苛刻。${CHINA_CONTEXT}
+
+只输出一个 \`\`\`json 代码块，结构如下，不要输出任何其它内容：
+\`\`\`json
+{
+  "unsupportedClaims": ["缺乏证据支撑的论断..."],
+  "disconfirming": [{"factorKey": "demand|supply|attention|valueCapture|catalyst", "issue": "反证描述", "severity": "high|medium|low", "suggestedScoreDelta": -1.5}],
+  "overfitWarnings": ["过拟合/反身性/幸存者偏差等..."],
+  "confidenceHaircut": 0.0,
+  "summary": "一句话复核结论"
+}
+\`\`\``;
+
+  const user = `【标的行情/统计数据块（唯一可引用的事实来源）】
+${JSON.stringify(factSummary(quote, stats), null, 2)}
+
+【待复核的瓶颈点初评】
+${JSON.stringify(assessmentDigest(assessment), null, 2)}
+
+请基于上方数据块严格证伪，输出 JSON 复核报告。`;
+
+  return { system, user };
+}
+
+/**
+ * 裁判（Judge / Aggregator 模式）：调和生成器初评与批判者复核，
+ * 在批判成立处保守下调打分与置信度，保留证据，给出最终结论。只输出 JSON。
+ */
+export function buildJudgePrompt(args: {
+  quote: StockQuote;
+  stats: ReturnType<typeof import("./market").deriveStats>;
+  assessment: ChokepointAssessment;
+  critique: CritiqueReport;
+}) {
+  const { quote, stats, assessment, critique } = args;
+  const factorsDoc = CHOKEPOINT_FACTORS.map((f) => `- ${f.key} (${f.zh}, 权重 ${f.weight})`).join("\n");
+  const system = `你是资深投资委员会主审（裁判）。你面前有：一位分析师的瓶颈点初评，以及一位风控分析师的证伪复核。你的职责是**调和二者、得出更可靠的最终结论**，而不是简单取中点。
+
+裁决原则：
+- 批判**成立且有数据支撑**处，相应**下调**对应因子分数（采纳其 suggestedScoreDelta 的方向，幅度可自定）；批判牵强处可保留初评。
+- evidence 仍为空或“无直接数据支撑”的因子，分数应偏保守。
+- 给出 finalConfidence（0-1）：综合证据充分度与批判严重性；存在 high 级反证时应明显降低。
+- 任一情况下都要**诚实**：宁可保守，不要为了好看而维持高分/买入推荐。
+
+五因子（保持 key 不变）：
+${factorsDoc}
+
+只输出一个 \`\`\`json 代码块：
+\`\`\`json
+{
+  "factors": [{"key": "demand|supply|attention|valueCapture|catalyst", "score": 0.0, "rationale": "调和后的理由", "evidence": "引用的数据；无则『无直接数据支撑』"}],
+  "verdict": "隐形冠军|值得跟踪|一般|回避 + 半句话",
+  "recommendedBuy": true,
+  "buyPriceRange": "如 xx.x-xx.x 元，无则空字串",
+  "sellPriceRange": "如 xx.x-xx.x 元，无则空字串",
+  "finalConfidence": 0.0,
+  "adjustmentNote": "相对初评做了哪些调整及原因，一两句"
+}
+\`\`\``;
+
+  const user = `【标的行情/统计数据块】
+${JSON.stringify(factSummary(quote, stats), null, 2)}
+
+【生成器初评】
+${JSON.stringify(assessmentDigest(assessment), null, 2)}
+
+【风控复核】
+${JSON.stringify(critique, null, 2)}
+
+请输出调和后的最终 JSON。`;
+
+  return { system, user };
+}

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { deriveStats, getKlineSafe, getQuote } from "@/lib/market";
-import { calculateChipDistribution, runTraditionalMaBacktest, runChokepointMomentumBacktest, analyzeTechnicalPatterns, generatePriceProjection } from "@/lib/quant";
+import { deriveStats, getQuoteFailover, getKlineFailover } from "@/lib/sources";
+import { calculateChipDistribution, runTraditionalMaBacktest, runChokepointMomentumBacktest, runWalkForwardWinRate, analyzeTechnicalPatterns, generatePriceProjection } from "@/lib/quant";
 import { buildAnalyzePrompt } from "@/lib/serenity";
 import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
 import { finalizeAssessment } from "@/lib/chokepoint";
+import { runCriticReview, runChokepointReview, deriveWinRate, runSelfConsistencyVote } from "@/lib/agentWorkflow";
+import { recordPrediction, getCalibrationSummary, type CalibrationSummary } from "@/lib/calibration";
 import { ndjsonStream } from "@/lib/stream";
 import { NarrativeJsonSplitter } from "@/lib/split";
 import type { ChokepointAssessment } from "@/lib/types";
@@ -140,7 +142,7 @@ export async function POST(req: Request) {
     send({ type: "stage", key: "quote", status: "start" });
     let quote, candles, stats;
     try {
-      [quote, candles] = await Promise.all([getQuote(code), getKlineSafe(code, 360)]);
+      [quote, candles] = await Promise.all([getQuoteFailover(code), getKlineFailover(code, 360)]);
       stats = deriveStats(candles);
     } catch (e) {
       send({ type: "error", message: `行情获取失败：${e instanceof Error ? e.message : e}` });
@@ -228,12 +230,72 @@ export async function POST(req: Request) {
         assessment.workflowSteps = [];
       }
       
+      // Stage 3.5: 自洽投票（self-consistency）：多次独立打分取每因子中位数，降单趟方差。
+      // 通过 SELF_CONSISTENCY_RUNS 控制额外采样次数（默认 2，设 0 关闭）。失败即降级保留主趟。
+      try {
+        const extraRuns = Number(process.env.SELF_CONSISTENCY_RUNS ?? 2);
+        if (Number.isFinite(extraRuns) && extraRuns > 0) {
+          send({ type: "stage", key: "vote", status: "start" });
+          const vote = await runSelfConsistencyVote({ quote, stats, assessment, extraRuns });
+          assessment.factors = vote.factors;
+          assessment.totalScore = vote.totalScore;
+          assessment.selfConsistency = vote.info;
+          send({ type: "stage", key: "vote", status: "done" });
+        }
+      } catch (e) {
+        send({ type: "stage", key: "vote", status: "done" });
+        console.warn("[analyze] 自洽投票降级（保留单趟打分）:", e instanceof Error ? e.message : e);
+      }
+
+      // Stage 4: Critic(Reflection) → Judge 复核工作流（对标 Google agentic 的反思/裁判模式）。
+      // 生成器初评 → 批判者证伪 → 裁判调和。失败即降级保留初评，绝不阻断主流程。
+      try {
+        send({ type: "stage", key: "critic", status: "start" });
+        const critique = await runCriticReview({ quote, stats, assessment });
+        send({ type: "stage", key: "critic", status: "done" });
+        send({ type: "stage", key: "judge", status: "start" });
+        const review = await runChokepointReview({ quote, stats, assessment, critique });
+        assessment.factors = review.factors;
+        assessment.totalScore = review.totalScore;
+        assessment.verdict = review.verdict;
+        assessment.recommendedBuy = review.recommendedBuy;
+        if (review.buyPriceRange !== undefined) assessment.buyPriceRange = review.buyPriceRange;
+        if (review.sellPriceRange !== undefined) assessment.sellPriceRange = review.sellPriceRange;
+        assessment.finalConfidence = review.finalConfidence;
+        assessment.critique = review.critique;
+        assessment.adjusted = review.adjusted;
+        send({ type: "stage", key: "judge", status: "done" });
+      } catch (e) {
+        send({ type: "stage", key: "critic", status: "done" });
+        send({ type: "stage", key: "judge", status: "done" });
+        console.warn("[analyze] 复核工作流降级（保留初评）:", e instanceof Error ? e.message : e);
+      }
+
       const chips = calculateChipDistribution(candles, quote.price);
       const traditionalBacktest = runTraditionalMaBacktest(candles);
       const chokepointBacktest = runChokepointMomentumBacktest(candles, assessment.totalScore);
+      const walkForward = runWalkForwardWinRate(candles);
+      assessment.winRate = deriveWinRate(walkForward, chokepointBacktest);
       const technical = analyzeTechnicalPatterns(candles, quote.price, chips);
       const projections = generatePriceProjection(candles, assessment.totalScore);
-      
+
+      // B3 校准闭环：把本次预测落库，并附带当前全局校准摘要（Brier/可靠性）。失败不阻断。
+      let calibration: CalibrationSummary | null = null;
+      try {
+        await recordPrediction({
+          code: quote.code,
+          name: quote.name,
+          date: new Date().toISOString().slice(0, 10),
+          totalScore: assessment.totalScore,
+          recommendedBuy: assessment.recommendedBuy ?? false,
+          confidence: assessment.finalConfidence ?? assessment.totalScore / 100,
+          winRate: assessment.winRate?.value,
+        });
+        calibration = await getCalibrationSummary();
+      } catch (e) {
+        console.warn("[analyze] 校准记录失败:", e instanceof Error ? e.message : e);
+      }
+
       const summaryElapsed = performance.now() - tSummaryStart;
       const totalElapsed = performance.now() - tStart;
 
@@ -243,6 +305,7 @@ export async function POST(req: Request) {
         stats, 
         assessment, 
         matchedKnowledge,
+        calibration,
         quant: { 
           chips, 
           backtest: chokepointBacktest, 

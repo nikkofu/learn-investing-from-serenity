@@ -1,30 +1,8 @@
 import { NextResponse } from "next/server";
 import { globalCache, getAdaptiveTTL } from "@/lib/cache";
+import { getStockRankList, getQuotesFailover } from "@/lib/sources";
 
 export const dynamic = "force-dynamic";
-
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-
-async function fetchWithRetry(url: string, options: RequestInit, retries = 3, delay = 1000): Promise<Response> {
-  let lastError: any;
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(url, options);
-      if (res.ok) {
-        return res;
-      }
-      lastError = new Error(`HTTP 错误: ${res.status}`);
-    } catch (err) {
-      lastError = err;
-    }
-    if (i < retries - 1) {
-      // 延迟重试，每次重试稍微增加延迟
-      await new Promise((resolve) => setTimeout(resolve, delay * (i + 1)));
-    }
-  }
-  throw lastError || new Error("请求失败且已超过最大重试次数");
-}
 
 export async function GET() {
   try {
@@ -34,89 +12,25 @@ export async function GET() {
     const list = await globalCache.getOrCreate(
       cacheKey,
       async () => {
-        // 1. 获取东方财富股吧人气榜前 100 列表
-        const rankUrl = "https://emappdata.eastmoney.com/stockrank/getAllCurrentList";
-        const rankPayload = {
-          appId: "appId01",
-          globalId: "786e4c21-70dc-435a-93bb-38",
-          marketType: "",
-          pageNo: 1,
-          pageSize: 100,
-        };
+        // 1. 东方财富股吧人气榜前 100（统一 emappdata 接口，走限流）
+        const rank = await getStockRankList(100);
+        if (rank.length === 0) return [];
 
-        const rankRes = await fetchWithRetry(rankUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "User-Agent": UA,
-            Referer: "https://guba.eastmoney.com/",
-          },
-          body: JSON.stringify(rankPayload),
-          cache: "no-store",
-        });
+        // 2. 批量补行情：统一行情接口（腾讯批量 → 东财 push2 兜底，全球可达、不封 IP），
+        //    替代被海外封锁的 push2 ulist。停市时返回当日收盘值。整体失败时退化为仅榜单。
+        const quoteMap = await getQuotesFailover(rank.map((r) => r.code));
 
-        const rankJson = await rankRes.json();
-        const rawList = rankJson.data ?? [];
-
-        if (rawList.length === 0) {
-          return [];
-        }
-
-        // 2. 构造东财行情接口所需的 secids 列表
-        // A股代码分类规则：SZ 以 0. 开头，SH 以 1. 开头
-        const secids = rawList
-          .map((item: any) => {
-            const sc = item.sc || "";
-            const code = sc.replace(/^(SZ|SH|BJ)/, "");
-            if (sc.startsWith("SH")) {
-              return `1.${code}`;
-            }
-            return `0.${code}`;
-          })
-          .join(",");
-
-        // 3. 批量拉取实时行情数据
-        // f2: 最新价, f3: 涨跌幅, f12: 代码, f14: 股票名称, f24: 换手率
-        const quoteUrl = `https://push2.eastmoney.com/api/qt/ulist.np/get?ut=f057cbcbce2a86e2866ab8877db1d059&fltt=2&invt=2&fields=f2,f3,f12,f14,f24&secids=${secids}`;
-
-        const quoteRes = await fetchWithRetry(quoteUrl, {
-          headers: {
-            "User-Agent": UA,
-            Referer: "https://quote.eastmoney.com/",
-          },
-          cache: "no-store",
-        });
-
-        const quoteJson = await quoteRes.json();
-        const diffList = quoteJson.data?.diff ?? [];
-
-        // 4. 将热榜排名与行情数据完美组装
-        // 由于 ulist 返回顺序与 secids 一致，我们直接按代码匹配以确保安全
-        const quoteMap = new Map<string, any>();
-        diffList.forEach((q: any) => {
-          if (q && q.f12) {
-            quoteMap.set(q.f12, q);
-          }
-        });
-
-        return rawList.map((item: any) => {
-          const sc = item.sc || "";
-          const code = sc.replace(/^(SZ|SH|BJ)/, "");
-          const q = quoteMap.get(code);
-
-          // 计算市场标识
-          let market = "SZ";
-          if (sc.startsWith("SH")) market = "SH";
-          else if (sc.startsWith("BJ")) market = "BJ";
-
+        // 3. 将热榜排名与行情数据组装
+        return rank.map((item) => {
+          const q = quoteMap[item.code];
           return {
-            rank: Number(item.rk) || 0,
-            code,
-            name: q?.f14 || item.sc, // 兜底使用原始证券代号
-            price: q?.f2 != null && q.f2 !== "-" ? Number(q.f2) : 0,
-            changePct: q?.f3 != null && q.f3 !== "-" ? Number(q.f3) : 0,
-            turnoverPct: q?.f24 != null && q.f24 !== "-" ? Number(q.f24) : 0,
-            market,
+            rank: item.rank,
+            code: item.code,
+            name: q?.name || item.sc, // 兜底使用原始证券代号
+            price: q?.price ?? 0,
+            changePct: q?.changePct ?? 0,
+            turnoverPct: q?.turnoverPct ?? 0,
+            market: item.market,
           };
         });
       },

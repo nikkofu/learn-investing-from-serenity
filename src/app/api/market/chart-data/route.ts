@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getKlineSafe, getQuote, deriveStats } from "@/lib/market";
+import { getQuoteFailover, deriveStats, getKlineFailover } from "@/lib/sources";
 import {
   calculateChipDistribution,
   runTraditionalMaBacktest,
@@ -24,8 +24,8 @@ export async function GET(req: Request) {
     if (period === "1W") klt = 102;
     else if (period === "1M") klt = 103;
 
-    // 并发拉取腾讯和东财基础数据
-    const [quote, candles] = await Promise.all([getQuote(code), getKlineSafe(code, 360, klt)]);
+    // 并发拉取：腾讯实时行情 + 多源互备 K 线（百度→新浪→push2his，周/月由日 K 重采样）
+    const [quote, candles] = await Promise.all([getQuoteFailover(code), getKlineFailover(code, 360, klt)]);
     const stats = deriveStats(candles);
 
     // 纯数学指标计算 (无模型延迟，毫秒级计算完毕)

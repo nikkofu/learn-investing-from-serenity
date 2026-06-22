@@ -49,6 +49,116 @@ export default function SettingsPage() {
   const [syncingDb, setSyncingDb] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
 
+  // 数据缓存策略
+  type CacheCat = {
+    category: string;
+    label: string;
+    desc: string;
+    default: { active: number; inactive: number };
+    current: { active: number; inactive: number };
+  };
+  const [cacheCats, setCacheCats] = useState<CacheCat[]>([]);
+  const [cacheDraft, setCacheDraft] = useState<Record<string, { active: string; inactive: string }>>({});
+  const [cacheStats, setCacheStats] = useState<{ total: number; valid: number; pending: number } | null>(null);
+  const [cacheStatus, setCacheStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
+
+  const fetchCache = async () => {
+    try {
+      const res = await fetch("/api/settings/cache");
+      const d = await res.json();
+      const cats: CacheCat[] = d.categories || [];
+      setCacheCats(cats);
+      setCacheStats(d.stats || null);
+      const draft: Record<string, { active: string; inactive: string }> = {};
+      for (const c of cats) draft[c.category] = { active: String(c.current.active), inactive: String(c.current.inactive) };
+      setCacheDraft(draft);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const fmtSec = (n: number): string => {
+    if (n >= 3600) return `${+(n / 3600).toFixed(n % 3600 === 0 ? 0 : 1)} 小时`;
+    if (n >= 60) return `${+(n / 60).toFixed(n % 60 === 0 ? 0 : 1)} 分钟`;
+    return `${n} 秒`;
+  };
+
+  const setDraft = (cat: string, field: "active" | "inactive", val: string) => {
+    setCacheDraft((prev) => ({ ...prev, [cat]: { ...prev[cat], [field]: val } }));
+  };
+
+  const saveCache = async () => {
+    setCacheBusy(true);
+    setCacheStatus(null);
+    try {
+      const settings: Record<string, { active: number; inactive: number }> = {};
+      for (const c of cacheCats) {
+        const d = cacheDraft[c.category];
+        if (!d) continue;
+        const active = Number(d.active);
+        const inactive = Number(d.inactive);
+        if (!Number.isFinite(active) || !Number.isFinite(inactive) || active < 0 || inactive < 0) {
+          throw new Error(`${c.label} 的 TTL 必须是非负数字（单位：秒）`);
+        }
+        settings[c.category] = { active, inactive };
+      }
+      const res = await fetch("/api/settings/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save", settings }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "保存失败");
+      setCacheStatus({ kind: "ok", msg: "缓存策略已保存并即时生效。" });
+      await fetchCache();
+    } catch (err) {
+      setCacheStatus({ kind: "err", msg: err instanceof Error ? err.message : "保存失败" });
+    } finally {
+      setCacheBusy(false);
+    }
+  };
+
+  const resetCache = async () => {
+    if (!confirm("确定恢复全部缓存类别为默认 TTL 吗？")) return;
+    setCacheBusy(true);
+    setCacheStatus(null);
+    try {
+      const res = await fetch("/api/settings/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset" }),
+      });
+      if (!res.ok) throw new Error("恢复默认失败");
+      setCacheStatus({ kind: "info", msg: "已恢复全部默认 TTL。" });
+      await fetchCache();
+    } catch (err) {
+      setCacheStatus({ kind: "err", msg: err instanceof Error ? err.message : "恢复默认失败" });
+    } finally {
+      setCacheBusy(false);
+    }
+  };
+
+  const clearCache = async () => {
+    if (!confirm("确定清空进程内全部缓存吗？（下次取数将重新拉取）")) return;
+    setCacheBusy(true);
+    setCacheStatus(null);
+    try {
+      const res = await fetch("/api/settings/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear" }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error("清空失败");
+      setCacheStats(d.stats || null);
+      setCacheStatus({ kind: "info", msg: "已清空全部缓存。" });
+    } catch (err) {
+      setCacheStatus({ kind: "err", msg: err instanceof Error ? err.message : "清空失败" });
+    } finally {
+      setCacheBusy(false);
+    }
+  };
+
   const fetchDbStatus = async () => {
     try {
       const res = await fetch("/api/knowledge/sync");
@@ -117,6 +227,7 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchConfig();
     fetchDbStatus();
+    fetchCache();
   }, []);
 
   const selectProviderCard = (name: string) => {
@@ -421,6 +532,97 @@ export default function SettingsPage() {
             {syncStatus && (
               <p className={`text-xs ${syncStatus.kind === "ok" ? "text-emerald-400" : syncStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
                 {syncStatus.msg}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-[var(--border)]" />
+
+      <div className="space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text)] select-none">数据缓存策略</h2>
+            <p className="text-xs text-[var(--muted)] mt-0.5">
+              所有股票数据接口统一缓存。每类按「盘中 / 休市」两套 TTL（单位：秒）：盘中要新鲜、休市可长存。配置存于服务端 <code className="font-mono text-xs">.data/cache-config.json</code>，保存后即时生效。
+            </p>
+          </div>
+          {cacheStats && (
+            <div className="shrink-0 text-right text-[10px] font-mono text-[var(--faint)] leading-relaxed select-none">
+              <div>缓存条目: <span className="text-[var(--muted)]">{cacheStats.valid}</span> 有效 / {cacheStats.total} 总</div>
+              <div>合并请求: {cacheStats.pending}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 space-y-3">
+          <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1 items-center">
+            <span className="text-[10px] font-bold tracking-wider text-[var(--faint)] uppercase">数据类别</span>
+            <span className="text-[10px] font-bold tracking-wider text-[var(--faint)] uppercase text-center w-32">盘中 TTL (秒)</span>
+            <span className="text-[10px] font-bold tracking-wider text-[var(--faint)] uppercase text-center w-32">休市 TTL (秒)</span>
+            {cacheCats.map((c) => {
+              const d = cacheDraft[c.category] ?? { active: "", inactive: "" };
+              return (
+                <div key={c.category} className="contents">
+                  <div className="py-2 border-t border-[var(--border)]">
+                    <div className="text-sm font-semibold text-[var(--text)]">{c.label}</div>
+                    <div className="text-[11px] text-[var(--muted)]">{c.desc}</div>
+                    <div className="text-[10px] text-[var(--faint)] font-mono mt-0.5">
+                      默认 盘中 {fmtSec(c.default.active)} · 休市 {fmtSec(c.default.inactive)}
+                    </div>
+                  </div>
+                  <div className="py-2 border-t border-[var(--border)]">
+                    <input
+                      type="number"
+                      min={0}
+                      className={`${field} text-center w-32`}
+                      value={d.active}
+                      onChange={(e) => setDraft(c.category, "active", e.target.value)}
+                    />
+                  </div>
+                  <div className="py-2 border-t border-[var(--border)]">
+                    <input
+                      type="number"
+                      min={0}
+                      className={`${field} text-center w-32`}
+                      value={d.inactive}
+                      onChange={(e) => setDraft(c.category, "inactive", e.target.value)}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-[var(--border)]">
+            <button
+              type="button"
+              onClick={saveCache}
+              disabled={cacheBusy}
+              className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-50 cursor-pointer select-none"
+            >
+              {cacheBusy ? "处理中…" : "保存缓存策略"}
+            </button>
+            <button
+              type="button"
+              onClick={resetCache}
+              disabled={cacheBusy}
+              className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50 cursor-pointer select-none"
+            >
+              恢复默认
+            </button>
+            <button
+              type="button"
+              onClick={clearCache}
+              disabled={cacheBusy}
+              className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-semibold text-amber-500 hover:bg-[var(--hover)] disabled:opacity-50 cursor-pointer select-none"
+            >
+              清空当前缓存
+            </button>
+            {cacheStatus && (
+              <p className={`text-xs ${cacheStatus.kind === "ok" ? "text-emerald-400" : cacheStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
+                {cacheStatus.msg}
               </p>
             )}
           </div>

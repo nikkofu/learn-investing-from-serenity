@@ -31,13 +31,14 @@ export function finalizeAssessment(
           key: f.key,
           score: Math.max(0, Math.min(5, Number(f.score) || 0)),
           rationale: f.rationale || "",
+          evidence: f.evidence || "",
         } satisfies ChokepointFactor,
       ])
   );
   // Always emit all five canonical factors (in canonical order) so the radar
   // chart + bars always render a complete shape, even if the model omitted some.
   const factors: ChokepointFactor[] = CHOKEPOINT_FACTORS.map(
-    (d) => provided.get(d.key) ?? { key: d.key, score: 0, rationale: "（模型未提供该项评分）" }
+    (d) => provided.get(d.key) ?? { key: d.key, score: 0, rationale: "（模型未提供该项评分）", evidence: "" }
   );
   // Score over only the factors the model actually rated, so missing factors
   // don't unfairly drag the composite down to zero.

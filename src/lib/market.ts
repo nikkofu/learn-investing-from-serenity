@@ -1,5 +1,5 @@
 import iconv from "iconv-lite";
-import type { Candle, StockQuote, StockSearchResult } from "./types";
+import type { Candle, StockFinancials, StockQuote, StockSearchResult } from "./types";
 import { globalCache, getAdaptiveTTL } from "./cache";
 
 const UA =
@@ -82,7 +82,7 @@ export async function searchStocks(keyword: string): Promise<StockSearchResult[]
       }
       return out;
     },
-    60 * 1000 // 搜索词缓存 1 分钟即可
+    getAdaptiveTTL("search")
   );
 }
 
@@ -142,6 +142,12 @@ export async function getQuote(code: string): Promise<StockQuote> {
   );
 }
 
+/** K 线接口返回里自带的股票名缓存（code → name），用于在「补名字」请求失败时回填权威名称。 */
+const klineNameCache = new Map<string, string>();
+export function getKlineName(code: string): string | undefined {
+  return klineNameCache.get(code);
+}
+
 /** Daily K-line history; best-effort (Eastmoney egress is flaky, so swallow errors). */
 export async function getKlineSafe(code: string, limit = 120, klt = 101): Promise<Candle[]> {
   try {
@@ -166,7 +172,8 @@ export async function getKline(code: string, limit = 120, klt = 101): Promise<Ca
       const res = await fetchRetry(url, {
         headers: { "User-Agent": UA, Referer: "https://quote.eastmoney.com/" },
       });
-      const data = (await res.json()) as { data?: { klines?: string[] } };
+      const data = (await res.json()) as { data?: { name?: string; klines?: string[] } };
+      if (data.data?.name) klineNameCache.set(code, data.data.name);
       const klines = data.data?.klines ?? [];
       return klines.map((line) => {
         // f51 date, f52 open, f53 close, f54 high, f55 low, f56 volume, f57 amount, f58 amplitude, f59 pct, f61 turnover
@@ -186,6 +193,58 @@ export async function getKline(code: string, limit = 120, klt = 101): Promise<Ca
     },
     ttl
   );
+}
+
+/**
+ * 拉取最新一期主要财务指标（营收/净利/毛利率/净利率/ROE/负债率等），best-effort。
+ * 用于给 AI 的基本面打分提供真实数据锚点，降低凭空臆测的幻觉。失败返回 null。
+ */
+export async function getFinancials(code: string): Promise<StockFinancials | null> {
+  const cacheKey = `financials:${code}`;
+  try {
+    return await globalCache.getOrCreate(
+      cacheKey,
+      async () => {
+        const { market } = classifyCode(code);
+        const secucode = `${code}.${market}`;
+        const url =
+          `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA` +
+          `&columns=ALL&filter=(SECUCODE%3D%22${secucode}%22)&pageNumber=1&pageSize=1` +
+          `&sortColumns=REPORT_DATE&sortTypes=-1&source=HSF10&client=PC`;
+        const res = await fetchRetry(url, {
+          headers: { "User-Agent": UA, Referer: "https://emweb.securities.eastmoney.com/" },
+          timeoutMs: 8000,
+          retries: 1,
+        });
+        const data = (await res.json()) as { result?: { data?: Array<Record<string, unknown>> } };
+        const row = data.result?.data?.[0];
+        if (!row) throw new Error(`no financials for ${code}`);
+        const toNum = (v: unknown): number | null =>
+          typeof v === "number" && Number.isFinite(v) ? v : null;
+        const reportName =
+          typeof row.REPORT_DATE_NAME === "string"
+            ? row.REPORT_DATE_NAME
+            : typeof row.REPORT_DATE === "string"
+              ? row.REPORT_DATE.slice(0, 10)
+              : "";
+        return {
+          reportName,
+          revenue: toNum(row.TOTALOPERATEREVE) ?? 0,
+          revenueYoy: toNum(row.TOTALOPERATEREVETZ),
+          netProfit: toNum(row.PARENTNETPROFIT) ?? 0,
+          netProfitYoy: toNum(row.PARENTNETPROFITTZ),
+          grossMargin: toNum(row.XSMLL),
+          netMargin: toNum(row.XSJLL),
+          roe: toNum(row.ROEJQ),
+          debtRatio: toNum(row.ZCFZL),
+          eps: toNum(row.EPSJB),
+        } satisfies StockFinancials;
+      },
+      getAdaptiveTTL("financials")
+    );
+  } catch {
+    return null;
+  }
 }
 
 /** Simple derived stats used to ground the chokepoint scoring. */

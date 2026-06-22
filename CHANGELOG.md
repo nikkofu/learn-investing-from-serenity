@@ -4,6 +4,41 @@
 
 ---
 
+## [0.5.0] - 2026-06-22
+
+> 本次为里程碑级版本：围绕**准确性优先、诚实优先**，把单 Agent 单趟打分升级为多智能体协作工作流，并补齐了组合 / 建议忠实回测、样本外胜率与校准闭环，同时引入全市场智能挖掘的高吞吐数据管线。
+
+### 🧠 多智能体 AI 工作流（Generator → Critic → Judge）
+- **三智能体协作复核**：新增 `src/lib/agentWorkflow.ts`，把"单 Agent 单趟"升级为 **生成器 → 批判者 → 裁判** 工作流（对齐 Google Agentic 的 Reflection / Critic / Debate 模式）。生成器初评 → 批判者（风控）专挖反证 / 无依据论断 / 过拟合叙事并标注严重度 → 裁判据此保守下调分数与置信度。任一步 LLM 失败均**自动降级**为纯确定性调和（`reconcileDeterministic`），绝不阻断主流程。
+- **强制证据引用**：生成器 prompt 要求每个五因子打分必须引用具体数据点（如"毛利率 31% → 需求 4 分"），无支撑的论断填"无直接数据支撑"并降权，错误从此可审计。
+- **自洽投票 (Self-Consistency)**：新增 `runSelfConsistencyVote`，最终打分独立跑 N 次取**中位数**降方差（`SELF_CONSISTENCY_RUNS` 控制，默认 2，设 0 关闭）。analyze 进度条新增「自洽投票」步骤，结果卡展示各因子 `主趟→共识(±极差)`。
+- **结构化输出强约束**：`src/lib/llm.ts` 的 `chatJson` 支持严格 `json_schema`（`additionalProperties:false` + 全字段 required），应用到投票 / 批判 / 裁判三处，杜绝字段漂移；provider 不支持时自动降级到 `json_object` → 纯文本。
+
+### 📈 诚实准确性体系（样本外胜率 + 校准闭环）
+- **样本外 walk-forward 胜率**：`quant.ts` 新增 `runWalkForwardWinRate`，信号在第 t 日只用 ≤t 的数据判定，仅在留出尾段统计 t→t+5 前瞻收益，杜绝未来函数。UI 并排展示"样本外 N 日前瞻 M 次信号"与"样本内对照（通常偏高）"。
+- **校准闭环 (Calibration Loop)**：新增 `src/lib/calibration.ts` + `/api/calibration/record`。每次分析自动把预测落库（`.data/calibration.json`），事后回填真实涨跌即可计算 **Brier 分 + 可靠性曲线 + 实际命中率**；analyze 页新增「校准闭环·可靠性」卡片。
+
+### 📊 回测体系扩建（组合 / 建议忠实 / 涨跌停真实性）
+- **组合级回测引擎**：新增 `src/lib/portfolioBacktest.ts` + `/api/backtest/portfolio` + `/backtest` 页。按截面排名每 N 日轮动持有 top-K，输出净值曲线 + CAGR + 最大回撤 + 年化夏普 + 换手率 + 交易流水（纯 SVG 可视化）。严格防未来函数。
+- **建议忠实回测框架**：新增 `src/lib/recommendationBacktest.ts` + `/api/backtest/recommendation` + `/backtest/strategy` 页。把模型买入 / 卖出价区间执行逻辑放到多股票 + 样本外滚动 + 涨跌停撮合 + 手续费下跑，统计真实胜率 / 期望 / 盈亏比，对比买入持有并给 z 检验显著性结论。
+- **A 股涨跌停撮合真实性**：`priceLimitFraction` 主板 ±10 / ST ±5 / 创业科创 ±20 / 北交 ±30，**涨停买不进、跌停卖不出、停牌顺延**。
+- **单只回测对比基准**：analyze 胜率区新增策略累计收益 vs 同期买入持有、超额 pp、对 50% 的单比例 z 检验显著性徽章（样本 < 30 明确标"不显著"）。
+
+### 🔍 全市场智能挖掘高吞吐管线
+- **两段漏斗加速 (P1)**：`miningScan.ts` clist 翻页多取 `f6/f8/f10`（成交额 / 换手 / 量比，零额外请求）→ 先粗筛再拉 K 线，冷扫 K 线请求量降约 5–10×；每日全量池用"仅跳停牌"保覆盖粗筛。
+- **批量 K 线原语 (P2)**：`unified.ts` 新增 `getKlinesBatch()`，有界并发 + 缓存 + 单只重试，baidu-first 免封源优先。
+- **卖方一致预期 (P3)**：`eastmoney.ts` 新增 `getEmAnalystConsensus()`，聚合研报看多占比 / 一致 EPS / 目标价 / 上行空间，24h 缓存，单只 8s 超时降级 + `anySucceeded` 区分"源宕机"与"确实无数据"。
+- **截面相对排名 (F3)**：`MiningResult` 新增 `percentile`，用 `rankNormalize` 给出每只在"综合分 / 预期收益"上的全市场排名。
+
+### 📝 文档
+- **README 全面重写**：产品 / 市场 / 设计主导，新增"为什么是 Serenity"对比表、核心能力总览、逐页详细使用说明、API 速查表、环境变量与诚实准确性边界说明。
+- **CHANGELOG**：补齐 0.4.4 之后到本版本的全部更新。
+
+### ✅ 质量
+- 全量 `tsc --noEmit` 通过；生产 `next build` 通过（全部路由编译成功）；新增引擎均通过离线烟雾测试。
+
+---
+
 ## [0.4.4] - 2026-06-18
 
 ### 🐛 关键崩溃修复 (Critical Bug Fix)

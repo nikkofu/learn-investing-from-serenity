@@ -24,10 +24,30 @@ export interface TradeAction {
 
 export interface BacktestResult {
   winRate: number;        // 胜率 %
+  sharpe: number;         // 夏普比率（按 252 交易日年化，无风险利率取 0）
   strategyReturn: number; // 策略累计收益率 %
   stockReturn: number;    // 个股同期收益率 %
   trades: TradeAction[];  // 历史交易点记录
   history: { date: string; strategyWorth: number; stockWorth: number }[]; // 每日资产净值折线图
+}
+
+/**
+ * 由策略净值曲线计算年化夏普比率。
+ * 口径：日收益 r_t = NAV_t / NAV_{t-1} - 1（含空仓的 0 收益日，反映真实持仓占用），
+ * 无风险利率取 0，年化系数 sqrt(252)。样本标准差用 n-1（无偏）。
+ */
+function annualizedSharpe(history: { strategyWorth: number }[]): number {
+  const rets: number[] = [];
+  for (let k = 1; k < history.length; k++) {
+    const prev = history[k - 1].strategyWorth;
+    if (prev > 0) rets.push(history[k].strategyWorth / prev - 1);
+  }
+  if (rets.length < 2) return 0;
+  const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
+  const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
+  const sd = Math.sqrt(variance);
+  if (sd <= 0) return 0;
+  return Number(((mean / sd) * Math.sqrt(252)).toFixed(2));
 }
 
 /**
@@ -165,7 +185,7 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
   const trades: TradeAction[] = [];
 
   if (candles.length < 25) {
-    return { winRate: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+    return { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
   }
 
   // 1. 预先计算均线 (MA20 和换手率 MA5/MA20)
@@ -301,6 +321,7 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
 
   return {
     winRate: Number(winRate.toFixed(1)),
+    sharpe: annualizedSharpe(history),
     strategyReturn: Number(strategyReturn.toFixed(2)),
     stockReturn: Number(stockReturn.toFixed(2)),
     trades,
@@ -329,20 +350,33 @@ export function runSerenityBacktest(candles: Candle[]): BacktestResult {
  */
 export function runChokepointMomentumBacktest(
   candles: Candle[],
-  chokepointScore: number
+  chokepointScore: number,
+  _opts: { code?: string } = {}
 ): BacktestResult {
   const history: BacktestResult["history"] = [];
   const trades: TradeAction[] = [];
 
   if (candles.length < 25) {
-    return { winRate: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+    return { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
   }
 
-  // 2. 预先计算均线 (MA20 和换手率 MA5/MA20)
+  // 2. 预先计算均线 (MA20 和量能 MA5/MA20)
   const prices = candles.map((c) => c.close);
   const ma20List: number[] = [];
   const volMa5: number[] = [];
   const volMa20: number[] = [];
+
+  // 量能代理：换手率优先（有则用，保持既有口径不变）；当数据源不返回换手率时（如新浪日K
+  // 只给 OHLCV，换手率恒为 0）降级用成交量。买点用的是「比值」t5/t20——换手率=成交量/流通
+  // 股本，流通股本在窗口内视为常数会在比值里约掉，故成交量比值与换手率比值数学等价。这样
+  // 任一数据源（含无换手率的源）都能稳定产出买点，避免「同一算法因数据源不同→0 笔交易/无 B 信号」。
+  const volProxy = candles.map((c) =>
+    c.turnoverPct && c.turnoverPct > 0
+      ? c.turnoverPct
+      : c.volume && c.volume > 0
+        ? c.volume
+        : 1,
+  );
 
   for (let i = 0; i < candles.length; i++) {
     if (i < 19) {
@@ -352,17 +386,16 @@ export function runChokepointMomentumBacktest(
       ma20List.push(sum / 20);
     }
 
-    const turnovers = candles.slice(0, i + 1).map(c => c.turnoverPct || 1);
     if (i < 4) {
-      volMa5.push(turnovers[i]);
+      volMa5.push(volProxy[i]);
     } else {
-      const sum = turnovers.slice(i - 4, i + 1).reduce((s, t) => s + t, 0);
+      const sum = volProxy.slice(i - 4, i + 1).reduce((s, t) => s + t, 0);
       volMa5.push(sum / 5);
     }
     if (i < 19) {
-      volMa20.push(turnovers[i]);
+      volMa20.push(volProxy[i]);
     } else {
-      const sum = turnovers.slice(i - 19, i + 1).reduce((s, t) => s + t, 0);
+      const sum = volProxy.slice(i - 19, i + 1).reduce((s, t) => s + t, 0);
       volMa20.push(sum / 20);
     }
   }
@@ -490,10 +523,67 @@ export function runChokepointMomentumBacktest(
 
   return {
     winRate: Number(winRate.toFixed(1)),
+    sharpe: annualizedSharpe(history),
     strategyReturn: Number(strategyReturn.toFixed(2)),
     stockReturn: Number(stockReturn.toFixed(2)),
     trades,
     history,
+  };
+}
+
+/** 样本外滚动命中率结果（无未来函数）。 */
+export interface WalkForwardWinRate {
+  winRate: number;   // 命中率 %（前瞻收益 > 阈值的比例）
+  sampleSize: number; // 留出尾段内触发的信号数
+  horizon: number;    // 前瞻评估天数
+  avgForwardPct: number; // 命中样本所在全部信号的平均前瞻收益 %
+}
+
+/**
+ * 样本外（walk-forward）命中率：消除「用当前快照回灌历史」的未来函数。
+ *
+ * - 入场信号在第 t 日仅使用 ≤ t 的数据判定（20 日动量为正 且 收盘价 > MA20）；
+ * - 仅在**留出尾段**（默认后 40%）统计信号，避免被前段隐含调参污染；
+ * - 命中判定用 t→t+horizon 的前瞻收益（这是相对 t 的“未来”，正是要度量的预测力），
+ *   且 t+horizon 不得越界。
+ * 这给出一个比样本内回测更诚实、可横向比较的“成功率”代理。
+ */
+export function runWalkForwardWinRate(
+  candles: Candle[],
+  opts: { lookback?: number; horizon?: number; holdoutFraction?: number; winThresholdPct?: number } = {},
+): WalkForwardWinRate {
+  const lookback = opts.lookback ?? 20;
+  const horizon = opts.horizon ?? 5;
+  const holdoutFraction = opts.holdoutFraction ?? 0.4;
+  const winThreshold = (opts.winThresholdPct ?? 0) / 100;
+  const N = candles.length;
+  const empty: WalkForwardWinRate = { winRate: 0, sampleSize: 0, horizon, avgForwardPct: 0 };
+  if (N < lookback + horizon + 10) return empty;
+
+  const closes = candles.map((c) => c.close);
+  const start = Math.max(lookback, Math.floor(N * (1 - holdoutFraction)));
+  const end = N - horizon; // 需要 t+horizon 有效
+
+  let wins = 0;
+  let count = 0;
+  let sumForward = 0;
+  for (let t = start; t < end; t++) {
+    // 仅用 ≤ t 的数据构造信号，杜绝未来函数。
+    const ma20 = closes.slice(t - lookback + 1, t + 1).reduce((s, v) => s + v, 0) / lookback;
+    const momentum = closes[t] / closes[t - lookback] - 1;
+    const entry = momentum > 0 && closes[t] > ma20;
+    if (!entry) continue;
+    const forward = closes[t + horizon] / closes[t] - 1;
+    sumForward += forward;
+    count++;
+    if (forward > winThreshold) wins++;
+  }
+  if (count === 0) return { ...empty, sampleSize: 0 };
+  return {
+    winRate: Number(((wins / count) * 100).toFixed(1)),
+    sampleSize: count,
+    horizon,
+    avgForwardPct: Number(((sumForward / count) * 100).toFixed(2)),
   };
 }
 
