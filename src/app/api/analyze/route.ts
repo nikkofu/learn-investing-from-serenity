@@ -13,8 +13,38 @@ import { ndjsonStream } from "@/lib/stream";
 import { NarrativeJsonSplitter } from "@/lib/split";
 import type { ChokepointAssessment } from "@/lib/types";
 import { globalCache } from "@/lib/cache";
+import { loadConfig } from "@/lib/config";
+import { getCacheTTL } from "@/lib/cacheSettings";
+import { getPersistent, setPersistent, fingerprint } from "@/lib/llmCache";
+import {
+  extractStatic,
+  mergeStaticDynamic,
+  runDynamicOverlay,
+  STATIC_PROMPT_VERSION,
+  type StaticAnalysis,
+} from "@/lib/analysisCache";
 
 export const dynamic = "force-dynamic";
+
+const ANALYZE_CACHE_NS = "analyze";
+
+/** 完整（缓存未命中）管线展示的阶段。 */
+const FULL_STAGES = [
+  { key: "quote", label: "获取行情数据（接口调用）" },
+  { key: "reason", label: "AI 瓶颈点五因子推理（静态层）" },
+  { key: "summary", label: "结构化汇总与打分" },
+  { key: "vote", label: "自洽投票（多次打分取中位降方差）" },
+  { key: "critic", label: "批判者复核（证伪 / 反方尽调）" },
+  { key: "judge", label: "裁判调和（最终结论与置信度）" },
+];
+
+/** 缓存命中时展示的阶段：跳过昂贵推理，只刷新动态层。 */
+const CACHED_STAGES = [
+  { key: "quote", label: "获取行情数据（接口调用）" },
+  { key: "cacheLoad", label: "⚡ 命中静态基本面缓存（秒级回放）" },
+  { key: "dynamic", label: "实时行情动态推理（关注度/催化/区间）" },
+  { key: "summary", label: "结构化汇总与打分" },
+];
 
 // 基于股票代码/名称，从本地知识库中动态匹配 Serenity 关联主题与一手推文
 async function findSerenityKnowledge(code: string, name: string) {
@@ -129,7 +159,7 @@ async function findSerenityKnowledge(code: string, name: string) {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { code?: string; context?: string };
+  const body = (await req.json()) as { code?: string; context?: string; refresh?: boolean };
   const code = body.code?.trim();
   if (!code || !/^\d{6}$/.test(code)) {
     return NextResponse.json({ error: "请提供 6 位股票代码" }, { status: 400 });
@@ -156,91 +186,132 @@ export async function POST(req: Request) {
     // Stage 1.5: 检索匹配 Serenity 本地知识库
     const matchedKnowledge = await findSerenityKnowledge(code, quote.name);
 
-    // Stage 2: stream the LLM's chokepoint reasoning token-by-token.
-    const { system, user } = buildAnalyzePrompt({
-      quote,
-      candles,
-      stats,
-      extraContext: body.context,
-      matchedKnowledge,
-    });
-    const tReasonStart = performance.now();
-    send({ type: "stage", key: "reason", status: "start" });
-    const splitter = new NarrativeJsonSplitter();
-    // Advance reason -> summary as soon as the (hidden) JSON phase begins, so the
-    // UI never looks stuck while the model silently writes the structured result.
-    let advanced = false;
-    let reasonElapsed = 0;
-    const advanceToSummary = () => {
-      if (advanced) return;
-      advanced = true;
-      reasonElapsed = performance.now() - tReasonStart;
-      send({ type: "stage", key: "reason", status: "done", elapsedMs: reasonElapsed });
-      send({ type: "stage", key: "summary", status: "start" });
-    };
-    try {
-      for await (const delta of chatStream(system, user)) {
-        if (delta.kind === "reasoning") {
-          send({ type: "token", kind: "reasoning", text: delta.text });
-          continue;
-        }
-        // Stream readable reasoning (content) and the raw JSON phase
-        // (structured) on separate channels, so the structured phase still
-        // shows live progress without polluting the readable console.
-        const { narrative, structured } = splitter.push(delta.text);
-        if (narrative) send({ type: "token", kind: "content", text: narrative });
-        if (structured) send({ type: "token", kind: "structured", text: structured });
-        if (splitter.inJsonPhase) advanceToSummary();
-      }
-      const tail = splitter.end();
-      if (tail) send({ type: "token", kind: "content", text: tail });
-    } catch (e) {
-      if (e instanceof LLMNotConfiguredError) {
-        send({ type: "error", status: 412, message: e.message });
-      } else {
-        send({ type: "error", message: `AI 分析失败：${e instanceof Error ? e.message : e}` });
-      }
-      return;
-    }
-    advanceToSummary();
+    // ── 静态/动态拆分：静态层（基本面/产业链/护城河，一周内不变）走持久化缓存，
+    // 命中即跳过昂贵的主推理 + 自洽投票 + Critic + Judge；动态层（关注度/催化/买卖区间）
+    // 每次都用当日行情实时刷新。知识库变化 / 自定义 context / 提示词版本变化都会让 key 改变从而自动失效。
+    const cfg = await loadConfig();
+    const model = cfg?.model ?? "unknown";
+    const keyFp = fingerprint({ knowledge: matchedKnowledge, context: body.context ?? "" });
+    const cacheKey = `v${STATIC_PROMPT_VERSION}:${code}:${model}:${keyFp}`;
+    const ttlMs = getCacheTTL("analysisFundamental", true);
+    const cached = body.refresh ? null : await getPersistent<StaticAnalysis>(ANALYZE_CACHE_NS, cacheKey);
+    const usingCache = Boolean(cached && cached.value.promptVersion === STATIC_PROMPT_VERSION);
 
-    // Stage 3: parse + normalize into the structured assessment.
-    const tSummaryStart = performance.now();
-    try {
-      const raw = parseJsonObject<Partial<ChokepointAssessment>>(splitter.jsonText);
-      const assessment = finalizeAssessment(raw);
-      
-      // 解析 BOM 和六步工作流额外数据
-      if (raw.bomPosition) {
-        assessment.bomPosition = {
-          nodeName: raw.bomPosition.nodeName || "",
-          bomRatio: raw.bomPosition.bomRatio || "",
-          role: raw.bomPosition.role || "",
-        };
-      } else {
-        assessment.bomPosition = null;
+    send({ type: "stages", stages: usingCache ? CACHED_STAGES : FULL_STAGES });
+
+    let assessment: ChokepointAssessment;
+    let reasonElapsed = 0;
+    let positioning = "";
+
+    if (usingCache && cached) {
+      // ── 命中缓存路径：秒级回放静态叙事 + 一次轻量动态推理。
+      const staticAnalysis = cached.value;
+      const tCache = performance.now();
+      send({ type: "stage", key: "cacheLoad", status: "start" });
+      if (staticAnalysis.narrative) send({ type: "token", kind: "content", text: staticAnalysis.narrative });
+      send({ type: "stage", key: "cacheLoad", status: "done", elapsedMs: performance.now() - tCache });
+
+      const tDyn = performance.now();
+      send({ type: "stage", key: "dynamic", status: "start" });
+      const overlay = await runDynamicOverlay({ quote, stats, staticAnalysis });
+      const merged = mergeStaticDynamic(staticAnalysis, overlay);
+      assessment = merged.assessment;
+      positioning = merged.positioning;
+      reasonElapsed = performance.now() - tDyn;
+      send({ type: "stage", key: "dynamic", status: "done", elapsedMs: reasonElapsed });
+      send({ type: "stage", key: "summary", status: "start" });
+    } else {
+      // ── 缓存未命中路径：跑完整管线（与原行为一致），算完后把静态层落盘。
+      const { system, user } = buildAnalyzePrompt({
+        quote,
+        candles,
+        stats,
+        extraContext: body.context,
+        matchedKnowledge,
+      });
+      const tReasonStart = performance.now();
+      send({ type: "stage", key: "reason", status: "start" });
+      const splitter = new NarrativeJsonSplitter();
+      let narrativeAcc = "";
+      let advanced = false;
+      const advanceToSummary = () => {
+        if (advanced) return;
+        advanced = true;
+        reasonElapsed = performance.now() - tReasonStart;
+        send({ type: "stage", key: "reason", status: "done", elapsedMs: reasonElapsed });
+        send({ type: "stage", key: "summary", status: "start" });
+      };
+      try {
+        for await (const delta of chatStream(system, user)) {
+          if (delta.kind === "reasoning") {
+            send({ type: "token", kind: "reasoning", text: delta.text });
+            continue;
+          }
+          const { narrative, structured } = splitter.push(delta.text);
+          if (narrative) {
+            narrativeAcc += narrative;
+            send({ type: "token", kind: "content", text: narrative });
+          }
+          if (structured) send({ type: "token", kind: "structured", text: structured });
+          if (splitter.inJsonPhase) advanceToSummary();
+        }
+        const tail = splitter.end();
+        if (tail) {
+          narrativeAcc += tail;
+          send({ type: "token", kind: "content", text: tail });
+        }
+      } catch (e) {
+        if (e instanceof LLMNotConfiguredError) {
+          send({ type: "error", status: 412, message: e.message });
+        } else {
+          send({ type: "error", message: `AI 分析失败：${e instanceof Error ? e.message : e}` });
+        }
+        return;
       }
-      
-      if (raw.workflowSteps) {
-        assessment.workflowSteps = raw.workflowSteps.map((s) => ({
-          step: Number(s.step),
-          title: s.title || "",
-          content: s.content || "",
-        }));
-      } else {
-        assessment.workflowSteps = [];
+      advanceToSummary();
+
+      let computed: ChokepointAssessment;
+      try {
+        const raw = parseJsonObject<Partial<ChokepointAssessment>>(splitter.jsonText);
+        computed = finalizeAssessment(raw);
+
+        // 解析 BOM 和六步工作流额外数据
+        if (raw.bomPosition) {
+          computed.bomPosition = {
+            nodeName: raw.bomPosition.nodeName || "",
+            bomRatio: raw.bomPosition.bomRatio || "",
+            role: raw.bomPosition.role || "",
+          };
+        } else {
+          computed.bomPosition = null;
+        }
+
+        if (raw.workflowSteps) {
+          computed.workflowSteps = raw.workflowSteps.map((s) => ({
+            step: Number(s.step),
+            title: s.title || "",
+            content: s.content || "",
+          }));
+        } else {
+          computed.workflowSteps = [];
+        }
+      } catch {
+        send({
+          type: "error",
+          message: "AI 输出解析失败（模型未返回有效 JSON），可重试或换一个能力更强的模型。",
+        });
+        return;
       }
-      
+
       // Stage 3.5: 自洽投票（self-consistency）：多次独立打分取每因子中位数，降单趟方差。
-      // 通过 SELF_CONSISTENCY_RUNS 控制额外采样次数（默认 2，设 0 关闭）。失败即降级保留主趟。
       try {
         const extraRuns = Number(process.env.SELF_CONSISTENCY_RUNS ?? 2);
         if (Number.isFinite(extraRuns) && extraRuns > 0) {
           send({ type: "stage", key: "vote", status: "start" });
-          const vote = await runSelfConsistencyVote({ quote, stats, assessment, extraRuns });
-          assessment.factors = vote.factors;
-          assessment.totalScore = vote.totalScore;
-          assessment.selfConsistency = vote.info;
+          const vote = await runSelfConsistencyVote({ quote, stats, assessment: computed, extraRuns });
+          computed.factors = vote.factors;
+          computed.totalScore = vote.totalScore;
+          computed.selfConsistency = vote.info;
           send({ type: "stage", key: "vote", status: "done" });
         }
       } catch (e) {
@@ -248,23 +319,22 @@ export async function POST(req: Request) {
         console.warn("[analyze] 自洽投票降级（保留单趟打分）:", e instanceof Error ? e.message : e);
       }
 
-      // Stage 4: Critic(Reflection) → Judge 复核工作流（对标 Google agentic 的反思/裁判模式）。
-      // 生成器初评 → 批判者证伪 → 裁判调和。失败即降级保留初评，绝不阻断主流程。
+      // Stage 4: Critic(Reflection) → Judge 复核工作流。
       try {
         send({ type: "stage", key: "critic", status: "start" });
-        const critique = await runCriticReview({ quote, stats, assessment });
+        const critique = await runCriticReview({ quote, stats, assessment: computed });
         send({ type: "stage", key: "critic", status: "done" });
         send({ type: "stage", key: "judge", status: "start" });
-        const review = await runChokepointReview({ quote, stats, assessment, critique });
-        assessment.factors = review.factors;
-        assessment.totalScore = review.totalScore;
-        assessment.verdict = review.verdict;
-        assessment.recommendedBuy = review.recommendedBuy;
-        if (review.buyPriceRange !== undefined) assessment.buyPriceRange = review.buyPriceRange;
-        if (review.sellPriceRange !== undefined) assessment.sellPriceRange = review.sellPriceRange;
-        assessment.finalConfidence = review.finalConfidence;
-        assessment.critique = review.critique;
-        assessment.adjusted = review.adjusted;
+        const review = await runChokepointReview({ quote, stats, assessment: computed, critique });
+        computed.factors = review.factors;
+        computed.totalScore = review.totalScore;
+        computed.verdict = review.verdict;
+        computed.recommendedBuy = review.recommendedBuy;
+        if (review.buyPriceRange !== undefined) computed.buyPriceRange = review.buyPriceRange;
+        if (review.sellPriceRange !== undefined) computed.sellPriceRange = review.sellPriceRange;
+        computed.finalConfidence = review.finalConfidence;
+        computed.critique = review.critique;
+        computed.adjusted = review.adjusted;
         send({ type: "stage", key: "judge", status: "done" });
       } catch (e) {
         send({ type: "stage", key: "critic", status: "done" });
@@ -272,70 +342,81 @@ export async function POST(req: Request) {
         console.warn("[analyze] 复核工作流降级（保留初评）:", e instanceof Error ? e.message : e);
       }
 
-      const chips = calculateChipDistribution(candles, quote.price);
-      // 策略注册表：一次跑全部已登记策略，前端可下拉切换；默认策略用于胜率口径与首屏 B/S。
-      const strategies = runAllStrategies(candles, { chokepointScore: assessment.totalScore, code: quote.code });
-      const defaultBacktest = pickDefaultResult(strategies)!;
-      const traditionalBacktest = strategies.find((s) => s.meta.id === "traditional-ma")?.result ?? defaultBacktest;
-      const walkForward = runWalkForwardWinRate(candles);
-      assessment.winRate = deriveWinRate(walkForward, defaultBacktest);
-      const technical = analyzeTechnicalPatterns(candles, quote.price, chips);
-      const projections = generatePriceProjection(candles, assessment.totalScore);
+      assessment = computed;
 
-      // B3 校准闭环：把本次预测落库，并附带当前全局校准摘要（Brier/可靠性）。失败不阻断。
-      let calibration: CalibrationSummary | null = null;
+      // 把静态层（基本面/产业链/工作流叙事）落盘，供后续一周内秒级命中。失败不阻断。
       try {
-        await recordPrediction({
-          code: quote.code,
-          name: quote.name,
-          date: new Date().toISOString().slice(0, 10),
-          totalScore: assessment.totalScore,
-          recommendedBuy: assessment.recommendedBuy ?? false,
-          confidence: assessment.finalConfidence ?? assessment.totalScore / 100,
-          winRate: assessment.winRate?.value,
-        });
-        calibration = await getCalibrationSummary();
+        const staticPayload = extractStatic(assessment, narrativeAcc, matchedKnowledge?.themeName);
+        await setPersistent(ANALYZE_CACHE_NS, cacheKey, staticPayload, ttlMs);
       } catch (e) {
-        console.warn("[analyze] 校准记录失败:", e instanceof Error ? e.message : e);
+        console.warn("[analyze] 静态层缓存写入失败:", e instanceof Error ? e.message : e);
       }
-
-      const summaryElapsed = performance.now() - tSummaryStart;
-      const totalElapsed = performance.now() - tStart;
-
-      send({ 
-        type: "result", 
-        quote, 
-        stats, 
-        assessment, 
-        matchedKnowledge,
-        calibration,
-        quant: { 
-          chips, 
-          backtest: defaultBacktest, 
-          backtests: {
-            traditional: traditionalBacktest,
-            chokepoint: defaultBacktest
-          },
-          strategies,
-          defaultStrategyId: DEFAULT_STRATEGY_ID,
-          technical, 
-          candles,
-          projections
-        },
-        timings: {
-          quoteMs: quoteElapsed,
-          reasonMs: reasonElapsed,
-          summaryMs: summaryElapsed,
-          totalMs: totalElapsed
-        }
-      });
-      send({ type: "stage", key: "summary", status: "done", elapsedMs: summaryElapsed });
-      send({ type: "done" });
-    } catch {
-      send({
-        type: "error",
-        message: "AI 输出解析失败（模型未返回有效 JSON），可重试或换一个能力更强的模型。",
-      });
     }
+
+    // ── 共享尾段：量化计算 + 校准 + 结果下发。
+    const tSummaryStart = performance.now();
+    const chips = calculateChipDistribution(candles, quote.price);
+    const strategies = runAllStrategies(candles, { chokepointScore: assessment.totalScore, code: quote.code });
+    const defaultBacktest = pickDefaultResult(strategies)!;
+    const traditionalBacktest = strategies.find((s) => s.meta.id === "traditional-ma")?.result ?? defaultBacktest;
+    const walkForward = runWalkForwardWinRate(candles);
+    assessment.winRate = deriveWinRate(walkForward, defaultBacktest);
+    const technical = analyzeTechnicalPatterns(candles, quote.price, chips);
+    const projections = generatePriceProjection(candles, assessment.totalScore);
+
+    let calibration: CalibrationSummary | null = null;
+    try {
+      await recordPrediction({
+        code: quote.code,
+        name: quote.name,
+        date: new Date().toISOString().slice(0, 10),
+        totalScore: assessment.totalScore,
+        recommendedBuy: assessment.recommendedBuy ?? false,
+        confidence: assessment.finalConfidence ?? assessment.totalScore / 100,
+        winRate: assessment.winRate?.value,
+      });
+      calibration = await getCalibrationSummary();
+    } catch (e) {
+      console.warn("[analyze] 校准记录失败:", e instanceof Error ? e.message : e);
+    }
+
+    const summaryElapsed = performance.now() - tSummaryStart;
+    const totalElapsed = performance.now() - tStart;
+
+    send({
+      type: "result",
+      quote,
+      stats,
+      assessment,
+      matchedKnowledge,
+      calibration,
+      cache: {
+        hit: usingCache,
+        createdAt: usingCache && cached ? cached.createdAt : Date.now(),
+        ttlMs,
+        positioning,
+      },
+      quant: {
+        chips,
+        backtest: defaultBacktest,
+        backtests: {
+          traditional: traditionalBacktest,
+          chokepoint: defaultBacktest,
+        },
+        strategies,
+        defaultStrategyId: DEFAULT_STRATEGY_ID,
+        technical,
+        candles,
+        projections,
+      },
+      timings: {
+        quoteMs: quoteElapsed,
+        reasonMs: reasonElapsed,
+        summaryMs: summaryElapsed,
+        totalMs: totalElapsed,
+      },
+    });
+    send({ type: "stage", key: "summary", status: "done", elapsedMs: summaryElapsed });
+    send({ type: "done" });
   });
 }

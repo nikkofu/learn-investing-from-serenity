@@ -22,7 +22,19 @@ export type CacheCategory =
   | "financials"
   | "profile"
   | "analyst"
-  | "search";
+  | "search"
+  // ↓ LLM 推理结果的持久化缓存（落盘到 .data/llm-cache，默认按「周」计）。
+  // 这些是相对固定、一周内几乎不变的"静态层"分析，单独长缓存以省时省费。
+  | "analysisFundamental"
+  | "sectorFundamental"
+  | "trendMap";
+
+/** 走持久化 LLM 缓存（.data/llm-cache）而非内存缓存的类别。 */
+export const LLM_CACHE_CATEGORIES = [
+  "analysisFundamental",
+  "sectorFundamental",
+  "trendMap",
+] as const satisfies readonly CacheCategory[];
 
 export interface TTLPair {
   /** 交易时段（盘中）TTL，毫秒 */
@@ -34,6 +46,7 @@ export interface TTLPair {
 const S = 1000;
 const M = 60 * S;
 const H = 60 * M;
+const D = 24 * H;
 
 /** 各类别默认 TTL（毫秒）。 */
 export const CACHE_DEFAULTS: Record<CacheCategory, TTLPair> = {
@@ -46,6 +59,10 @@ export const CACHE_DEFAULTS: Record<CacheCategory, TTLPair> = {
   profile: { active: 10 * M, inactive: 6 * H },
   analyst: { active: 6 * H, inactive: 24 * H },
   search: { active: 5 * M, inactive: 30 * M },
+  // 基本面/产业链推理一周内几乎不变，盘中/休市同为 7 天。
+  analysisFundamental: { active: 7 * D, inactive: 7 * D },
+  sectorFundamental: { active: 7 * D, inactive: 7 * D },
+  trendMap: { active: 7 * D, inactive: 7 * D },
 };
 
 /** 各类别的中文标签与说明（用于设置界面）。 */
@@ -59,6 +76,9 @@ export const CACHE_LABELS: Record<CacheCategory, { label: string; desc: string }
   profile: { label: "个股基本面", desc: "PE/PB/市值等基本面字段" },
   analyst: { label: "卖方一致预期", desc: "研报看多占比/一致 EPS/目标价，日级更新" },
   search: { label: "搜索", desc: "股票代码/名称搜索结果" },
+  analysisFundamental: { label: "个股基本面推理（LLM）", desc: "瓶颈点/护城河/产业链等静态层 AI 推理，一周不变长缓存" },
+  sectorFundamental: { label: "板块基本面推理（LLM）", desc: "行业瓶颈/产业链结构等静态层 AI 推理，长缓存" },
+  trendMap: { label: "趋势产业链图谱（LLM）", desc: "趋势→供应链→BOM 卡位图谱，几乎全静态，长缓存" },
 };
 
 export const CACHE_CATEGORIES = Object.keys(CACHE_DEFAULTS) as CacheCategory[];

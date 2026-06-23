@@ -1,6 +1,14 @@
 import { loadCurated, loadPostsDigest } from "@/lib/knowledge";
+import { mapPostToSectors } from "@/lib/postMapping";
 
 export const dynamic = "force-dynamic";
+
+function formatMetric(n?: number): string {
+  if (!n || n <= 0) return "0";
+  if (n >= 10000) return `${(n / 10000).toFixed(1)}w`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
 
 export default async function MethodologyPage() {
   const [curated, posts] = await Promise.all([loadCurated(), loadPostsDigest()]);
@@ -68,27 +76,105 @@ export default async function MethodologyPage() {
 
       {posts.available && (
         <section>
-          <h2 className="mb-3 text-lg font-semibold">
+          <h2 className="mb-1 text-lg font-semibold">
             近期 X 发言<span className="ml-2 text-xs font-normal text-[var(--faint)]">（共收录 {posts.count} 条）</span>
           </h2>
-          <div className="space-y-3">
-            {posts.recent.map((p) => (
-              <a
-                key={p.id}
-                href={p.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 transition hover:border-[var(--accent-line)] hover:bg-[var(--hover)]"
-              >
-                <div className="mb-1 flex items-center gap-2 text-xs text-[var(--faint)]">
-                  <span>{p.date}</span>
-                  {p.tickers.slice(0, 6).map((t) => (
-                    <span key={t} className="font-mono text-[var(--accent)]">${t}</span>
-                  ))}
+          <p className="mb-3 text-xs text-[var(--faint)]">
+            原文全文展示；每条已映射到知识库「主题 → A 股瓶颈点」表中最相关的板块/个股，点击可直接跳转诊断分析。
+          </p>
+          <div className="space-y-4">
+            {posts.recent.map((p) => {
+              const mapping = mapPostToSectors(p, curated.themes);
+              const scannerHref = `/scanner?codes=${mapping.codes.join(",")}&title=${encodeURIComponent(
+                `Serenity ${p.date} 发言相关瓶颈点`,
+              )}`;
+              return (
+                <div
+                  key={p.id}
+                  className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5"
+                >
+                  <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--faint)]">
+                    <span className="font-medium text-[var(--muted)]">{p.date}</span>
+                    {p.tickers.length > 0 && (
+                      <span className="flex flex-wrap gap-1">
+                        {p.tickers.map((t) => (
+                          <span key={t} className="font-mono text-[var(--accent)]">${t}</span>
+                        ))}
+                      </span>
+                    )}
+                    {p.metrics && (
+                      <span className="flex items-center gap-2 text-[var(--faint)]">
+                        <span title="点赞">♥ {formatMetric(p.metrics.likes)}</span>
+                        <span title="转发">↻ {formatMetric(p.metrics.reposts)}</span>
+                        {!!p.metrics.views && <span title="浏览">👁 {formatMetric(p.metrics.views)}</span>}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="whitespace-pre-line text-sm leading-6 text-[var(--text)]">{p.text}</p>
+
+                  {mapping.themes.length > 0 ? (
+                    <div className="mt-4 space-y-3 border-t border-[var(--border)] pt-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-[var(--accent)]">相关 A 股板块</span>
+                        {mapping.themes.map((t) => (
+                          <span
+                            key={t.name}
+                            className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] text-[var(--accent)]"
+                          >
+                            {t.name}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {mapping.themes
+                          .flatMap((t) => t.companies)
+                          .filter((c, i, arr) => arr.findIndex((x) => x.code === c.code) === i)
+                          .slice(0, 12)
+                          .map((c) => (
+                            <a
+                              key={c.code}
+                              href={`/analyze?code=${c.code}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={`${c.segment} · ${c.note}`}
+                              className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-2.5 py-1 text-xs transition hover:border-[var(--accent-line)] hover:bg-[var(--hover)]"
+                            >
+                              <span className="font-medium text-[var(--text)]">{c.name}</span>{" "}
+                              <span className="font-mono text-[var(--faint)]">{c.code}</span>
+                            </a>
+                          ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs text-[var(--faint)]">
+                      暂无直接对应的 A 股瓶颈点板块
+                    </p>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
+                    <a
+                      href={p.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[var(--muted)] underline-offset-2 hover:text-[var(--accent)] hover:underline"
+                    >
+                      查看原文 ↗
+                    </a>
+                    {mapping.codes.length > 0 && (
+                      <a
+                        href={scannerHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[var(--accent)] underline-offset-2 hover:underline"
+                      >
+                        在扫描器批量分析这 {mapping.codes.length} 只 →
+                      </a>
+                    )}
+                  </div>
                 </div>
-                <p className="whitespace-pre-line text-sm leading-6 text-[var(--text)] line-clamp-4">{p.text}</p>
-              </a>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

@@ -210,6 +210,89 @@ ${extraContext ? `\n补充背景：${extraContext}\n` : ""}
   return { system, user };
 }
 
+/**
+ * 动态层（快变）提示词：给定**已缓存的静态层基本面结论** + **当日实时行情**，
+ * 只重新推理与价格/行情强相关的部分：`attention`（关注度/估值是否被消化）、
+ * `catalyst`（短期催化时点）两个因子，以及买卖价区间、是否建议买入、当前区位点评。
+ *
+ * 这是一个**极小**的提示词（不重复跑昂贵的产业链/护城河深度推理），用于在静态
+ * 缓存命中时以一次轻量调用刷新动态结论 —— 省时省费的关键。
+ */
+export function buildDynamicAnalyzePrompt(args: {
+  quote: StockQuote;
+  stats: ReturnType<typeof import("./market").deriveStats>;
+  staticDigest: {
+    thesis: string;
+    verdict: string;
+    /** 静态层已定的 demand/supply/valueCapture 打分（仅供锚定，不要改动）。 */
+    staticFactors: { key: ChokepointFactorKey; score: number; rationale: string }[];
+    bomPosition?: { nodeName: string; bomRatio: string; role: string } | null;
+    themeName?: string;
+  };
+}) {
+  const { quote, stats, staticDigest } = args;
+  const dynDoc = CHOKEPOINT_FACTORS.filter((f) => f.key === "attention" || f.key === "catalyst")
+    .map((f) => `- ${f.key} (${f.zh} ${f.en}, 权重 ${f.weight}): ${f.description}`)
+    .join("\n");
+
+  const system = `你是 Serenity（白毛股神）瓶颈点投资法的 AI 分析助手。${SERENITY_PROFILE.coreIdea}
+
+【任务】下面会给你该股票**已确定的静态基本面结论**（产业链/护城河/瓶颈定位，一周内不变，请直接采信、不要推翻），以及**当日最新行情**。你只需基于"当日行情 + 静态结论"，重新评估两个与价格强相关的动态因子并给出操作区间：
+${dynDoc}
+
+【强制证据引用】attention、catalyst 两个因子都必须给出 evidence：引用下方行情数据块里的具体字段与数值（如「区间位置=82%、换手率=3.1%、市盈率TTM=45.2」）；无支撑则填「无直接数据支撑」并相应保守打分。
+
+【区位与操作】结合静态瓶颈论点 + 当前价格在近 120 日区间位置（rangePosition）、换手率，给出：
+- buyPriceRange / sellPriceRange：买入与卖出/止盈价区间（如 xx.x-xx.x 元，不适用填空字串）；
+- recommendedBuy：是否建议当前买入；
+- positioning：一句话当前区位点评（如"底部刚启动可建底仓 / 高位追高需等回踩"）。
+
+请勿改动静态因子（demand/supply/valueCapture），也不要重写产业链分析。只输出一个 \`\`\`json 代码块：
+\`\`\`json
+{
+  "factors": [
+    {"key": "attention", "score": "0.0-5.0，精度0.1", "rationale": "...", "evidence": "引用行情数据或填『无直接数据支撑』"},
+    {"key": "catalyst", "score": "0.0-5.0，精度0.1", "rationale": "...", "evidence": "..."}
+  ],
+  "recommendedBuy": true,
+  "buyPriceRange": "如 xx.x-xx.x 元，无则空串",
+  "sellPriceRange": "如 xx.x-xx.x 元，无则空串",
+  "positioning": "一句话当前区位与仓位点评"
+}
+\`\`\``;
+
+  const dataBlock = {
+    名称: quote.name,
+    代码: quote.code,
+    最新价: quote.price,
+    涨跌幅百分比: quote.changePct,
+    市盈率TTM: quote.pe,
+    市净率: quote.pb,
+    换手率百分比: quote.turnoverPct,
+    近窗口统计: stats,
+  };
+
+  const user = `【已确定的静态基本面结论（请采信，勿推翻）】
+${JSON.stringify(
+    {
+      关联主题: staticDigest.themeName ?? "",
+      结论: staticDigest.verdict,
+      瓶颈论点: staticDigest.thesis,
+      BOM卡位: staticDigest.bomPosition ?? null,
+      静态因子打分: staticDigest.staticFactors,
+    },
+    null,
+    2,
+  )}
+
+【当日实时行情】
+${JSON.stringify(dataBlock, null, 2)}
+
+请只评估 attention、catalyst 两个动态因子，并给出操作区间与区位点评，用 \`\`\`json 代码块输出。`;
+
+  return { system, user };
+}
+
 /** Build messages for mapping a trend to an A-share supply chain + chokepoints. */
 export function buildMapPrompt(trend: string) {
   const system = `你是 Serenity（白毛股神）瓶颈点投资法的 AI 产业链分析助手。

@@ -35,6 +35,12 @@ interface AnalyzeResponse {
   } | null;
   quant?: any;
   calibration?: CalibrationSummary | null;
+  cache?: {
+    hit: boolean;
+    createdAt: number;
+    ttlMs: number;
+    positioning: string;
+  };
   timings?: {
     quoteMs: number;
     reasonMs: number;
@@ -116,7 +122,7 @@ function AnalyzeInner() {
     setRecentStocks([]);
   };
 
-  async function analyze(code: string, attempt = 1) {
+  async function analyze(code: string, attempt = 1, refresh = false) {
     setLoading(true);
     setRetryCount(attempt);
     setError("");
@@ -137,7 +143,7 @@ function AnalyzeInner() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, refresh }),
       });
       if (!(res.headers.get("content-type") || "").includes("ndjson")) {
         const json = await res.json().catch(() => ({}));
@@ -149,6 +155,10 @@ function AnalyzeInner() {
       await readNdjson(res, (ev) => {
         setRetryCount(1);
         switch (ev.type as string) {
+          case "stages":
+            // 后端根据是否命中静态缓存下发本次运行的阶段清单（命中/未命中两套不同）。
+            setStages((ev.stages as { key: string; label: string }[]).map((s) => ({ ...s, status: "pending" })));
+            break;
           case "stage":
             setStages((prev) => applyStageEvent(prev, ev.key as string, ev.status as "start" | "done", ev.elapsedMs as number | undefined));
             break;
@@ -171,6 +181,7 @@ function AnalyzeInner() {
               assessment: ev.assessment as ChokepointAssessment,
               quant: ev.quant,
               calibration: (ev.calibration ?? null) as CalibrationSummary | null,
+              cache: ev.cache as AnalyzeResponse["cache"],
               timings: ev.timings as any,
             });
             gotResult = true;
@@ -192,7 +203,7 @@ function AnalyzeInner() {
       if (attempt < 10) {
         console.warn(`第 ${attempt}/10 次尝试失败，准备重试: ${msg}`);
         await new Promise((resolve) => setTimeout(resolve, 1500));
-        return analyze(code, attempt + 1);
+        return analyze(code, attempt + 1, refresh);
       } else {
         setError(`${msg}（已重试 10 次，均告失败，请换一个能力更强的模型）`);
         setLoading(false);
@@ -329,9 +340,62 @@ function AnalyzeInner() {
         />
       )}
 
+      {data?.cache && (
+        <CacheBadge
+          cache={data.cache}
+          disabled={loading}
+          onRefresh={() => data?.quote && analyze(data.quote.code, 1, true)}
+        />
+      )}
+
       {preview && !data && <PreviewCard quote={preview.quote} stats={preview.stats} />}
 
       {data && <Result data={data} />}
+    </div>
+  );
+}
+
+function CacheBadge({
+  cache,
+  onRefresh,
+  disabled,
+}: {
+  cache: NonNullable<AnalyzeResponse["cache"]>;
+  onRefresh: () => void;
+  disabled?: boolean;
+}) {
+  // 相对时间依赖 Date.now()（非纯），在 effect 里计算，避免在渲染期调用不纯函数。
+  const [ageText, setAgeText] = useState("");
+  useEffect(() => {
+    const ageMs = Math.max(0, Date.now() - cache.createdAt);
+    setAgeText(
+      ageMs < 60 * 60 * 1000
+        ? `${Math.round(ageMs / 60000)} 分钟前`
+        : ageMs < 24 * 60 * 60 * 1000
+          ? `${Math.round(ageMs / 3600000)} 小时前`
+          : `${Math.round(ageMs / 86400000)} 天前`,
+    );
+  }, [cache.createdAt]);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-[2px] border border-[var(--border)] bg-[var(--inset)] px-3.5 py-2 text-xs">
+      <div className="flex items-center gap-2">
+        {cache.hit ? (
+          <span className="font-semibold text-emerald-500">⚡ 静态基本面缓存命中</span>
+        ) : (
+          <span className="font-semibold text-[var(--accent)]">🧠 全量推理（已写入静态缓存）</span>
+        )}
+        <span className="text-[var(--muted)]">
+          {cache.hit ? `基本面推理生成于 ${ageText}，本次仅实时刷新动态层（关注度/催化/买卖区间）` : "基本面推理一周内将直接秒级命中"}
+        </span>
+        {cache.positioning && <span className="text-[var(--faint)]">· 区位：{cache.positioning}</span>}
+      </div>
+      <button
+        onClick={onRefresh}
+        disabled={disabled}
+        className="shrink-0 rounded-[2px] border border-[var(--border)] px-2.5 py-1 text-[var(--muted)] transition hover:text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-50"
+      >
+        强制重算静态层
+      </button>
     </div>
   );
 }
