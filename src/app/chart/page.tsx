@@ -10,6 +10,7 @@ import RadarChart from "@/components/RadarChart";
 import BacktestReport from "@/components/BacktestReport";
 import { DEFAULT_MA_PARAMS, type MaStrategyParams, type BacktestResult } from "@/lib/quant";
 import type { PerformanceReport } from "@/lib/performance";
+import { DRAW_PRESETS, type ChartDrawing } from "@/lib/drawings";
 
 interface AnalyzeResponse {
   quote: StockQuote;
@@ -78,6 +79,47 @@ function ChartInner() {
   const [tuned, setTuned] = useState<{ backtest: BacktestResult; report: PerformanceReport; params: MaStrategyParams } | null>(null);
   const [tuning, setTuning] = useState(false);
   const [tuneErr, setTuneErr] = useState("");
+  // P1-D LLM 交互式画图：AI 把技术分析输出为绘图基元，叠加到 Pro 画布。
+  const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
+  const [drawRationale, setDrawRationale] = useState("");
+  const [drawing, setDrawing] = useState(false);
+  const [drawErr, setDrawErr] = useState("");
+  const [drawQ, setDrawQ] = useState("");
+
+  async function runDraw(opts: { question?: string; preset?: string }) {
+    const code = data?.quote.code || params.get("code");
+    if (!code || !/^\d{6}$/.test(code)) return;
+    setDrawing(true);
+    setDrawErr("");
+    try {
+      const res = await fetch("/api/chart/draw", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, fq, period, question: opts.question, preset: opts.preset }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || `AI 画图失败: ${res.status}`);
+      const plan = j.plan as { rationale: string; drawings: ChartDrawing[] };
+      setDrawings(plan.drawings ?? []);
+      setDrawRationale(plan.rationale ?? "");
+      if (!plan.drawings?.length) setDrawErr("AI 未给出可绘制的关键位（可换个问法）");
+    } catch (e) {
+      setDrawErr(e instanceof Error ? e.message : "AI 画图失败");
+    } finally {
+      setDrawing(false);
+    }
+  }
+  function clearDrawings() {
+    setDrawings([]);
+    setDrawRationale("");
+    setDrawErr("");
+  }
+  // 切换标的/复权/周期后，旧的 AI 绘图基于旧序列已失效，自动清空。
+  useEffect(() => {
+    setDrawings([]);
+    setDrawRationale("");
+    setDrawErr("");
+  }, [data?.quote.code, period, fq]);
   
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -473,12 +515,58 @@ function ChartInner() {
                   <span className="text-[9px] font-mono text-[var(--faint)] ml-1">筹码/投影/VRVP 请切回「经典 SVG」</span>
                 )}
               </div>
+              {/* P1-D LLM 交互式画图：按钮 + 对话驱动 AI 自动画线/标注，叠加到 Pro 画布 */}
+              {chartView === "pro" && (
+                <div className="mb-2 border border-[var(--border)] rounded-[2px] bg-[var(--inset)]/40 p-2 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono mr-0.5">AI 画图</span>
+                    {DRAW_PRESETS.map((p) => (
+                      <button
+                        key={p.key}
+                        disabled={drawing}
+                        onClick={() => runDraw({ preset: p.key })}
+                        className="px-2 py-0.5 text-[10px] font-semibold rounded-[1px] bg-[var(--bg)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition"
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                    <input
+                      value={drawQ}
+                      onChange={(e) => setDrawQ(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && drawQ.trim() && !drawing) runDraw({ question: drawQ.trim() });
+                      }}
+                      placeholder="让 AI 画…（例：标出最近的支撑位与下降趋势线）"
+                      disabled={drawing}
+                      className="flex-1 min-w-[180px] px-2 py-0.5 text-[10px] font-mono bg-[var(--bg)] border border-[var(--border)] rounded-[1px] text-[var(--text)] placeholder:text-[var(--faint)] outline-none focus:border-[var(--accent)]"
+                    />
+                    <button
+                      disabled={drawing || !drawQ.trim()}
+                      onClick={() => runDraw({ question: drawQ.trim() })}
+                      className="px-2 py-0.5 text-[10px] font-bold rounded-[1px] bg-[var(--accent)] text-[var(--accent-fg)] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition"
+                    >
+                      {drawing ? "绘制中…" : "AI 画"}
+                    </button>
+                    {drawings.length > 0 && (
+                      <button
+                        onClick={clearDrawings}
+                        className="px-2 py-0.5 text-[10px] rounded-[1px] border border-[var(--border)] text-[var(--faint)] hover:text-[var(--text)] cursor-pointer transition"
+                      >
+                        清除 ({drawings.length})
+                      </button>
+                    )}
+                  </div>
+                  {drawErr && <div className="text-[10px] font-mono text-amber-400">{drawErr}</div>}
+                  {drawRationale && <div className="text-[10px] font-mono text-[var(--muted)] leading-relaxed">💡 {drawRationale}</div>}
+                </div>
+              )}
               {chartView === "pro" ? (
                 <LightweightChart
                   candles={data.quant.candles ?? []}
                   trades={data.quant.backtest?.trades ?? []}
                   code={data.quote.code}
                   fq={fq}
+                  drawings={drawings}
                 />
               ) : (
                 <QuantChart

@@ -4,6 +4,21 @@
 
 ---
 
+## [0.24.0] - 2026-06-23
+
+> **LLM 交互式画图 / AI 自动画线标注（对标 TradingView 画图工具 + AI 助手）**。Pro 画布新增「AI 画图」面板：按钮一键（支撑阻力/趋势线/形态识别/买卖区间）或自然语言对话，由 LLM 把技术分析意图输出为结构化绘图基元（水平线/趋势线/区间/标注），自动叠加到图上并附判断依据。
+
+### 新增：LLM 交互式画图
+- `src/lib/drawings.ts`（新增）：绘图基元类型（`hline`/`trendline`/`zone`/`marker`）+ `sanitizeDrawPlan()`——价位夹到 `[minLow*0.6, maxHigh*1.4]`、日期就近吸附到真实交易日、丢弃非法基元、上限 12 条，杜绝模型越界/幻觉坐标；内置 `DRAW_PRESETS` 四个快捷指令。
+- `src/app/api/chart/draw/route.ts`（新增）：`POST { code, fq?, period?, question?, preset? }`，喂最近 ~90 根 K 线 + 价格区间给 LLM（复用 `chatJson` 结构化输出），返回 `{ plan: { rationale, drawings } }`；LLM 未配置 → 503 友好提示。
+- `src/components/LightweightChart.tsx`：新增 `drawings` 叠加层渲染——`hline`/`zone` 走价格线（带轴标签）、`trendline` 走两点线序列、`marker` 并入买卖标记；语义配色（支撑蓝/阻力琥珀/偏多绿/偏空红），仅日线口径渲染。
+- `src/app/chart/page.tsx`：Pro 画布上方「AI 画图」面板（4 预设按钮 + 对话输入 + 绘制中/清除态 + 依据展示）；切换标的/复权/周期自动清空旧绘图。
+
+### ✅ 质量
+- `tsc --noEmit` 0 error；`eslint`（改动文件）0 error；`next build` 通过。仅新增 2 个端点 + 1 个库 + Pro 画布叠加层 + 面板，分析管线与经典 SVG 视图零影响。绘图坐标全程 sanitize，模型仅决定"画什么"、不决定"画到哪个越界价位"。
+
+---
+
 ## [0.23.0] - 2026-06-23
 
 > **多周期分时 / 日内 5·15·30·60m（对标 TradingView 日内多周期）**。Pro 画布视图周期切换新增 5m / 15m / 30m / 60m 分时档，按需向东财 push2his 拉取分钟级 K 线，原生时间轴显示北京钟面时间；十字光标读数、对数/百分比纵轴、MACD/RSI/KDJ 副图、逐根回放全部在分时档下可用。

@@ -21,13 +21,25 @@ import type { Candle } from "@/lib/types";
 import type { TradeAction } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL } from "@/lib/indicators";
+import type { ChartDrawing, MarkerDrawing, DrawingColor } from "@/lib/drawings";
 
 interface LightweightChartProps {
   candles: Candle[];
   trades: TradeAction[];
   code?: string;
   fq?: "qfq" | "hfq";
+  drawings?: ChartDrawing[];
 }
+
+// AI 画图叠加层配色（语义色，与蜡烛涨跌色区分开）
+const DRAW_COLORS: Record<DrawingColor, string> = {
+  support: "#38bdf8",
+  resistance: "#f59e0b",
+  neutral: "#94a3b8",
+  bull: "#10b981",
+  bear: "#ef4444",
+};
+const drawColor = (c?: DrawingColor) => DRAW_COLORS[c ?? "neutral"];
 
 type Timeframe = "5m" | "15m" | "30m" | "60m" | "1D" | "1W" | "1M";
 const INTRADAY_TFS: Timeframe[] = ["5m", "15m", "30m", "60m"];
@@ -72,7 +84,7 @@ function maOf(candles: Candle[], period: number): (number | null)[] {
   return out;
 }
 
-export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq" }: LightweightChartProps) {
+export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [] }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -164,10 +176,16 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
         shape: t.type === "buy" ? "arrowUp" : "arrowDown",
         text: t.type === "buy" ? "B" : "S",
       }));
-    markersApiRef.current?.setMarkers(markers);
+    const drawMarkers: SeriesMarker<Time>[] = (intraday ? [] : drawings)
+      .filter((d): d is MarkerDrawing => d.type === "marker")
+      .map((d) => ({ time: toTime(d.date), position: "aboveBar", color: drawColor(d.color), shape: "circle", text: d.text }));
+    const all = [...markers, ...drawMarkers].sort((a, b) =>
+      typeof a.time === "number" && typeof b.time === "number" ? a.time - b.time : String(a.time).localeCompare(String(b.time))
+    );
+    markersApiRef.current?.setMarkers(all);
     const last = vc[vc.length - 1];
     if (last) setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0 });
-  }, [trades, toTime]);
+  }, [trades, toTime, drawings, intraday]);
 
   // 结构层：仅在「指标/周期/纵轴/副图」变化时重建图表与序列（不随回放游标变动）
   useEffect(() => {
@@ -249,6 +267,25 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       if (panes[1]) panes[1].setStretchFactor(1);
     }
 
+    // AI 画图叠加层（仅日线口径；横线/区间走价格线，趋势线走两点序列，标注走 marker）
+    if (!intraday && drawings.length > 0) {
+      for (const dr of drawings) {
+        if (dr.type === "hline") {
+          candleSeries.createPriceLine({ price: dr.price, color: drawColor(dr.color), lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: dr.label });
+        } else if (dr.type === "zone") {
+          const col = drawColor(dr.color);
+          candleSeries.createPriceLine({ price: dr.priceHigh, color: col, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `${dr.label} 上` });
+          candleSeries.createPriceLine({ price: dr.priceLow, color: col, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `${dr.label} 下` });
+        } else if (dr.type === "trendline") {
+          const s = chart.addSeries(LineSeries, { color: drawColor(dr.color), lineWidth: 2, lineStyle: LineStyle.Solid, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+          s.setData([
+            { time: toTime(dr.from.date), value: dr.from.price },
+            { time: toTime(dr.to.date), value: dr.to.price },
+          ]);
+        }
+      }
+    }
+
     paint(viewCandles);
     chart.timeScale().fitContent();
 
@@ -271,7 +308,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     };
     // 故意不依赖 viewCandles：回放游标变化由下方数据层处理，避免重建图表导致闪烁。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, macd, rsi, kdj, boll, maOn, showBoll, subInd, yScaleMode, intraday, toTime, paint]);
+  }, [candles, macd, rsi, kdj, boll, maOn, showBoll, subInd, yScaleMode, intraday, drawings, toTime, paint]);
 
   // 数据层：回放游标（viewCandles）变化时仅重绘数据，并把最新显露的 K 线滚入视野。
   useEffect(() => {
