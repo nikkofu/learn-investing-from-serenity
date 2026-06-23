@@ -4,6 +4,21 @@
 
 ---
 
+## [0.19.0] - 2026-06-23
+
+> **引入 TradingView 官方开源 lightweight-charts 画布引擎（Pro 视图）**。图表工作区新增「图表引擎：经典 SVG / Pro 画布」一键切换，二者并存、互不影响：经典 SVG 保留我们独有的筹码分布 / 价格投影 / VRVP 自绘叠加；Pro 画布主打专业交互与性能。
+
+### 新增：Pro 画布视图（lightweight-charts v5）
+- 新增依赖 `lightweight-charts@5.2.0`（canvas 渲染，6000+ 根丝滑，解决长历史全量 SVG 卡顿）。
+- 新组件 `src/components/LightweightChart.tsx`：K线 + 成交量 + MA(5/10/20/60/120/250) + 布林带叠加、买卖标记（B/S 箭头）、**库原生十字光标 + OHLCV 读数条**、**库原生对数 / 百分比纵轴**、MACD / RSI / KDJ **独立窗格**副图、周期 日/周/月 聚合。
+- 新文件 `src/lib/candleAgg.ts`：抽出周/月 K 聚合纯函数（Pro 视图复用）。
+- `src/app/chart/page.tsx`：图表区新增引擎切换；Pro 视图复用现有复权/数据管线（筹码/投影/VRVP 提示切回经典视图）。
+
+### ✅ 质量
+- `tsc --noEmit`、`eslint`（改动文件）、`next build` 全通过；lightweight-charts 选用发布满 7 天的稳定版（5.2.0，2026-04-24）。
+
+---
+
 ## [0.18.0] - 2026-06-23
 
 > **标准化回测绩效报表（对标 TradingView Strategy Tester / 券商回测报告）**。回测不再只看「收益率 + 胜率」，补齐专业风险/收益指标与可视化，让回测可信到能指导下单。随所选策略实时重算。

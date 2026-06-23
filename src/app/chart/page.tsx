@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import type { ChokepointAssessment, StockQuote, StockSearchResult } from "@/lib/types";
 import { readNdjson } from "@/lib/stream-client";
 import QuantChart from "@/components/QuantChart";
+import LightweightChart from "@/components/LightweightChart";
 import RadarChart from "@/components/RadarChart";
 
 interface AnalyzeResponse {
@@ -57,6 +58,8 @@ function ChartInner() {
   const [period, setPeriod] = useState<"1D" | "1W" | "1M">("1D");
   // 复权口径：qfq=前复权（贴现价看操作）/ hfq=后复权（长周期真实回测）。图表/筹码/交易标记/回测同口径切换。
   const [fq, setFq] = useState<"qfq" | "hfq">("qfq");
+  // 图表引擎：classic = 自研 SVG（筹码/投影/VRVP 叠加）；pro = lightweight-charts 画布（十字光标/多窗格/性能）。
+  const [chartView, setChartView] = useState<"classic" | "pro">("classic");
   
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -405,12 +408,40 @@ function ChartInner() {
               </button>
             </div>
           ) : data && data.quant ? (
-            <div className="flex-1 overflow-hidden" ref={containerRef}>
-              <QuantChart
-                quantData={data.quant}
-                currentPrice={data.quant.refPrice ?? data.quote.price}
-                height={chartHeight}
-              />
+            <div className="flex-1 overflow-auto" ref={containerRef}>
+              {/* 图表引擎切换：经典 SVG / Pro 画布(lightweight-charts) */}
+              <div className="flex items-center gap-1 mb-2 select-none">
+                <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono mr-1">图表引擎</span>
+                <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px] font-mono">
+                  {([["classic", "经典 SVG"], ["pro", "Pro 画布"]] as const).map(([m, label]) => (
+                    <button
+                      key={m}
+                      onClick={() => setChartView(m)}
+                      title={m === "classic" ? "自研 SVG：筹码分布 / 价格投影 / VRVP 原生叠加" : "lightweight-charts 画布：十字光标 / 多窗格副图 / 原生对数%轴 / 6000+ 根丝滑"}
+                      className={`px-2.5 py-0.5 text-[10px] font-semibold cursor-pointer rounded-[1px] transition ${
+                        chartView === m ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {chartView === "pro" && (
+                  <span className="text-[9px] font-mono text-[var(--faint)] ml-1">筹码/投影/VRVP 请切回「经典 SVG」</span>
+                )}
+              </div>
+              {chartView === "pro" ? (
+                <LightweightChart
+                  candles={data.quant.candles ?? []}
+                  trades={data.quant.backtest?.trades ?? []}
+                />
+              ) : (
+                <QuantChart
+                  quantData={data.quant}
+                  currentPrice={data.quant.refPrice ?? data.quote.price}
+                  height={chartHeight}
+                />
+              )}
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-xs text-[var(--faint)] font-mono">
