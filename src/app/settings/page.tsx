@@ -64,6 +64,42 @@ export default function SettingsPage() {
   const [cacheStatus, setCacheStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
 
+  // 行情历史起始日期
+  const [historyStartDraft, setHistoryStartDraft] = useState("");
+  const [defaultHistoryStart, setDefaultHistoryStart] = useState("2000-01-01");
+  const [marketBusy, setMarketBusy] = useState(false);
+  const [marketStatus, setMarketStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
+
+  const fetchMarket = async () => {
+    try {
+      const res = await fetch("/api/settings/market");
+      const d = await res.json();
+      if (d.historyStart) setHistoryStartDraft(d.historyStart);
+      if (d.defaultHistoryStart) setDefaultHistoryStart(d.defaultHistoryStart);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const saveMarket = async () => {
+    setMarketBusy(true);
+    setMarketStatus(null);
+    try {
+      const res = await fetch("/api/settings/market", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ historyStart: historyStartDraft }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "保存失败");
+      setMarketStatus({ kind: "ok", msg: "已保存。新起始日期对今后新拉取/全量刷新生效；如需让已缓存个股的历史立即变长，请清空 K 线缓存后重新分析。" });
+      await fetchMarket();
+    } catch (err) {
+      setMarketStatus({ kind: "err", msg: err instanceof Error ? err.message : "保存失败" });
+    } finally {
+      setMarketBusy(false);
+    }
+  };
+
   const fetchCache = async () => {
     try {
       const res = await fetch("/api/settings/cache");
@@ -251,6 +287,7 @@ export default function SettingsPage() {
     fetchConfig();
     fetchDbStatus();
     fetchCache();
+    fetchMarket();
   }, []);
 
   const selectProviderCard = (name: string) => {
@@ -657,6 +694,52 @@ export default function SettingsPage() {
             {cacheStatus && (
               <p className={`text-xs ${cacheStatus.kind === "ok" ? "text-emerald-400" : cacheStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
                 {cacheStatus.msg}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-[var(--border)]" />
+
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--text)] select-none">行情历史起始日期</h2>
+          <p className="text-xs text-[var(--muted)] mt-0.5">
+            全量日线从该日期拉起（默认 <code className="font-mono text-xs">{defaultHistoryStart}</code>），用于更长的策略回测样本。若某数据源有更晚的硬性起点，则以该源能给的最早为准。配置存于 <code className="font-mono text-xs">.data/market-config.json</code>。
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold tracking-wider text-[var(--faint)] uppercase">起始日期 (YYYY-MM-DD)</span>
+              <input
+                type="date"
+                className={`${field} w-44`}
+                value={historyStartDraft}
+                onChange={(e) => setHistoryStartDraft(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={saveMarket}
+              disabled={marketBusy}
+              className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-50 cursor-pointer select-none"
+            >
+              {marketBusy ? "处理中…" : "保存起始日期"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryStartDraft(defaultHistoryStart)}
+              disabled={marketBusy}
+              className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50 cursor-pointer select-none"
+            >
+              恢复默认
+            </button>
+            {marketStatus && (
+              <p className={`text-xs ${marketStatus.kind === "ok" ? "text-emerald-400" : marketStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
+                {marketStatus.msg}
               </p>
             )}
           </div>

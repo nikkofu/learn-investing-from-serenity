@@ -8,25 +8,19 @@
  * 新数据源作为兜底，不重复造轮子。
  */
 
-import { getQuote, getKline, getFinancials } from "../market";
+import { getQuote, getFinancials } from "../market";
 import { globalCache, getAdaptiveTTL } from "../cache";
 import type { StockQuote, Candle, StockFinancials } from "../types";
 import { getTencentQuotes } from "./tencent";
-import { getBaiduKline } from "./baidu";
-import { getSinaFinancialReport, getSinaKline } from "./sina";
+import { getSinaFinancialReport } from "./sina";
 import { getEmQuote, getEmStockInfo, getEmAnalystConsensus } from "./eastmoney";
+import { getDailyHistory, HISTORY_LIMIT } from "./klineStore";
 import type { EmAnalystConsensus } from "./eastmoney";
-import type { BaiduCandle, EmStockInfo, SinaReportPeriod, Sourced, SourceAttempt, TencentQuote } from "./types";
+import type { Candidate, EmStockInfo, SinaReportPeriod, Sourced, SourceAttempt, TencentQuote } from "./types";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 function clampInt(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, Math.round(v)));
-}
-
-interface Candidate<T> {
-  source: string;
-  run: () => Promise<T>;
-  accept?: (v: T) => boolean;
 }
 
 /** 按优先级依次尝试，命中即返回；记录每个源的成败。全部失败则抛错。 */
@@ -88,26 +82,6 @@ function txToStockQuote(q: TencentQuote): StockQuote {
     totalMarketCap: q.totalMarketCapYi * 1e8,
     time: q.time,
   };
-}
-
-function baiduToCandles(rows: BaiduCandle[], limit: number): Candle[] {
-  const out: Candle[] = [];
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    const prev = i > 0 ? rows[i - 1].close : r.open;
-    out.push({
-      date: r.date,
-      open: r.open,
-      close: r.close,
-      high: r.high,
-      low: r.low,
-      volume: r.volume,
-      amount: r.amount,
-      changePct: prev ? Math.round(((r.close - prev) / prev) * 100 * 100) / 100 : 0,
-      turnoverPct: r.turnoverPct,
-    });
-  }
-  return out.slice(-limit);
 }
 
 function findItem(items: Record<string, string>, ...keys: string[]): string | undefined {
@@ -227,29 +201,28 @@ export function getDailyKline(
   );
 }
 
-function getDailyKlineUncached(
+// 实际取数走 klineStore 的「全量落盘 + 增量更新」本地行情库：
+// 一次性拿到完整历史（约 10 年）后按 limit 切片，盘内复用、只补增量、自动处理复权漂移。
+async function getDailyKlineUncached(
   code: string,
   limit: number,
   order: "em-first" | "baidu-first",
 ): Promise<Sourced<Candle[]>> {
-  const em: Candidate<Candle[]> = {
-    source: "eastmoney-push2his",
-    run: () => getKline(code, limit),
-    accept: (k) => k.length > 0,
-  };
-  const baidu: Candidate<Candle[]> = {
-    source: "baidu",
-    run: async () => baiduToCandles(await getBaiduKline(code), limit),
-    accept: (k) => k.length > 0,
-  };
-  const sina: Candidate<Candle[]> = {
-    source: "sina",
-    run: () => getSinaKline(code, limit),
-    accept: (k) => k.length > 0,
-  };
-  // 免封源（baidu/sina）始终排在东财前后，保证任一可用即出数据；末位东财兜底。
-  const chain = order === "baidu-first" ? [baidu, sina, em] : [em, baidu, sina];
-  return failover<Candle[]>("daily-kline", chain);
+  const { data, source, attempts } = await getDailyHistory(code, order);
+  return { data: data.slice(-limit), source, attempts };
+}
+
+/**
+ * 取「后复权」全量日线（仅东财 fqt=2），专供回测：早年价不为负、长周期收益正确。
+ * 与前复权各自独立落盘（.data/kline-cache-hfq），失败返回空数组（由调用方回退前复权全量）。
+ */
+export async function getHfqDailyHistory(code: string, limit = HISTORY_LIMIT): Promise<Candle[]> {
+  try {
+    const { data } = await getDailyHistory(code, "em-first", "hfq");
+    return data.slice(-limit);
+  } catch {
+    return [];
+  }
 }
 
 /** 把日 K 重采样为周/月 K（OHLC: 开=首/收=末/高=区间最高/低=区间最低；量额累加）。 */
@@ -293,9 +266,9 @@ function resampleCandles(daily: Candle[], unit: "week" | "month"): Candle[] {
  * 任一源（百度/新浪/push2his）成功即返回；全失败返回空数组（与 getKlineSafe 行为一致）。
  */
 export async function getKlineFailover(code: string, limit = 120, klt = 101): Promise<Candle[]> {
-  // 周/月需更多日线作重采样的原料（上限 1023 受新浪 datalen 约束）。
+  // 周/月需更多日线作重采样的原料。底层是落盘的全量历史，按需切片即可（上限 HISTORY_LIMIT）。
   const span = klt === 103 ? 22 : klt === 102 ? 5 : 1;
-  const dailyLimit = Math.min(1023, limit * span + 30);
+  const dailyLimit = Math.min(HISTORY_LIMIT, limit * span + 30);
   try {
     const { data } = await getDailyKline(code, dailyLimit, "baidu-first");
     if (klt === 102) return resampleCandles(data, "week").slice(-limit);

@@ -157,9 +157,12 @@ export async function getKlineSafe(code: string, limit = 120, klt = 101): Promis
   }
 }
 
-/** Daily K-line history from Eastmoney (UTF-8). */
-export async function getKline(code: string, limit = 120, klt = 101): Promise<Candle[]> {
-  const cacheKey = `kline:${code}:${limit}:${klt}`;
+/**
+ * Daily K-line history from Eastmoney (UTF-8).
+ * fqt: 0=不复权 / 1=前复权（默认，贴合现价，用于近端显示与打分）/ 2=后复权（早年价不为负、长周期收益正确，用于回测）。
+ */
+export async function getKline(code: string, limit = 120, klt = 101, fqt = 1): Promise<Candle[]> {
+  const cacheKey = `kline:${code}:${limit}:${klt}:${fqt}`;
   const ttl = getAdaptiveTTL("kline");
   return globalCache.getOrCreate(
     cacheKey,
@@ -168,7 +171,7 @@ export async function getKline(code: string, limit = 120, klt = 101): Promise<Ca
       const url =
         `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}` +
         `&ut=fa5fd1943c7b386f172d6893dbfba10b&fields1=f1,f2,f3,f4,f5,f6` +
-        `&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f61&klt=${klt}&fqt=1&end=20500101&lmt=${limit}`;
+        `&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f61&klt=${klt}&fqt=${fqt}&end=20500101&lmt=${limit}`;
       const res = await fetchRetry(url, {
         headers: { "User-Agent": UA, Referer: "https://quote.eastmoney.com/" },
       });

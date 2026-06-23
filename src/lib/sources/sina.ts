@@ -24,12 +24,15 @@ interface SinaKlineRow {
   volume?: string;
 }
 
+/** 新浪 datalen 实测可取上限（远高于旧代码自设的 1023，足够约 12 年日线）。 */
+export const SINA_KLINE_MAX = 8000;
+
 /**
  * 新浪日 K 线（scale=240 即日线），不封 IP、全球可达，作为 push2his/百度的互备源。
  * 新浪只返回 OHLCV，无成交额/换手率/涨跌幅，涨跌幅按前收盘价推算，缺失字段置 0。
  */
 export async function getSinaKline(code: string, limit = 360): Promise<Candle[]> {
-  const datalen = Math.max(1, Math.min(1023, limit));
+  const datalen = Math.max(1, Math.min(SINA_KLINE_MAX, limit));
   const url =
     "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?" +
     qs({ symbol: sinaSymbol(code), scale: 240, ma: "no", datalen });

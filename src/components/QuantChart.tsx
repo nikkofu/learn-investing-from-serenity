@@ -27,6 +27,29 @@ interface QuantChartProps {
   externalPeriod?: "1D" | "1W" | "1M";
 }
 
+/** 本笔交易的仓位比例（0..1）：buy=占满仓资金比例，sell=占当前持仓比例；未设视为整仓。 */
+function tradeFraction(t: TradeAction): number {
+  return t.sizePct != null ? Math.max(0, Math.min(1, t.sizePct)) : 1;
+}
+/** 仓位比例 → 标记不透明度（卖 1/2 ≈ 0.5；保留 0.3 下限以免过淡看不见）。 */
+function fractionOpacity(frac: number): number {
+  return Math.max(0.3, Math.min(1, frac));
+}
+/** 仓位比例的简短角标（满仓不显示，常见分数用 ½⅓¼，其余用百分比）。 */
+function fractionBadge(frac: number): string {
+  if (frac >= 0.999) return "";
+  const known: [number, string][] = [[0.25, "¼"], [0.33, "⅓"], [0.5, "½"], [0.67, "⅔"], [0.75, "¾"]];
+  for (const [v, s] of known) if (Math.abs(frac - v) < 0.03) return s;
+  return `${Math.round(frac * 100)}%`;
+}
+/** 操作仓位中文描述：建/加仓 or 减/清仓 + 百分比。 */
+function positionActionLabel(t: TradeAction): string {
+  const frac = tradeFraction(t);
+  const pct = Math.round(frac * 100);
+  if (t.type === "buy") return frac >= 0.999 ? "建仓 · 满仓(100%)" : `加/建仓 · ${pct}%`;
+  return frac >= 0.999 ? "清仓 · 全部(100%)" : `减仓 · ${pct}%`;
+}
+
 // 辅助：获取自然周的分组键
 function getYearWeek(dateStr: string): string {
   const d = new Date(dateStr);
@@ -203,17 +226,15 @@ function detectHistoricalChannels(candles: Candle[]): HistChannel[] {
   return channels;
 }
 
-// 均线计算
+// 均线计算（O(n) 滚动和：维护窗口累加，避免每根都 slice+reduce 重算，长历史下显著省 CPU）
 const calculateMA = (data: Candle[], period: number): number[] => {
-  const ma: number[] = [];
+  const ma: number[] = new Array(data.length);
+  let sum = 0;
   for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) {
-      const sum = data.slice(0, i + 1).reduce((s, c) => s + c.close, 0);
-      ma.push(Number((sum / (i + 1)).toFixed(2)));
-    } else {
-      const sum = data.slice(i - period + 1, i + 1).reduce((s, c) => s + c.close, 0);
-      ma.push(Number((sum / period).toFixed(2)));
-    }
+    sum += data[i].close;
+    if (i >= period) sum -= data[i - period].close;
+    const count = i < period - 1 ? i + 1 : period;
+    ma[i] = Number((sum / count).toFixed(2));
   }
   return ma;
 };
@@ -364,8 +385,17 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         });
       }
 
-      const maxVal = Math.max(...priceList, 1) * 1.03;
-      const minVal = Math.min(...priceList, 9999) * 0.97;
+      // 用循环取极值而非 Math.max(...arr) 展开：大窗口（如全量 8000 根）下 priceList 可达数万元素，
+      // 展开成参数会触发「Maximum call stack size exceeded」，循环既安全又更快。
+      let rawMax = 1;
+      let rawMin = 9999;
+      for (let pi = 0; pi < priceList.length; pi++) {
+        const v = priceList[pi];
+        if (v > rawMax) rawMax = v;
+        if (v < rawMin) rawMin = v;
+      }
+      const maxVal = rawMax * 1.03;
+      const minVal = rawMin * 0.97;
       const range = maxVal - minVal || 1;
 
       const getY = (val: number) => {
@@ -373,7 +403,11 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
       };
 
       // 计算成交量最大值 (在可视蜡烛切片中取最值，使缩放后成交量柱子高低对比自适应展现)
-      const maxVolume = Math.max(...slicedCandles.map((c) => c.volume || 0), 1);
+      let maxVolume = 1;
+      for (let ci = 0; ci < slicedCandles.length; ci++) {
+        const v = slicedCandles[ci].volume || 0;
+        if (v > maxVolume) maxVolume = v;
+      }
 
       // 拟合通道曲线在 K线视图下的价格映射路径 (延伸至未来预测端点)
       let upperChannelPath = "";
@@ -469,15 +503,18 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
       const ma250Points = slicedMa250.map((val, idx) => `${getX(idx).toFixed(1)},${getY(val).toFixed(1)}`);
 
       // 交易标记点在 K线主图的映射 (找到相同日期的 K 线绘制在 high/low 上方)
+      // 先建「日期/周/月 键 → 切片内首个索引」的 Map，O(n)；避免逐笔交易 findIndex 的 O(交易数×n)。
+      const keyOf = (date: string) =>
+        periodMode === "1W" ? getYearWeek(date) : periodMode === "1M" ? date.slice(0, 7) : date;
+      const dateToIdx = new Map<string, number>();
+      for (let idx = 0; idx < slicedCandles.length; idx++) {
+        const k = keyOf(slicedCandles[idx].date);
+        if (!dateToIdx.has(k)) dateToIdx.set(k, idx);
+      }
       const tradePoints = trades
         .map((t) => {
-          const idx = slicedCandles.findIndex((c) => {
-            if (c.date === t.date) return true;
-            if (periodMode === "1W") return getYearWeek(c.date) === getYearWeek(t.date);
-            if (periodMode === "1M") return c.date.slice(0, 7) === t.date.slice(0, 7);
-            return false;
-          });
-          if (idx === -1) return null;
+          const idx = dateToIdx.get(keyOf(t.date));
+          if (idx === undefined) return null;
           const isBuy = t.type === "buy";
           // 悬浮显示在K线高/低价两侧
           const price = isBuy ? slicedCandles[idx].low : slicedCandles[idx].high;
@@ -490,7 +527,9 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         .filter(Boolean) as (TradeAction & { x: number; y: number })[];
 
       // 3. 计算所有可见的历史趋势通道路径
-      const histChannels = detectHistoricalChannels(currentCandles);
+      // 只在「可视切片」上做通道检测（原来对全量 currentCandles 跑，长历史下 O(N×60×len) 极昂贵）。
+      // 返回索引即切片内相对索引，直接用作 visibleIdx，无需再按 sliceStart 裁剪。
+      const histChannels = detectHistoricalChannels(slicedCandles);
       const histChannelPaths: Array<{
         type: "up" | "down" | "range";
         upperPath: string;
@@ -500,9 +539,10 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
       }> = [];
 
       histChannels.forEach((chan) => {
-        if (chan.endIndex >= sliceStart && chan.startIndex < sliceStart + slicedLen) {
-          const drawStart = Math.max(chan.startIndex, sliceStart);
-          const drawEnd = Math.min(chan.endIndex, sliceStart + slicedLen - 1);
+        {
+          // chan.startIndex/endIndex 已是切片内相对索引
+          const drawStart = chan.startIndex;
+          const drawEnd = chan.endIndex;
           
           if (drawEnd >= drawStart) {
             const upperDiff = 1.8 * chan.stdDev;
@@ -516,7 +556,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
             const polygonLower: string[] = [];
             
             for (let i = drawStart; i <= drawEnd; i++) {
-              const visibleIdx = i - sliceStart;
+              const visibleIdx = i;
               const offset = i - chan.startIndex;
               const midVal = chan.intercept + chan.slope * offset;
               const upperVal = midVal + upperDiff;
@@ -660,10 +700,15 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         }
       }
 
+      // 日期 → 切片内索引 Map（O(n)），替代逐笔 findIndex 的 O(交易数×n)。
+      const histDateToIdx = new Map<string, number>();
+      for (let idx = 0; idx < slicedHistory.length; idx++) {
+        if (!histDateToIdx.has(slicedHistory[idx].date)) histDateToIdx.set(slicedHistory[idx].date, idx);
+      }
       const tradePoints = trades
         .map((t) => {
-          const idx = slicedHistory.findIndex((h) => h.date === t.date);
-          if (idx === -1) return null;
+          const idx = histDateToIdx.get(t.date);
+          if (idx === undefined) return null;
           return {
             ...t,
             x: getXWorth(idx),
@@ -689,7 +734,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         slicedHistory
       };
     }
-  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showMA120, showMA250, showChannel, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount, ma5List, ma10List, ma20List, ma60List, ma120List, ma250List, quantData.projections]);
+  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showMA120, showMA250, showChannel, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount, ma5List, ma10List, ma20List, ma60List, ma120List, ma250List, quantData]);
 
   // 3. 筹码分布直方图的渲染映射计算
   const chipChartWidth = 140;
@@ -1668,6 +1713,10 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
               {chartParams.tradePoints.map((t, idx) => {
                 const isBuy = t.type === "buy";
                 const isHovered = hoveredTrade && hoveredTrade.date === t.date && hoveredTrade.type === t.type;
+                // 标记不透明度 = 本笔仓位比例（卖 1/2 → 50% 透明），角标显示分数。
+                const frac = tradeFraction(t);
+                const op = fractionOpacity(frac);
+                const badge = fractionBadge(frac);
                 return (
                   <g 
                     key={`trade-${idx}`}
@@ -1680,6 +1729,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       cy={t.y}
                       r={isHovered ? 7 : 5}
                       fill={isBuy ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)"}
+                      fillOpacity={op}
                       style={{ transition: "all 0.15s ease" }}
                     />
                     <circle
@@ -1687,6 +1737,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       cy={t.y}
                       r="3"
                       fill={isBuy ? "var(--accent)" : "#ef4444"}
+                      fillOpacity={op}
                       stroke="var(--surface)"
                       strokeWidth="1"
                     />
@@ -1694,13 +1745,14 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       x={t.x}
                       y={isBuy ? t.y + 11 : t.y - 7}
                       fill={isBuy ? "var(--accent)" : "#f87171"}
+                      fillOpacity={op}
                       fontSize={isHovered ? 8.5 : 7.5}
                       fontWeight="bold"
                       fontFamily="monospace"
                       textAnchor="middle"
                       style={{ transition: "all 0.15s ease" }}
                     >
-                      {isBuy ? "B" : "S"}
+                      {isBuy ? "B" : "S"}{badge}
                     </text>
                   </g>
                 );
@@ -1710,7 +1762,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
               {hoveredTrade && (() => {
                 const isBuy = hoveredTrade.type === "buy";
                 const width = 230;
-                const height = 95;
+                const height = 128;
                 const x = Math.max(padding, Math.min(mainChartWidth - padding - width, hoveredTrade.x - width / 2));
                 const y = Math.max(padding, hoveredTrade.y - height - 12);
                 
@@ -1747,7 +1799,19 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                           <span className="text-slate-400">成交价格：</span>
                           <span className="font-extrabold text-slate-200">{hoveredTrade.price.toFixed(2)} 元</span>
                         </div>
-                        <p className="text-[8px] text-slate-300 leading-normal text-justify line-clamp-3">
+                        <div className="flex justify-between mb-1">
+                          <span className="text-slate-400">操作仓位：</span>
+                          <span className="font-extrabold text-slate-200">{positionActionLabel(hoveredTrade)}</span>
+                        </div>
+                        {hoveredTrade.profitPct != null && (
+                          <div className="flex justify-between mb-1">
+                            <span className="text-slate-400">本笔盈亏：</span>
+                            <span className="font-extrabold" style={{ color: hoveredTrade.profitPct >= 0 ? "#34d399" : "#f87171" }}>
+                              {hoveredTrade.profitPct >= 0 ? "+" : ""}{hoveredTrade.profitPct.toFixed(1)}%
+                            </span>
+                          </div>
+                        )}
+                        <p className="text-[8px] text-slate-300 leading-normal text-justify line-clamp-2">
                           {hoveredTrade.reason}
                         </p>
                       </div>
@@ -2054,16 +2118,19 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         {activeTab === "backtest" ? (
           <div className="text-[11px] leading-relaxed text-[var(--muted)] grid grid-cols-1 md:grid-cols-3 gap-4 font-mono">
             <div className="border border-[var(--border)] p-2.5 bg-[var(--inset)]">
-              <span className="text-[9px] uppercase tracking-wider text-[var(--accent)] font-bold block mb-1">【策略买入规则】</span>
-              <p>1. 日线收盘价成功突破 20 日均线 (MA20)</p>
-              <p>2. 5 日均成交量/换手率放大至 20 日均的 1.3 倍以上</p>
-              <p>3. 近 120 天价格百分位处于低位区 (rangePosition &lt; 0.45)</p>
+              <span className="text-[9px] uppercase tracking-wider text-[var(--accent)] font-bold block mb-1">
+                【当前策略 · {activeStrategyMeta ? `${activeStrategyMeta.name} v${activeStrategyMeta.version}` : "默认策略"}】
+              </span>
+              <p className="max-h-[120px] overflow-y-auto pr-1 text-justify">
+                {activeStrategyMeta?.description ?? "该策略的买卖规则由所选策略定义；下拉切换策略可查看各自的进出场逻辑。"}
+              </p>
             </div>
             <div className="border border-[var(--border)] p-2.5 bg-[var(--inset)]">
-              <span className="text-[9px] uppercase tracking-wider text-red-500 font-bold block mb-1">【策略卖出规则】</span>
-              <p>1. 均线破位：股价日线跌破 20 日均线</p>
-              <p>2. 止盈目标：个股相比买入价累计涨幅达 35% 以上</p>
-              <p>3. 超买预警：处于极高价格区 (rangePosition &gt; 0.85) 且换手暴增 15% 以上滞涨</p>
+              <span className="text-[9px] uppercase tracking-wider text-red-500 font-bold block mb-1">【标记图例 · 怎么读 B/S】</span>
+              <p>• <b className="text-[var(--accent)]">B</b> 绿点=买入，<b className="text-red-400">S</b> 红点=卖出。</p>
+              <p>• <b>点的透明度 = 本笔仓位比例</b>：满仓动作=实心，卖 1/2≈半透明(½)，卖 1/3≈更淡(⅓)。</p>
+              <p>• 一个 B 常对应多个 S：分批止盈（+8% 减⅓ → +25% 再减 → 跟踪/支撑清仓），故 S 比 B 多。</p>
+              <p>• 悬浮任意标记或下方「交易明细」可见「操作仓位 + 本笔盈亏 + 触发理由」。</p>
             </div>
             <div className="border border-[var(--border)] p-2.5 bg-[var(--inset)] border-l-[3px] border-l-[var(--accent)]">
               <span className="text-[9px] uppercase tracking-wider text-[var(--accent)] font-bold block mb-1">【AI 交易优化建议】</span>
@@ -2078,18 +2145,26 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
               [...trades].reverse().map((t, idx) => {
                 const isBuy = t.type === "buy";
                 return (
-                  <div key={idx} className="flex justify-between items-center py-2 px-3 hover:bg-[var(--hover)]">
-                    <div className="flex items-center gap-2">
+                  <div key={idx} className="flex justify-between items-center gap-2 py-2 px-3 hover:bg-[var(--hover)]">
+                    <div className="flex items-center gap-2 shrink-0">
                       <span className={`px-1 py-0.5 text-[8px] font-bold rounded-[1px] uppercase ${isBuy ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "bg-red-500/10 text-red-400"}`}>
                         {isBuy ? "BUY" : "SELL"}
                       </span>
                       <span className="text-[var(--text)] font-semibold">{t.date}</span>
+                      <span className="px-1 py-0.5 text-[8px] rounded-[1px] bg-[var(--inset)] text-[var(--muted)] whitespace-nowrap">
+                        {positionActionLabel(t)}
+                      </span>
                     </div>
-                    <span className="text-[var(--muted)] flex-1 pl-4 truncate max-w-[400px] text-left" title={t.reason}>
+                    <span className="text-[var(--muted)] flex-1 px-2 truncate text-left" title={t.reason}>
                       {t.reason}
                     </span>
+                    {t.profitPct != null && (
+                      <span className="font-bold text-right shrink-0 w-[52px]" style={{ color: t.profitPct >= 0 ? "#10b981" : "#ef4444" }}>
+                        {t.profitPct >= 0 ? "+" : ""}{t.profitPct.toFixed(1)}%
+                      </span>
+                    )}
                     <span className="text-[var(--text)] font-bold text-right pl-2 shrink-0">
-                      成交价: {t.price.toFixed(2)} 元
+                      {t.price.toFixed(2)} 元
                     </span>
                   </div>
                 );

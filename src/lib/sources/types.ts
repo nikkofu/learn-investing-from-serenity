@@ -247,3 +247,10 @@ export interface Sourced<T> {
   source: string;
   attempts: SourceAttempt[];
 }
+
+/** 失败转移的候选源：source 名 + 取数函数 + 可选的「结果是否可接受」判定。 */
+export interface Candidate<T> {
+  source: string;
+  run: () => Promise<T>;
+  accept?: (v: T) => boolean;
+}

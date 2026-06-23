@@ -64,11 +64,14 @@ export {
   getQuotesFailover,
   getDailyKline,
   getKlineFailover,
+  getHfqDailyHistory,
   getMainFinancials,
   getStockProfile,
   getAnalystConsensus,
   getKlinesBatch,
 } from "./unified";
 export type { AnalystConsensus, KlineBatchItem } from "./unified";
+// 日 K「全量落盘 + 增量更新」本地行情库
+export { getDailyHistory, HISTORY_LIMIT } from "./klineStore";
 // 低层工具/搜索（保留在 market.ts，统一从本出口转出，外围只 import "@/lib/sources"）
 export { searchStocks, deriveStats, classifyCode, getKlineName } from "../market";
