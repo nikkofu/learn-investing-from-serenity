@@ -51,3 +51,6 @@ next-env.d.ts
 /session-transcript.w
 
 /.sessions/
+
+# tmp directory
+tmp/
