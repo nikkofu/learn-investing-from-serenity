@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createChart,
   CandlestickSeries,
@@ -13,6 +13,7 @@ import {
   type IChartApi,
   type ISeriesApi,
   type SeriesMarker,
+  type ISeriesMarkersPluginApi,
   type Time,
   type CandlestickData,
 } from "lightweight-charts";
@@ -38,6 +39,12 @@ const MA_DEFS: { period: number; color: string; key: string }[] = [
   { period: 250, color: "#ef4444", key: "ma250" },
 ];
 
+const REPLAY_SPEEDS: { label: string; ms: number }[] = [
+  { label: "慢", ms: 700 },
+  { label: "中", ms: 350 },
+  { label: "快", ms: 120 },
+];
+
 function maOf(candles: Candle[], period: number): (number | null)[] {
   const out: (number | null)[] = new Array(candles.length).fill(null);
   let sum = 0;
@@ -49,10 +56,15 @@ function maOf(candles: Candle[], period: number): (number | null)[] {
   return out;
 }
 
+const toTime = (d: string) => d as unknown as Time;
+
 export default function LightweightChart({ candles: rawCandles, trades }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const markersApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  // 每个序列携带自己的「按可见 K 线重绘」闭包，回放时仅重绘数据、不重建图表。
+  const paintersRef = useRef<((vc: Candle[]) => void)[]>([]);
 
   const [period, setPeriod] = useState<"1D" | "1W" | "1M">("1D");
   const [yScaleMode, setYScaleMode] = useState<"linear" | "log" | "pct">("linear");
@@ -61,12 +73,48 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
   const [maOn, setMaOn] = useState<Record<string, boolean>>({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma250: false });
   const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number } | null>(null);
 
+  // 逐根回放：replayN = 当前显露的 K 线根数（null = 关闭，显示全部）
+  const [replayN, setReplayN] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [speedMs, setSpeedMs] = useState(350);
+
   const candles = useMemo(() => candlesByPeriod(rawCandles, period), [rawCandles, period]);
   const macd = useMemo(() => computeMACD(candles), [candles]);
   const rsi = useMemo(() => computeRSI(candles), [candles]);
   const kdj = useMemo(() => computeKDJ(candles), [candles]);
   const boll = useMemo(() => computeBOLL(candles), [candles]);
 
+  const startN = useMemo(() => Math.min(60, candles.length), [candles.length]);
+  const viewCandles = useMemo(
+    () => (replayN === null ? candles : candles.slice(0, Math.max(1, Math.min(replayN, candles.length)))),
+    [candles, replayN]
+  );
+
+  // 切换标的/周期后回放参数复位
+  useEffect(() => {
+    setReplayN(null);
+    setPlaying(false);
+  }, [rawCandles, period]);
+
+  // 将当前可见 K 线刷到所有序列 + 标记 + 读数条
+  const paint = useCallback((vc: Candle[]) => {
+    for (const p of paintersRef.current) p(vc);
+    const inRange = new Set(vc.map((c) => c.date));
+    const markers: SeriesMarker<Time>[] = trades
+      .filter((t) => inRange.has(t.date))
+      .map((t) => ({
+        time: toTime(t.date),
+        position: t.type === "buy" ? "belowBar" : "aboveBar",
+        color: t.type === "buy" ? DOWN : UP,
+        shape: t.type === "buy" ? "arrowUp" : "arrowDown",
+        text: t.type === "buy" ? "B" : "S",
+      }));
+    markersApiRef.current?.setMarkers(markers);
+    const last = vc[vc.length - 1];
+    if (last) setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0 });
+  }, [trades]);
+
+  // 结构层：仅在「指标/周期/纵轴/副图」变化时重建图表与序列（不随回放游标变动）
   useEffect(() => {
     const el = containerRef.current;
     if (!el || candles.length === 0) return;
@@ -74,7 +122,6 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
     const css = getComputedStyle(document.documentElement);
     const textColor = css.getPropertyValue("--text").trim() || "#d4d4d4";
     const borderColor = css.getPropertyValue("--border").trim() || "#2a2a2a";
-    const surface = css.getPropertyValue("--surface").trim() || "#0e0e0e";
 
     const chart = createChart(el, {
       autoSize: true,
@@ -85,67 +132,54 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
       timeScale: { borderColor, timeVisible: false, rightOffset: 4 },
     });
     chartRef.current = chart;
-    void surface;
+    paintersRef.current = [];
 
-    const toTime = (d: string) => d as unknown as Time;
-
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: UP,
-      downColor: DOWN,
-      borderVisible: false,
-      wickUpColor: UP,
-      wickDownColor: DOWN,
-    });
+    const candleSeries = chart.addSeries(CandlestickSeries, { upColor: UP, downColor: DOWN, borderVisible: false, wickUpColor: UP, wickDownColor: DOWN });
     candleSeriesRef.current = candleSeries;
-    candleSeries.setData(candles.map((c): CandlestickData => ({ time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close })));
+    paintersRef.current.push((vc) =>
+      candleSeries.setData(vc.map((c): CandlestickData => ({ time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close })))
+    );
+    markersApiRef.current = createSeriesMarkers(candleSeries, []);
 
     // 成交量（主图底部叠加，独立隐藏价格轴）
     const volSeries = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, color: UP });
-    volSeries.setData(candles.map((c) => ({ time: toTime(c.date), value: c.volume || 0, color: (c.close >= c.open ? UP : DOWN) + "66" })));
+    paintersRef.current.push((vc) => volSeries.setData(vc.map((c) => ({ time: toTime(c.date), value: c.volume || 0, color: (c.close >= c.open ? UP : DOWN) + "66" }))));
     chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
 
     // 均线
     for (const def of MA_DEFS) {
       if (!maOn[def.key]) continue;
-      const arr = maOf(candles, def.period);
       const s = chart.addSeries(LineSeries, { color: def.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-      s.setData(candles.map((c, i) => (arr[i] != null ? { time: toTime(c.date), value: arr[i] as number } : null)).filter((p): p is { time: Time; value: number } => p !== null));
+      paintersRef.current.push((vc) => {
+        const arr = maOf(vc, def.period);
+        s.setData(vc.map((c, i) => (arr[i] != null ? { time: toTime(c.date), value: arr[i] as number } : null)).filter((p): p is { time: Time; value: number } => p !== null));
+      });
     }
 
     // 布林带
     if (showBoll) {
-      const mk = (vals: number[], dashed: boolean) => {
+      const mk = (pick: (b: typeof boll) => number[], dashed: boolean) => {
         const s = chart.addSeries(LineSeries, { color: "#38bdf8", lineWidth: 1, lineStyle: dashed ? LineStyle.Dashed : LineStyle.Solid, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-        s.setData(candles.map((c, i) => (Number.isFinite(vals[i]) ? { time: toTime(c.date), value: vals[i] } : null)).filter((p): p is { time: Time; value: number } => p !== null));
+        paintersRef.current.push((vc) => {
+          const vals = pick(boll);
+          s.setData(vc.map((c, i) => (Number.isFinite(vals[i]) ? { time: toTime(c.date), value: vals[i] } : null)).filter((p): p is { time: Time; value: number } => p !== null));
+        });
       };
-      mk(boll.upper, false);
-      mk(boll.mid, true);
-      mk(boll.lower, false);
+      mk((b) => b.upper, false);
+      mk((b) => b.mid, true);
+      mk((b) => b.lower, false);
     }
-
-    // 买卖标记
-    const inRange = new Set(candles.map((c) => c.date));
-    const markers: SeriesMarker<Time>[] = trades
-      .filter((t) => inRange.has(t.date))
-      .map((t) => ({
-        time: toTime(t.date),
-        position: t.type === "buy" ? "belowBar" : "aboveBar",
-        color: t.type === "buy" ? DOWN : UP,
-        shape: t.type === "buy" ? "arrowUp" : "arrowDown",
-        text: t.type === "buy" ? "B" : "S",
-      }));
-    if (markers.length > 0) createSeriesMarkers(candleSeries, markers);
 
     // 副图振荡指标（独立窗格）
     if (subInd !== "none") {
       const paneIdx = 1;
       const lineP = (vals: number[], color: string) => {
         const s = chart.addSeries(LineSeries, { color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false }, paneIdx);
-        s.setData(candles.map((c, i) => (Number.isFinite(vals[i]) ? { time: toTime(c.date), value: vals[i] } : null)).filter((p): p is { time: Time; value: number } => p !== null));
+        paintersRef.current.push((vc) => s.setData(vc.map((c, i) => (Number.isFinite(vals[i]) ? { time: toTime(c.date), value: vals[i] } : null)).filter((p): p is { time: Time; value: number } => p !== null)));
       };
       if (subInd === "macd") {
         const hist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, paneIdx);
-        hist.setData(candles.map((c, i) => (Number.isFinite(macd.macd[i]) ? { time: toTime(c.date), value: macd.macd[i], color: (macd.macd[i] >= 0 ? UP : DOWN) + "99" } : null)).filter((p): p is { time: Time; value: number; color: string } => p !== null));
+        paintersRef.current.push((vc) => hist.setData(vc.map((c, i) => (Number.isFinite(macd.macd[i]) ? { time: toTime(c.date), value: macd.macd[i], color: (macd.macd[i] >= 0 ? UP : DOWN) + "99" } : null)).filter((p): p is { time: Time; value: number; color: string } => p !== null)));
         lineP(macd.dif, "#eab308");
         lineP(macd.dea, "#38bdf8");
       } else if (subInd === "rsi") {
@@ -160,10 +194,8 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
       if (panes[1]) panes[1].setStretchFactor(1);
     }
 
+    paint(viewCandles);
     chart.timeScale().fitContent();
-
-    const last = candles[candles.length - 1];
-    setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0 });
 
     const onMove = chart.subscribeCrosshairMove((param) => {
       if (!param.time) return;
@@ -179,11 +211,39 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      markersApiRef.current = null;
+      paintersRef.current = [];
     };
-  }, [candles, trades, macd, rsi, kdj, boll, maOn, showBoll, subInd, yScaleMode]);
+    // 故意不依赖 viewCandles：回放游标变化由下方数据层处理，避免重建图表导致闪烁。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candles, macd, rsi, kdj, boll, maOn, showBoll, subInd, yScaleMode, paint]);
+
+  // 数据层：回放游标（viewCandles）变化时仅重绘数据，并把最新显露的 K 线滚入视野。
+  useEffect(() => {
+    if (!chartRef.current || paintersRef.current.length === 0) return;
+    paint(viewCandles);
+    if (replayN !== null) chartRef.current.timeScale().scrollToRealTime();
+  }, [viewCandles, replayN, paint]);
+
+  // 自动播放：按速度逐根推进，到末根自动停。
+  useEffect(() => {
+    if (!playing || replayN === null) return;
+    if (replayN >= candles.length) { setPlaying(false); return; }
+    const id = setInterval(() => {
+      setReplayN((n) => (n === null ? n : Math.min(candles.length, n + 1)));
+    }, speedMs);
+    return () => clearInterval(id);
+  }, [playing, speedMs, replayN, candles.length]);
 
   const fmt = (v: number) => v.toFixed(2);
   const chgColor = legend && legend.chg >= 0 ? UP : DOWN;
+  const replayOn = replayN !== null;
+
+  const enterReplay = () => { setReplayN(startN); setPlaying(false); };
+  const exitReplay = () => { setReplayN(null); setPlaying(false); };
+  const stepBack = () => setReplayN((n) => Math.max(2, (n ?? startN) - 1));
+  const stepFwd = () => setReplayN((n) => Math.min(candles.length, (n ?? startN) + 1));
+  const reset = () => { setReplayN(startN); setPlaying(false); };
 
   return (
     <div className="space-y-2">
@@ -234,6 +294,34 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
             ))}
           </div>
         </div>
+
+        {/* 逐根回放（对标 TradingView Bar Replay） */}
+        <div className="flex items-center gap-1" title="逐根回放：隐藏未来 K 线，单步或自动逐根显露，练习/复盘临场决策">
+          <span className="text-[9px] uppercase tracking-wider text-[var(--faint)]">回放</span>
+          {!replayOn ? (
+            <button onClick={enterReplay} className="px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] bg-[var(--inset)] border border-[var(--border)] text-[var(--faint)] hover:text-[var(--text)]">
+              ▷ 开始回放
+            </button>
+          ) : (
+            <div className="flex items-center gap-1">
+              <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px]">
+                <button onClick={reset} title="回到起点" className="px-1.5 py-0.5 text-[9.5px] cursor-pointer rounded-[1px] text-[var(--faint)] hover:text-[var(--text)]">⏮</button>
+                <button onClick={stepBack} title="后退一根" className="px-1.5 py-0.5 text-[9.5px] cursor-pointer rounded-[1px] text-[var(--faint)] hover:text-[var(--text)]">◀</button>
+                <button onClick={() => setPlaying((p) => !p)} title={playing ? "暂停" : "播放"} className="px-1.5 py-0.5 text-[9.5px] cursor-pointer rounded-[1px] text-[var(--text)]">{playing ? "⏸" : "▶"}</button>
+                <button onClick={stepFwd} title="前进一根" className="px-1.5 py-0.5 text-[9.5px] cursor-pointer rounded-[1px] text-[var(--faint)] hover:text-[var(--text)]">▶|</button>
+              </div>
+              <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px]">
+                {REPLAY_SPEEDS.map((s) => (
+                  <button key={s.ms} onClick={() => setSpeedMs(s.ms)} className={`px-1.5 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] ${speedMs === s.ms ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"}`}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[9px] text-[var(--faint)] tabular-nums">{viewCandles.length}/{candles.length}</span>
+              <button onClick={exitReplay} className="px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] text-[var(--faint)] hover:text-[var(--text)]">退出</button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 图表容器 + OHLCV 读数条 */}
@@ -247,6 +335,7 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
             <span>收 <span style={{ color: chgColor }}>{fmt(legend.c)}</span></span>
             <span style={{ color: chgColor }}>{legend.chg >= 0 ? "+" : ""}{legend.chg.toFixed(2)}%</span>
             <span className="text-[var(--faint)]">量 {(legend.v / 100).toFixed(0)} 手</span>
+            {replayOn && <span className="text-[var(--accent)]">● 回放中</span>}
           </div>
         )}
         <div ref={containerRef} className="w-full h-full" />
