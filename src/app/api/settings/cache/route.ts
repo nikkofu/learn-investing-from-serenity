@@ -8,17 +8,21 @@ import {
   type TTLPair,
 } from "@/lib/cacheSettings";
 import { globalCache } from "@/lib/cache";
+import { clearNamespace, namespaceStats } from "@/lib/llmCache";
 
 export const dynamic = "force-dynamic";
 
 const MS = 1000;
+
+// 落盘持久 LLM 缓存的命名空间（与各路由中的常量一致）。
+const LLM_CACHE_NAMESPACES = ["analyze", "sector", "map"] as const;
 
 /** ms TTLPair → 秒（界面用，便于人读）。 */
 function pairToSec(p: TTLPair): { active: number; inactive: number } {
   return { active: Math.round(p.active / MS), inactive: Math.round(p.inactive / MS) };
 }
 
-/** GET：返回各类别标签/说明/默认值/当前值（单位：秒）+ 当前缓存统计。 */
+/** GET：返回各类别标签/说明/默认值/当前值（单位：秒）+ 当前缓存统计（含落盘 LLM 缓存）。 */
 export async function GET() {
   const categories = getCacheSettingsView().map((c) => ({
     category: c.category,
@@ -27,7 +31,15 @@ export async function GET() {
     default: pairToSec(c.default),
     current: pairToSec(c.current),
   }));
-  return NextResponse.json({ categories, stats: globalCache.stats() });
+  const llmEntries = await Promise.all(
+    LLM_CACHE_NAMESPACES.map(async (ns) => [ns, await namespaceStats(ns)] as const),
+  );
+  const llm = Object.fromEntries(llmEntries);
+  const llmTotal = llmEntries.reduce(
+    (acc, [, s]) => ({ total: acc.total + s.total, valid: acc.valid + s.valid }),
+    { total: 0, valid: 0 },
+  );
+  return NextResponse.json({ categories, stats: globalCache.stats(), llm, llmTotal });
 }
 
 function secToMs(v: unknown): number | undefined {
@@ -54,6 +66,13 @@ export async function POST(req: Request) {
   if (action === "clear") {
     globalCache.clear();
     return NextResponse.json({ ok: true, cleared: true, stats: globalCache.stats() });
+  }
+
+  if (action === "clearLLM") {
+    // 清空落盘的静态基本面缓存（下次访问会重新全量推理并重建缓存）。
+    const cleared = await Promise.all(LLM_CACHE_NAMESPACES.map((ns) => clearNamespace(ns)));
+    const total = cleared.reduce((a, b) => a + b, 0);
+    return NextResponse.json({ ok: true, clearedLLM: total });
   }
 
   if (action === "reset") {

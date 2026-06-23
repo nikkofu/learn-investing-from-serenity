@@ -60,6 +60,7 @@ export default function SettingsPage() {
   const [cacheCats, setCacheCats] = useState<CacheCat[]>([]);
   const [cacheDraft, setCacheDraft] = useState<Record<string, { active: string; inactive: string }>>({});
   const [cacheStats, setCacheStats] = useState<{ total: number; valid: number; pending: number } | null>(null);
+  const [llmStats, setLlmStats] = useState<{ total: number; valid: number } | null>(null);
   const [cacheStatus, setCacheStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
 
@@ -70,6 +71,7 @@ export default function SettingsPage() {
       const cats: CacheCat[] = d.categories || [];
       setCacheCats(cats);
       setCacheStats(d.stats || null);
+      setLlmStats(d.llmTotal || null);
       const draft: Record<string, { active: string; inactive: string }> = {};
       for (const c of cats) draft[c.category] = { active: String(c.current.active), inactive: String(c.current.inactive) };
       setCacheDraft(draft);
@@ -152,6 +154,27 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error("清空失败");
       setCacheStats(d.stats || null);
       setCacheStatus({ kind: "info", msg: "已清空全部缓存。" });
+    } catch (err) {
+      setCacheStatus({ kind: "err", msg: err instanceof Error ? err.message : "清空失败" });
+    } finally {
+      setCacheBusy(false);
+    }
+  };
+
+  const clearLLMCache = async () => {
+    if (!confirm("确定清空落盘的静态基本面缓存吗？（下次分析会重新全量推理，耗时与费用会上升）")) return;
+    setCacheBusy(true);
+    setCacheStatus(null);
+    try {
+      const res = await fetch("/api/settings/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clearLLM" }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error("清空失败");
+      setCacheStatus({ kind: "info", msg: `已清空静态基本面缓存（${d.clearedLLM ?? 0} 条）。` });
+      await fetchCache();
     } catch (err) {
       setCacheStatus({ kind: "err", msg: err instanceof Error ? err.message : "清空失败" });
     } finally {
@@ -552,6 +575,9 @@ export default function SettingsPage() {
             <div className="shrink-0 text-right text-[10px] font-mono text-[var(--faint)] leading-relaxed select-none">
               <div>缓存条目: <span className="text-[var(--muted)]">{cacheStats.valid}</span> 有效 / {cacheStats.total} 总</div>
               <div>合并请求: {cacheStats.pending}</div>
+              {llmStats && (
+                <div>静态推理: <span className="text-[var(--muted)]">{llmStats.valid}</span> 有效 / {llmStats.total} 总</div>
+              )}
             </div>
           )}
         </div>
@@ -619,6 +645,14 @@ export default function SettingsPage() {
               className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-semibold text-amber-500 hover:bg-[var(--hover)] disabled:opacity-50 cursor-pointer select-none"
             >
               清空当前缓存
+            </button>
+            <button
+              type="button"
+              onClick={clearLLMCache}
+              disabled={cacheBusy}
+              className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-semibold text-red-500 hover:bg-[var(--hover)] disabled:opacity-50 cursor-pointer select-none"
+            >
+              清空静态基本面缓存
             </button>
             {cacheStatus && (
               <p className={`text-xs ${cacheStatus.kind === "ok" ? "text-emerald-400" : cacheStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>

@@ -4,29 +4,39 @@ import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
 import { ndjsonStream } from "@/lib/stream";
 import { NarrativeJsonSplitter } from "@/lib/split";
 import type { SupplyChainMap, SupplyChainNode } from "@/lib/types";
-import { globalCache } from "@/lib/cache";
+import { loadConfig } from "@/lib/config";
+import { getCacheTTL } from "@/lib/cacheSettings";
+import { getPersistent, setPersistent } from "@/lib/llmCache";
 
 export const dynamic = "force-dynamic";
 
+const MAP_CACHE_NS = "map";
+// 趋势→产业链图谱几乎全静态，提示词版本变化时 +1 让旧缓存自然失效。
+const MAP_PROMPT_VERSION = 1;
+
 export async function POST(req: Request) {
-  const body = (await req.json()) as { trend?: string };
+  const body = (await req.json()) as { trend?: string; refresh?: boolean };
   const trend = body.trend?.trim();
   if (!trend) {
     return NextResponse.json({ error: "请提供一个趋势/主题" }, { status: 400 });
   }
 
-  const cacheKey = `map:trend:${trend}`;
-  const cachedMap = globalCache.get<SupplyChainMap>(cacheKey);
+  const refresh = body.refresh === true;
+  const cfg = await loadConfig();
+  const model = cfg?.model ?? "unknown";
+  const cacheKey = `v${MAP_PROMPT_VERSION}:${trend}:${model}`;
+  const ttlMs = getCacheTTL("trendMap", true);
+  const cachedMap = refresh ? null : await getPersistent<SupplyChainMap>(MAP_CACHE_NS, cacheKey);
 
   if (cachedMap) {
-    // 缓存命中：快速模拟流式协议输出以完全兼容前端组件
+    // 缓存命中：落盘的产业链图谱秒级回放，完全兼容前端流式协议。
     return ndjsonStream(async (send) => {
       send({ type: "stage", key: "reason", status: "start" });
-      send({ type: "token", kind: "content", text: `已从系统缓存中加载此前关于“${trend}”的产业链拆解结果...\n\n` });
+      send({ type: "token", kind: "content", text: `⚡ 已从持久缓存命中此前关于“${trend}”的产业链拆解结果（图谱为低频静态数据）...\n\n` });
       send({ type: "stage", key: "reason", status: "done" });
       send({ type: "stage", key: "summary", status: "start" });
       send({ type: "stage", key: "summary", status: "done" });
-      send({ type: "result", map: cachedMap });
+      send({ type: "result", map: cachedMap.value });
       send({ type: "done" });
     });
   }
@@ -95,9 +105,13 @@ export async function POST(req: Request) {
           "本图由 AI 依据 Serenity 瓶颈点方法生成，公司/代码可能有误，仅供研究，不构成投资建议。",
       };
       send({ type: "result", map });
-      
-      // 写入缓存，由于产业链结构是低频稳定数据，直接缓存 24 小时
-      globalCache.set(cacheKey, map, 24 * 60 * 60 * 1000);
+
+      // 落盘持久缓存：产业链结构是低频稳定数据，默认缓存 7 天且重启不丢。失败不阻断。
+      try {
+        await setPersistent(MAP_CACHE_NS, cacheKey, map, ttlMs);
+      } catch (e) {
+        console.warn("[map] 图谱缓存写入失败:", e instanceof Error ? e.message : e);
+      }
 
       send({ type: "stage", key: "summary", status: "done" });
       send({ type: "done" });

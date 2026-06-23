@@ -7,8 +7,33 @@ import { ndjsonStream } from "@/lib/stream";
 import { NarrativeJsonSplitter } from "@/lib/split";
 import { globalCache, getAdaptiveTTL } from "@/lib/cache";
 import { emClist } from "@/lib/sources";
+import { loadConfig } from "@/lib/config";
+import { getCacheTTL } from "@/lib/cacheSettings";
+import { getPersistent, setPersistent, fingerprint } from "@/lib/llmCache";
 
 export const dynamic = "force-dynamic";
+
+const SECTOR_CACHE_NS = "sector";
+// 板块基本面研判提示词版本，变动时 +1 让旧缓存自然失效。
+const SECTOR_PROMPT_VERSION = 1;
+
+interface SectorAssessment {
+  factors: { key: string; score: number; rationale: string }[];
+  totalScore: number;
+  verdict: string;
+  thesis: string;
+  chokepoints: unknown[];
+  leaders: { code: string; name: string; role: string }[];
+  risks: unknown[];
+  catalysts: unknown[];
+}
+
+/** 落盘缓存的板块静态研判（结构/瓶颈/龙头一周内不变；实时资金流/涨跌幅每次重拉）。 */
+interface SectorCachePayload {
+  promptVersion: number;
+  assessment: SectorAssessment;
+  narrative: string;
+}
 
 // 模糊匹配行业板块在知识库中的关联主题
 async function findSerenitySectorKnowledge(sectorName: string) {
@@ -83,9 +108,10 @@ async function findSerenitySectorKnowledge(sectorName: string) {
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { code?: string; name?: string };
+    const body = (await req.json()) as { code?: string; name?: string; refresh?: boolean };
     const code = body.code?.trim();
     const name = body.name?.trim();
+    const refresh = body.refresh === true;
 
     if (!code || !/^BK\d+$/.test(code)) {
       return NextResponse.json({ error: "请提供有效的板块代码，如 BK1465" }, { status: 400 });
@@ -174,6 +200,38 @@ export async function POST(req: Request) {
       // Stage 1.5: 检索匹配 Serenity 本地知识库
       const matchedKnowledge = await findSerenitySectorKnowledge(sectorInfo.name);
 
+      // 静态层缓存：板块结构/瓶颈/龙头一周内不变 → 命中即跳过 LLM，秒级回放研判。
+      const cfg = await loadConfig();
+      const model = cfg?.model ?? "unknown";
+      const cacheKey = `v${SECTOR_PROMPT_VERSION}:${code}:${model}:${fingerprint(matchedKnowledge)}`;
+      const ttlMs = getCacheTTL("sectorFundamental", true);
+      const cached = refresh ? null : await getPersistent<SectorCachePayload>(SECTOR_CACHE_NS, cacheKey);
+
+      if (cached && cached.value.promptVersion === SECTOR_PROMPT_VERSION) {
+        const tCache = performance.now();
+        send({ type: "stage", key: "reason", status: "start" });
+        send({ type: "token", kind: "content", text: `⚡ 已命中板块基本面静态缓存（结构/瓶颈/龙头为低频数据），实时行情已刷新...\n\n` });
+        if (cached.value.narrative) send({ type: "token", kind: "content", text: cached.value.narrative });
+        send({ type: "stage", key: "reason", status: "done", elapsedMs: performance.now() - tCache });
+        send({ type: "stage", key: "summary", status: "start" });
+        send({
+          type: "result",
+          sectorInfo,
+          matchedKnowledge,
+          assessment: cached.value.assessment,
+          cache: { hit: true, createdAt: cached.createdAt, ttlMs },
+          timings: {
+            quoteMs: quoteElapsed,
+            reasonMs: performance.now() - tCache,
+            summaryMs: 0,
+            totalMs: performance.now() - tStart,
+          },
+        });
+        send({ type: "stage", key: "summary", status: "done", elapsedMs: 0 });
+        send({ type: "done" });
+        return;
+      }
+
       // Stage 2: 流式传输 LLM 板块研判
       const { system, user } = buildSectorAnalyzePrompt({
         sectorName: sectorInfo.name,
@@ -190,6 +248,7 @@ export async function POST(req: Request) {
       const tReasonStart = performance.now();
       send({ type: "stage", key: "reason", status: "start" });
       const splitter = new NarrativeJsonSplitter();
+      let narrativeAcc = "";
       let advanced = false;
       let reasonElapsed = 0;
 
@@ -208,12 +267,18 @@ export async function POST(req: Request) {
             continue;
           }
           const { narrative, structured } = splitter.push(delta.text);
-          if (narrative) send({ type: "token", kind: "content", text: narrative });
+          if (narrative) {
+            narrativeAcc += narrative;
+            send({ type: "token", kind: "content", text: narrative });
+          }
           if (structured) send({ type: "token", kind: "structured", text: structured });
           if (splitter.inJsonPhase) advanceToSummary();
         }
         const tail = splitter.end();
-        if (tail) send({ type: "token", kind: "content", text: tail });
+        if (tail) {
+          narrativeAcc += tail;
+          send({ type: "token", kind: "content", text: tail });
+        }
       } catch (e) {
         if (e instanceof LLMNotConfiguredError) {
           send({ type: "error", status: 412, message: e.message });
@@ -249,7 +314,7 @@ export async function POST(req: Request) {
           }, 0).toFixed(2)
         );
 
-        const assessment = {
+        const assessment: SectorAssessment = {
           factors,
           totalScore,
           verdict: raw.verdict || "一般",
@@ -264,6 +329,18 @@ export async function POST(req: Request) {
           catalysts: raw.catalysts || [],
         };
 
+        // 落盘静态层研判，供一周内秒级命中。失败不阻断。
+        try {
+          await setPersistent<SectorCachePayload>(
+            SECTOR_CACHE_NS,
+            cacheKey,
+            { promptVersion: SECTOR_PROMPT_VERSION, assessment, narrative: narrativeAcc },
+            ttlMs,
+          );
+        } catch (e) {
+          console.warn("[sector] 静态层缓存写入失败:", e instanceof Error ? e.message : e);
+        }
+
         const summaryElapsed = performance.now() - tSummaryStart;
         const totalElapsed = performance.now() - tStart;
 
@@ -272,6 +349,7 @@ export async function POST(req: Request) {
           sectorInfo,
           matchedKnowledge,
           assessment,
+          cache: { hit: false, createdAt: Date.now(), ttlMs },
           timings: {
             quoteMs: quoteElapsed,
             reasonMs: reasonElapsed,
