@@ -284,6 +284,8 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
   const [showMA120, setShowMA120] = useState(true);
   const [showMA250, setShowMA250] = useState(true);
   const [showChannel, setShowChannel] = useState(true);
+  // 纵轴标度：linear 线性 / log 对数（贴合后复权长周期，低位不贴底）/ pct 百分比（相对首根收盘看相对涨跌）。
+  const [yScaleMode, setYScaleMode] = useState<"linear" | "log" | "pct">("linear");
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [hoveredChip, setHoveredChip] = useState<{ price: number; volume: number; ratio: number } | null>(null);
 
@@ -398,8 +400,24 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
       const minVal = rawMin * 0.97;
       const range = maxVal - minVal || 1;
 
+      // 纵轴标度：对数仅在最小值为正时启用（否则自动回退线性，避免 log 负数）；百分比与线性同形（仅轴标签不同）。
+      const logOk = yScaleMode === "log" && minVal > 0;
+      const effYMode: "linear" | "log" | "pct" = logOk ? "log" : yScaleMode === "log" ? "linear" : yScaleMode;
+      const lnMin = logOk ? Math.log(minVal) : 0;
+      const lnRange = logOk ? (Math.log(maxVal) - lnMin) || 1 : 1;
+      const yBase = slicedCandles[0]?.close || minVal || 1;
+
       const getY = (val: number) => {
+        if (logOk) {
+          const v = val > 0 ? val : minVal;
+          return padding + (1 - (Math.log(v) - lnMin) / lnRange) * mainDrawHeight;
+        }
         return padding + (1 - (val - minVal) / range) * mainDrawHeight;
+      };
+      // 给定纵向比例位置（0=顶部/最大值, 1=底部/最小值）反推该处价格，供网格轴标签使用（对数下取指数刻度）。
+      const yValueAt = (frac: number) => {
+        if (logOk) return Math.exp(Math.log(maxVal) - frac * lnRange);
+        return maxVal - frac * (maxVal - minVal);
       };
 
       // 计算成交量最大值 (在可视蜡烛切片中取最值，使缩放后成交量柱子高低对比自适应展现)
@@ -593,6 +611,9 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         maxWorth: maxVal,
         getX,
         getY,
+        yMode: effYMode,
+        yBase,
+        yValueAt,
         ma5Path: `M ${ma5Points.join(" L ")}`,
         ma10Path: `M ${ma10Points.join(" L ")}`,
         ma20Path: `M ${ma20Points.join(" L ")}`,
@@ -724,6 +745,9 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         maxWorth,
         getX: getXWorth,
         getY,
+        yMode: "linear" as const,
+        yBase: 0,
+        yValueAt: (frac: number) => maxWorth - frac * (maxWorth - minWorth),
         strategyPath: `M ${strategyPoints.join(" L ")}`,
         stockPath: `M ${stockPoints.join(" L ")}`,
         upperChannelPath,
@@ -734,7 +758,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         slicedHistory
       };
     }
-  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showMA120, showMA250, showChannel, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount, ma5List, ma10List, ma20List, ma60List, ma120List, ma250List, quantData]);
+  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showMA120, showMA250, showChannel, yScaleMode, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount, ma5List, ma10List, ma20List, ma60List, ma120List, ma250List, quantData]);
 
   // 3. 筹码分布直方图的渲染映射计算
   const chipChartWidth = 140;
@@ -1249,6 +1273,26 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
             <input type="checkbox" checked={showChannel} onChange={(e) => setShowChannel(e.target.checked)} className="rounded-[1px] accent-[var(--accent)]" />
             回归通道
           </label>
+
+          {/* 纵轴标度切换（对标 TradingView 线性/对数/百分比）：对数贴合后复权长周期，百分比看相对涨跌 */}
+          {chartType === "kline" && (
+            <div className="flex items-center gap-1" title="纵轴标度：线性 / 对数（贴合后复权长周期，低位不贴底）/ 百分比（相对首根收盘看相对涨跌）">
+              <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--faint)] select-none">纵轴</span>
+              <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px] font-mono">
+                {([["linear", "线性"], ["log", "对数"], ["pct", "%"]] as const).map(([m, label]) => (
+                  <button
+                    key={m}
+                    onClick={() => setYScaleMode(m)}
+                    className={`px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer transition rounded-[1px] ${
+                      yScaleMode === m ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 周期切换 */}
@@ -1329,7 +1373,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
           <div className="relative border border-[var(--border)] bg-[var(--inset)] overflow-hidden rounded-none p-1">
             {/* 纵轴单位标注 */}
             <div className="absolute left-2.5 top-1.5 z-10 text-[7.5px] font-mono text-[var(--faint)] uppercase tracking-wider scale-90 origin-top-left">
-              Y轴: {chartType === "kline" ? "个股股价 (元)" : "账户总资产净值 (元)"}
+              Y轴: {chartType === "kline" ? (yScaleMode === "pct" ? "相对涨跌 (%)" : yScaleMode === "log" ? "个股股价 (元·对数)" : "个股股价 (元)") : "账户总资产净值 (元)"}
             </div>
 
             <svg
@@ -1346,7 +1390,16 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
               {/* 背景网格线 */}
               {Array.from({ length: 5 }).map((_, i) => {
                 const y = padding + (i / 4) * mainDrawHeight;
-                const val = chartParams.maxWorth - (i / 4) * (chartParams.maxWorth - chartParams.minWorth);
+                const val = chartParams.yValueAt(i / 4);
+                let axisLabel: string;
+                if (chartType !== "kline") {
+                  axisLabel = val.toLocaleString(undefined, { maximumFractionDigits: 0 });
+                } else if (chartParams.yMode === "pct") {
+                  const pct = (val / chartParams.yBase - 1) * 100;
+                  axisLabel = `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+                } else {
+                  axisLabel = val.toFixed(2);
+                }
                 return (
                   <g key={i}>
                     <line
@@ -1365,7 +1418,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       fontSize="8"
                       fontFamily="monospace"
                     >
-                      {chartType === "kline" ? val.toFixed(2) : val.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      {axisLabel}
                     </text>
                   </g>
                 );
