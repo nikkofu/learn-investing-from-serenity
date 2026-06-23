@@ -3,6 +3,7 @@
 import { useMemo, useState, useRef, useEffect } from "react";
 import { calculateChipDistribution } from "@/lib/quant";
 import type { ChipDistributionResult, BacktestResult, TradeAction, TechnicalAssessment } from "@/lib/quant";
+import { computeMACD, computeRSI, computeKDJ, computeBOLL } from "@/lib/indicators";
 import type { Candle } from "@/lib/types";
 
 interface QuantChartProps {
@@ -286,6 +287,9 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
   const [showChannel, setShowChannel] = useState(true);
   // 纵轴标度：linear 线性 / log 对数（贴合后复权长周期，低位不贴底）/ pct 百分比（相对首根收盘看相对涨跌）。
   const [yScaleMode, setYScaleMode] = useState<"linear" | "log" | "pct">("linear");
+  // 布林带叠加在主图；副图振荡指标单选（无/MACD/RSI/KDJ）。
+  const [showBoll, setShowBoll] = useState(false);
+  const [subInd, setSubInd] = useState<"none" | "macd" | "rsi" | "kdj">("none");
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [hoveredChip, setHoveredChip] = useState<{ price: number; volume: number; ratio: number } | null>(null);
 
@@ -308,8 +312,12 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
 
   // 1. 回测图大小与间隔
   const mainChartWidth = 620;
-  const totalSvgHeight = 300;
   const padding = 20;
+  // 副图振荡面板：启用时在成交量下方增一栏，SVG 总高动态加高。
+  const subActive = chartType === "kline" && subInd !== "none";
+  const oscDrawHeight = 60;
+  const oscYStart = 300;
+  const totalSvgHeight = subActive ? oscYStart + oscDrawHeight + 16 : 300;
 
   // 动态高度划分与成交量副图尺寸
   const showVolumeChart = chartType === "kline";
@@ -341,6 +349,12 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
   const ma120List = useMemo(() => calculateMA(currentCandles, 120), [currentCandles]);
   const ma250List = useMemo(() => calculateMA(currentCandles, 250), [currentCandles]);
 
+  // 技术指标（副图/叠加），口径对齐通达信/同花顺默认。
+  const macdData = useMemo(() => computeMACD(currentCandles), [currentCandles]);
+  const rsiData = useMemo(() => computeRSI(currentCandles), [currentCandles]);
+  const kdjData = useMemo(() => computeKDJ(currentCandles), [currentCandles]);
+  const bollData = useMemo(() => computeBOLL(currentCandles), [currentCandles]);
+
   // 2. 回测折线图/K线图的坐标映射计算
   const chartParams = useMemo(() => {
     if (currentCandles.length === 0) return null;
@@ -368,6 +382,9 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
       const slicedMa60 = ma60List.slice(sliceStart);
       const slicedMa120 = ma120List.slice(sliceStart);
       const slicedMa250 = ma250List.slice(sliceStart);
+      const slicedBollMid = bollData.mid.slice(sliceStart);
+      const slicedBollUp = bollData.upper.slice(sliceStart);
+      const slicedBollLow = bollData.lower.slice(sliceStart);
 
       slicedCandles.forEach((c) => priceList.push(c.high, c.low));
       if (showMA5) priceList.push(...slicedMa5);
@@ -376,6 +393,13 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
       if (showMA60) priceList.push(...slicedMa60);
       if (showMA120) priceList.push(...slicedMa120);
       if (showMA250) priceList.push(...slicedMa250);
+
+      if (showBoll) {
+        for (let bi = 0; bi < slicedBollUp.length; bi++) {
+          if (Number.isFinite(slicedBollUp[bi])) priceList.push(slicedBollUp[bi]);
+          if (Number.isFinite(slicedBollLow[bi])) priceList.push(slicedBollLow[bi]);
+        }
+      }
 
       if (technical?.trendChannel && showChannel) {
         priceList.push(technical.trendChannel.upperLine, technical.trendChannel.lowerLine);
@@ -419,6 +443,18 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         if (logOk) return Math.exp(Math.log(maxVal) - frac * lnRange);
         return maxVal - frac * (maxVal - minVal);
       };
+      // 跳过 NaN 预热段的折线路径（用于 BOLL 等有预热期的叠加线）。
+      const finiteLinePath = (arr: number[]) => {
+        const pts: string[] = [];
+        for (let i = 0; i < arr.length; i++) {
+          if (!Number.isFinite(arr[i])) continue;
+          pts.push(`${getX(i).toFixed(1)},${getY(arr[i]).toFixed(1)}`);
+        }
+        return pts.length ? `M ${pts.join(" L ")}` : "";
+      };
+      const bollMidPath = showBoll ? finiteLinePath(slicedBollMid) : "";
+      const bollUpperPath = showBoll ? finiteLinePath(slicedBollUp) : "";
+      const bollLowerPath = showBoll ? finiteLinePath(slicedBollLow) : "";
 
       // 计算成交量最大值 (在可视蜡烛切片中取最值，使缩放后成交量柱子高低对比自适应展现)
       let maxVolume = 1;
@@ -614,6 +650,9 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         yMode: effYMode,
         yBase,
         yValueAt,
+        bollMidPath,
+        bollUpperPath,
+        bollLowerPath,
         ma5Path: `M ${ma5Points.join(" L ")}`,
         ma10Path: `M ${ma10Points.join(" L ")}`,
         ma20Path: `M ${ma20Points.join(" L ")}`,
@@ -758,7 +797,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         slicedHistory
       };
     }
-  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showMA120, showMA250, showChannel, yScaleMode, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount, ma5List, ma10List, ma20List, ma60List, ma120List, ma250List, quantData]);
+  }, [currentCandles, chartType, showMA5, showMA10, showMA20, showMA60, showMA120, showMA250, showChannel, showBoll, yScaleMode, technical, history, trades, currentPrice, periodMode, mainDrawHeight, zoomCount, ma5List, ma10List, ma20List, ma60List, ma120List, ma250List, bollData, quantData]);
 
   // 3. 筹码分布直方图的渲染映射计算
   const chipChartWidth = 140;
@@ -1266,6 +1305,10 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                 <input type="checkbox" checked={showMA250} onChange={(e) => setShowMA250(e.target.checked)} className="rounded-[1px] accent-[var(--accent)]" />
                 MA250
               </label>
+              <label className="flex items-center gap-1 cursor-pointer hover:text-[var(--text)]" title="布林带 BOLL(20,2)：中轨=MA20，上下轨=±2倍标准差">
+                <input type="checkbox" checked={showBoll} onChange={(e) => setShowBoll(e.target.checked)} className="rounded-[1px] accent-[var(--accent)]" />
+                BOLL
+              </label>
             </div>
           )}
 
@@ -1285,6 +1328,26 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                     onClick={() => setYScaleMode(m)}
                     className={`px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer transition rounded-[1px] ${
                       yScaleMode === m ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 副图振荡指标切换（对标 TradingView 可插拔副图）：无 / MACD / RSI / KDJ */}
+          {chartType === "kline" && (
+            <div className="flex items-center gap-1" title="副图指标：MACD / RSI / KDJ（口径对齐通达信/同花顺）">
+              <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--faint)] select-none">副图</span>
+              <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px] font-mono">
+                {([["none", "无"], ["macd", "MACD"], ["rsi", "RSI"], ["kdj", "KDJ"]] as const).map(([m, label]) => (
+                  <button
+                    key={m}
+                    onClick={() => setSubInd(m)}
+                    className={`px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer transition rounded-[1px] ${
+                      subInd === m ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"
                     }`}
                   >
                     {label}
@@ -1500,6 +1563,15 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                   {showMA120 && <path d={chartParams.ma120Path} fill="none" stroke="#c084fc" strokeWidth="1.2" opacity="0.8" style={{ stroke: "#a855f7" }} />}
                   {showMA250 && <path d={chartParams.ma250Path} fill="none" stroke="#ef4444" strokeWidth="1.5" opacity="0.85" />}
 
+                  {/* 布林带 BOLL(20,2) 叠加：中轨虚线 + 上下轨实线 */}
+                  {showBoll && (
+                    <g>
+                      <path d={chartParams.bollUpperPath} fill="none" stroke="#38bdf8" strokeWidth="0.9" opacity="0.75" />
+                      <path d={chartParams.bollMidPath} fill="none" stroke="#38bdf8" strokeWidth="0.9" opacity="0.6" strokeDasharray="3 2" />
+                      <path d={chartParams.bollLowerPath} fill="none" stroke="#38bdf8" strokeWidth="0.9" opacity="0.75" />
+                    </g>
+                  )}
+
                   {/* K线蜡烛线绘制 */}
                   {chartParams.slicedCandles.map((c, idx) => {
                     const x = chartParams.getX(idx);
@@ -1607,6 +1679,105 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                   })}
                 </g>
               )}
+
+              {/* === C2. 副图振荡指标 (MACD / RSI / KDJ) === */}
+              {chartParams.type === "kline" && subActive && (() => {
+                const sliceStart = chartParams.sliceStart;
+                const n = chartParams.slicedCandles.length;
+                const top = oscYStart;
+                const bot = oscYStart + oscDrawHeight;
+                const candleWidth = Math.max(1.5, ((mainChartWidth - 2 * padding) / Math.max(1, n)) * 0.65);
+                const visExtent = (arr: number[]): readonly [number, number] => {
+                  let lo = Infinity;
+                  let hi = -Infinity;
+                  for (let i = 0; i < n; i++) {
+                    const v = arr[sliceStart + i];
+                    if (!Number.isFinite(v)) continue;
+                    if (v < lo) lo = v;
+                    if (v > hi) hi = v;
+                  }
+                  if (lo === Infinity) return [0, 1];
+                  return [lo, hi];
+                };
+                const linePath = (arr: number[], lo: number, hi: number) => {
+                  const span = (hi - lo) || 1;
+                  const pts: string[] = [];
+                  for (let i = 0; i < n; i++) {
+                    const v = arr[sliceStart + i];
+                    if (!Number.isFinite(v)) continue;
+                    const y = bot - ((v - lo) / span) * oscDrawHeight;
+                    pts.push(`${chartParams.getX(i).toFixed(1)},${y.toFixed(1)}`);
+                  }
+                  return pts.length ? `M ${pts.join(" L ")}` : "";
+                };
+                const frame = (label: string, guides: { v: number; lo: number; hi: number; text?: string }[]) => (
+                  <>
+                    <line x1={padding} y1={top} x2={mainChartWidth - padding} y2={top} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="2 3" />
+                    <line x1={padding} y1={bot} x2={mainChartWidth - padding} y2={bot} stroke="var(--border)" strokeWidth="0.5" />
+                    <text x={padding + 5} y={top - 4} fill="var(--faint)" fontSize="7.5" fontFamily="monospace">{label}</text>
+                    {guides.map((g, gi) => {
+                      const y = bot - ((g.v - g.lo) / ((g.hi - g.lo) || 1)) * oscDrawHeight;
+                      return (
+                        <g key={`og-${gi}`}>
+                          <line x1={padding} y1={y} x2={mainChartWidth - padding} y2={y} stroke="var(--border)" strokeWidth="0.4" strokeDasharray="1 4" opacity="0.6" />
+                          {g.text && <text x={mainChartWidth - padding - 2} y={y - 2} fill="var(--faint)" fontSize="6.5" fontFamily="monospace" textAnchor="end">{g.text}</text>}
+                        </g>
+                      );
+                    })}
+                  </>
+                );
+
+                if (subInd === "macd") {
+                  let mx = 0;
+                  for (let i = 0; i < n; i++) {
+                    for (const arr of [macdData.dif, macdData.dea, macdData.macd]) {
+                      const v = arr[sliceStart + i];
+                      if (Number.isFinite(v) && Math.abs(v) > mx) mx = Math.abs(v);
+                    }
+                  }
+                  mx = mx || 1;
+                  const lo = -mx;
+                  const hi = mx;
+                  const zeroY = bot - ((0 - lo) / (hi - lo)) * oscDrawHeight;
+                  return (
+                    <g>
+                      {frame("MACD(12,26,9)", [{ v: 0, lo, hi }])}
+                      {chartParams.slicedCandles.map((_, i) => {
+                        const v = macdData.macd[sliceStart + i];
+                        if (!Number.isFinite(v)) return null;
+                        const y = bot - ((v - lo) / (hi - lo)) * oscDrawHeight;
+                        return <rect key={`macd-${i}`} x={chartParams.getX(i) - candleWidth / 2} y={Math.min(y, zeroY)} width={candleWidth} height={Math.max(0.4, Math.abs(y - zeroY))} fill={v >= 0 ? "#ef4444" : "#10b981"} opacity="0.6" />;
+                      })}
+                      <path d={linePath(macdData.dif, lo, hi)} fill="none" stroke="#eab308" strokeWidth="0.9" />
+                      <path d={linePath(macdData.dea, lo, hi)} fill="none" stroke="#38bdf8" strokeWidth="0.9" />
+                    </g>
+                  );
+                }
+                if (subInd === "rsi") {
+                  return (
+                    <g>
+                      {frame("RSI(14)", [{ v: 70, lo: 0, hi: 100, text: "70" }, { v: 50, lo: 0, hi: 100 }, { v: 30, lo: 0, hi: 100, text: "30" }])}
+                      <path d={linePath(rsiData, 0, 100)} fill="none" stroke="#eab308" strokeWidth="0.9" />
+                    </g>
+                  );
+                }
+                const [jLo, jHi] = visExtent(kdjData.j);
+                let lo = Math.min(jLo, 0);
+                let hi = Math.max(jHi, 100);
+                for (const arr of [kdjData.k, kdjData.d]) {
+                  const [l, h] = visExtent(arr);
+                  if (l < lo) lo = l;
+                  if (h > hi) hi = h;
+                }
+                return (
+                  <g>
+                    {frame("KDJ(9,3,3)", [{ v: 80, lo, hi, text: "80" }, { v: 20, lo, hi, text: "20" }])}
+                    <path d={linePath(kdjData.k, lo, hi)} fill="none" stroke="#eab308" strokeWidth="0.9" />
+                    <path d={linePath(kdjData.d, lo, hi)} fill="none" stroke="#38bdf8" strokeWidth="0.9" />
+                    <path d={linePath(kdjData.j, lo, hi)} fill="none" stroke="#ec4899" strokeWidth="0.9" />
+                  </g>
+                );
+              })()}
 
               {/* === D. X轴日期时间刻度标注 === */}
               {(() => {
