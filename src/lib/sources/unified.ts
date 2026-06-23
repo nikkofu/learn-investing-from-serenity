@@ -8,7 +8,7 @@
  * 新数据源作为兜底，不重复造轮子。
  */
 
-import { getQuote, getFinancials } from "../market";
+import { getQuote, getFinancials, getKline } from "../market";
 import { globalCache, getAdaptiveTTL } from "../cache";
 import type { StockQuote, Candle, StockFinancials } from "../types";
 import { getTencentQuotes } from "./tencent";
@@ -276,6 +276,26 @@ export async function getKlineFailover(code: string, limit = 120, klt = 101, fq:
     if (klt === 102) return resampleCandles(data, "week").slice(-limit);
     if (klt === 103) return resampleCandles(data, "month").slice(-limit);
     return data.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 分钟级分时 K 线（5/15/30/60m，对标 TradingView 日内多周期）。
+ * 东财 push2his 直取最近 N 根分时数据，不入日线落盘库（分时仅近段可得）。
+ * fq: qfq→fqt=1（前复权）/ hfq→fqt=2（后复权）。日期形如 "YYYY-MM-DD HH:MM"。
+ * 任一异常返回空数组（与 getKlineFailover 行为一致）。
+ */
+export async function getIntradayKline(
+  code: string,
+  limit = 480,
+  klt: 5 | 15 | 30 | 60 = 5,
+  fq: FqMode = "qfq"
+): Promise<Candle[]> {
+  const fqt = fq === "hfq" ? 2 : 1;
+  try {
+    return await getKline(code, limit, klt, fqt);
   } catch {
     return [];
   }

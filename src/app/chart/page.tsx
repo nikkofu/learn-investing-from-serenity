@@ -477,6 +477,8 @@ function ChartInner() {
                 <LightweightChart
                   candles={data.quant.candles ?? []}
                   trades={data.quant.backtest?.trades ?? []}
+                  code={data.quote.code}
+                  fq={fq}
                 />
               ) : (
                 <QuantChart

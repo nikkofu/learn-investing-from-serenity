@@ -64,6 +64,7 @@ export {
   getQuotesFailover,
   getDailyKline,
   getKlineFailover,
+  getIntradayKline,
   getHfqDailyHistory,
   getMainFinancials,
   getStockProfile,

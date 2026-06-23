@@ -4,6 +4,20 @@
 
 ---
 
+## [0.23.0] - 2026-06-23
+
+> **多周期分时 / 日内 5·15·30·60m（对标 TradingView 日内多周期）**。Pro 画布视图周期切换新增 5m / 15m / 30m / 60m 分时档，按需向东财 push2his 拉取分钟级 K 线，原生时间轴显示北京钟面时间；十字光标读数、对数/百分比纵轴、MACD/RSI/KDJ 副图、逐根回放全部在分时档下可用。
+
+### 新增：日内多周期
+- `src/lib/sources/unified.ts`（+ `index.ts` 导出）：新增 `getIntradayKline(code, limit, klt∈{5,15,30,60}, fq)`，东财 push2his 直取最近 N 根分钟 K（不入日线落盘库；`fq=hfq` 走 `fqt=2`）。
+- `src/app/api/market/kline/route.ts`（新增）：`GET ?code=&period=5m|15m|30m|60m&fq=` → `{ candles }`，专供 Pro 画布日内切换按需取数。
+- `src/components/LightweightChart.tsx`：周期选择器新增分时档（5m/15m/30m/60m | 日/周/月分组）；选中分时档时按需拉取并渲染分钟 K（切个股/复权/分钟周期自动重拉，带加载/错误态）。分时日期 `YYYY-MM-DD HH:MM` 按 UTC 解析成时间戳，使库 UTC 标签恰好显示为北京钟面时间，并开启 `timeVisible`。
+
+### ✅ 质量
+- 数据源实测：东财 push2his `klt=5` 返回带时间戳的分钟 K（如 `2026-06-23 14:25 …`）；多周期同一代码路径仅 `klt` 不同。`tsc --noEmit` 0 error；`eslint`（改动文件）0 error；`next build` 通过。仅改动 Pro 画布 + 数据层 + 新端点，经典 SVG 视图与分析管线零影响。
+
+---
+
 ## [0.22.0] - 2026-06-23
 
 > **逐根回放 / Bar Replay（对标 TradingView Bar Replay）**。Pro 画布视图新增「回放」模式：隐藏未来 K 线，单步或自动逐根显露，配速度档与进度读数，用于不开"上帝视角"地复盘临场决策与练习。

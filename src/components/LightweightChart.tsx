@@ -25,7 +25,13 @@ import { computeMACD, computeRSI, computeKDJ, computeBOLL } from "@/lib/indicato
 interface LightweightChartProps {
   candles: Candle[];
   trades: TradeAction[];
+  code?: string;
+  fq?: "qfq" | "hfq";
 }
+
+type Timeframe = "5m" | "15m" | "30m" | "60m" | "1D" | "1W" | "1M";
+const INTRADAY_TFS: Timeframe[] = ["5m", "15m", "30m", "60m"];
+const DAILY_TFS: Timeframe[] = ["1D", "1W", "1M"];
 
 const UP = "#ef4444"; // 阳（涨）红
 const DOWN = "#10b981"; // 阴（跌）绿
@@ -45,6 +51,16 @@ const REPLAY_SPEEDS: { label: string; ms: number }[] = [
   { label: "快", ms: 120 },
 ];
 
+// 分时（5/15/30/60m）日期形如 "YYYY-MM-DD HH:MM"（北京时间）：按 UTC 解析成时间戳，
+// 使 lightweight-charts 的 UTC 标签恰好显示为北京钟面时间；日线则用业务日字符串。
+const isIntradayTf = (tf: Timeframe) => tf.endsWith("m");
+function makeToTime(intraday: boolean) {
+  return (d: string): Time =>
+    intraday
+      ? (Math.floor(Date.parse(d.replace(" ", "T") + ":00Z") / 1000) as unknown as Time)
+      : (d as unknown as Time);
+}
+
 function maOf(candles: Candle[], period: number): (number | null)[] {
   const out: (number | null)[] = new Array(candles.length).fill(null);
   let sum = 0;
@@ -56,9 +72,7 @@ function maOf(candles: Candle[], period: number): (number | null)[] {
   return out;
 }
 
-const toTime = (d: string) => d as unknown as Time;
-
-export default function LightweightChart({ candles: rawCandles, trades }: LightweightChartProps) {
+export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq" }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -66,7 +80,7 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
   // 每个序列携带自己的「按可见 K 线重绘」闭包，回放时仅重绘数据、不重建图表。
   const paintersRef = useRef<((vc: Candle[]) => void)[]>([]);
 
-  const [period, setPeriod] = useState<"1D" | "1W" | "1M">("1D");
+  const [period, setPeriod] = useState<Timeframe>("1D");
   const [yScaleMode, setYScaleMode] = useState<"linear" | "log" | "pct">("linear");
   const [subInd, setSubInd] = useState<"none" | "macd" | "rsi" | "kdj">("none");
   const [showBoll, setShowBoll] = useState(false);
@@ -78,7 +92,17 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
   const [playing, setPlaying] = useState(false);
   const [speedMs, setSpeedMs] = useState(350);
 
-  const candles = useMemo(() => candlesByPeriod(rawCandles, period), [rawCandles, period]);
+  // 日内分时：选中 5/15/30/60m 时按需拉取（不走日线 props）
+  const [intradayCandles, setIntradayCandles] = useState<Candle[] | null>(null);
+  const [tfLoading, setTfLoading] = useState(false);
+  const [tfErr, setTfErr] = useState("");
+  const intraday = isIntradayTf(period);
+
+  const candles = useMemo(
+    () => (intraday ? intradayCandles ?? [] : candlesByPeriod(rawCandles, period as "1D" | "1W" | "1M")),
+    [rawCandles, period, intraday, intradayCandles]
+  );
+  const toTime = useCallback((d: string): Time => makeToTime(intraday)(d), [intraday]);
   const macd = useMemo(() => computeMACD(candles), [candles]);
   const rsi = useMemo(() => computeRSI(candles), [candles]);
   const kdj = useMemo(() => computeKDJ(candles), [candles]);
@@ -96,6 +120,37 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
     setPlaying(false);
   }, [rawCandles, period]);
 
+  // 日内分时按需拉取（切换个股/复权/分钟周期重拉）
+  useEffect(() => {
+    if (!intraday) {
+      setIntradayCandles(null);
+      setTfErr("");
+      return;
+    }
+    if (!code) return;
+    let cancelled = false;
+    setTfLoading(true);
+    setTfErr("");
+    fetch(`/api/market/kline?code=${code}&period=${period}&fq=${fq}`)
+      .then(async (r) => {
+        const j = await r.json();
+        if (!r.ok || j.error) throw new Error(j.error || `加载失败: ${r.status}`);
+        if (!cancelled) setIntradayCandles(j.candles ?? []);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setTfErr(e instanceof Error ? e.message : "分时加载失败");
+          setIntradayCandles([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setTfLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [intraday, code, period, fq]);
+
   // 将当前可见 K 线刷到所有序列 + 标记 + 读数条
   const paint = useCallback((vc: Candle[]) => {
     for (const p of paintersRef.current) p(vc);
@@ -112,7 +167,7 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
     markersApiRef.current?.setMarkers(markers);
     const last = vc[vc.length - 1];
     if (last) setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0 });
-  }, [trades]);
+  }, [trades, toTime]);
 
   // 结构层：仅在「指标/周期/纵轴/副图」变化时重建图表与序列（不随回放游标变动）
   useEffect(() => {
@@ -129,7 +184,7 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
       grid: { vertLines: { color: borderColor, style: LineStyle.Dotted }, horzLines: { color: borderColor, style: LineStyle.Dotted } },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor, mode: yScaleMode === "log" ? PriceScaleMode.Logarithmic : yScaleMode === "pct" ? PriceScaleMode.Percentage : PriceScaleMode.Normal },
-      timeScale: { borderColor, timeVisible: false, rightOffset: 4 },
+      timeScale: { borderColor, timeVisible: intraday, secondsVisible: false, rightOffset: 4 },
     });
     chartRef.current = chart;
     paintersRef.current = [];
@@ -201,8 +256,8 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
       if (!param.time) return;
       const cd = param.seriesData.get(candleSeries) as CandlestickData | undefined;
       if (!cd) return;
-      const dateStr = param.time as unknown as string;
-      const match = candles.find((c) => c.date === dateStr);
+      const match = candles.find((c) => toTime(c.date) === param.time);
+      const dateStr = match?.date ?? String(param.time);
       setLegend({ date: dateStr, o: cd.open, h: cd.high, l: cd.low, c: cd.close, v: match?.volume || 0, chg: match?.changePct ?? 0 });
     });
     void onMove;
@@ -216,7 +271,7 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
     };
     // 故意不依赖 viewCandles：回放游标变化由下方数据层处理，避免重建图表导致闪烁。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, macd, rsi, kdj, boll, maOn, showBoll, subInd, yScaleMode, paint]);
+  }, [candles, macd, rsi, kdj, boll, maOn, showBoll, subInd, yScaleMode, intraday, toTime, paint]);
 
   // 数据层：回放游标（viewCandles）变化时仅重绘数据，并把最新显露的 K 线滚入视野。
   useEffect(() => {
@@ -262,15 +317,23 @@ export default function LightweightChart({ candles: rawCandles, trades }: Lightw
           </label>
         </div>
 
-        <div className="flex items-center gap-1" title="周期：日/周/月 K">
+        <div className="flex items-center gap-1" title="周期：分时 5/15/30/60m（日内，按需拉取） · 日/周/月 K">
           <span className="text-[9px] uppercase tracking-wider text-[var(--faint)]">周期</span>
           <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px]">
-            {(["1D", "1W", "1M"] as const).map((m) => (
+            {INTRADAY_TFS.map((m) => (
+              <button key={m} onClick={() => setPeriod(m)} className={`px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] ${period === m ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"}`}>
+                {m}
+              </button>
+            ))}
+            <span className="w-px bg-[var(--border)] mx-0.5" />
+            {DAILY_TFS.map((m) => (
               <button key={m} onClick={() => setPeriod(m)} className={`px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] ${period === m ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"}`}>
                 {m}
               </button>
             ))}
           </div>
+          {tfLoading && <span className="text-[9px] text-[var(--accent)] ml-0.5">分时加载中…</span>}
+          {tfErr && <span className="text-[9px] text-emerald-400 ml-0.5">{tfErr}</span>}
         </div>
 
         <div className="flex items-center gap-1" title="纵轴标度：线性 / 对数 / 百分比（lightweight-charts 原生）">
