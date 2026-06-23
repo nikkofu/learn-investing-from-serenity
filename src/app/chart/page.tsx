@@ -7,6 +7,9 @@ import { readNdjson } from "@/lib/stream-client";
 import QuantChart from "@/components/QuantChart";
 import LightweightChart from "@/components/LightweightChart";
 import RadarChart from "@/components/RadarChart";
+import BacktestReport from "@/components/BacktestReport";
+import { DEFAULT_MA_PARAMS, type MaStrategyParams, type BacktestResult } from "@/lib/quant";
+import type { PerformanceReport } from "@/lib/performance";
 
 interface AnalyzeResponse {
   quote: StockQuote;
@@ -26,6 +29,16 @@ interface AnalyzeResponse {
   } | null;
   quant?: any;
 }
+
+// 传统均线突破策略可调参数表单字段（对标 TradingView Strategy 参数面板）。
+const PARAM_FIELDS: { key: keyof MaStrategyParams; label: string; step: number; min: number; max: number; suffix?: string }[] = [
+  { key: "maPeriod", label: "均线周期", step: 1, min: 2, max: 250 },
+  { key: "takeProfitPct", label: "止盈涨幅", step: 1, min: 1, max: 500, suffix: "%" },
+  { key: "volMultiple", label: "放量倍数", step: 0.1, min: 0.5, max: 10, suffix: "×" },
+  { key: "safeRangePos", label: "安全价位上限", step: 0.05, min: 0.1, max: 1 },
+  { key: "overboughtPos", label: "超买价位", step: 0.05, min: 0.1, max: 1 },
+  { key: "overboughtTurnover", label: "超买天量换手", step: 1, min: 1, max: 100, suffix: "%" },
+];
 
 const FACTOR_LABELS: Record<string, string> = {
   demand: "确定需求",
@@ -60,6 +73,11 @@ function ChartInner() {
   const [fq, setFq] = useState<"qfq" | "hfq">("qfq");
   // 图表引擎：classic = 自研 SVG（筹码/投影/VRVP 叠加）；pro = lightweight-charts 画布（十字光标/多窗格/性能）。
   const [chartView, setChartView] = useState<"classic" | "pro">("classic");
+  // 策略参数化：表单调参后 POST /api/market/backtest 实时重跑「传统均线突破策略」。
+  const [maParams, setMaParams] = useState<MaStrategyParams>(DEFAULT_MA_PARAMS);
+  const [tuned, setTuned] = useState<{ backtest: BacktestResult; report: PerformanceReport; params: MaStrategyParams } | null>(null);
+  const [tuning, setTuning] = useState(false);
+  const [tuneErr, setTuneErr] = useState("");
   
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -99,6 +117,8 @@ function ChartInner() {
     setLoading(true);
     setError("");
     setData(null);
+    setTuned(null);
+    setTuneErr("");
     setSearchResults([]);
     setAiLoading(false);
     setAiStageMsg("");
@@ -213,6 +233,29 @@ function ChartInner() {
       console.error(err);
       setAiError(err instanceof Error ? err.message : "AI 评估中断");
       setAiLoading(false);
+    }
+  }
+
+  // 参数化策略实时重跑：按当前表单参数 + 复权/周期口径，调用专用回测接口
+  async function runTunedBacktest() {
+    const code = data?.quote.code || params.get("code");
+    if (!code || !/^\d{6}$/.test(code)) return;
+    setTuning(true);
+    setTuneErr("");
+    try {
+      const res = await fetch("/api/market/backtest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, fq, period, params: maParams }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error || `回测失败: ${res.status}`);
+      setTuned(json);
+      setMaParams(json.params); // 回填被夹紧/校正后的参数
+    } catch (e) {
+      setTuneErr(e instanceof Error ? e.message : "参数化回测失败");
+    } finally {
+      setTuning(false);
     }
   }
 
@@ -620,43 +663,99 @@ function ChartInner() {
               )}
 
               {/* 交易回测与模拟明细面板 */}
-              {activeTab === "trades" && data.quant && (
+              {activeTab === "trades" && data.quant && (() => {
+                const bt = tuned?.backtest ?? data.quant.backtest;
+                return (
                 <div className="space-y-4">
+                  {/* 策略调参表单（参数可调 + 实时重跑回测，对标 TradingView Strategy 参数面板） */}
+                  <div className="border border-[var(--border)] bg-[var(--bg)] p-3 rounded-[2px] space-y-2.5 font-mono">
+                    <div className="flex items-center justify-between border-b border-[var(--border)] pb-1.5">
+                      <span className="font-bold text-[10.5px] uppercase text-[var(--text)]">策略调参 · 传统均线突破</span>
+                      <span className="text-[8.5px] text-[var(--faint)]">实时重跑回测</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {PARAM_FIELDS.map((f) => (
+                        <label key={f.key} className="flex flex-col gap-0.5">
+                          <span className="text-[9px] text-[var(--faint)]">{f.label}{f.suffix ? `（${f.suffix}）` : ""}</span>
+                          <input
+                            type="number"
+                            step={f.step}
+                            min={f.min}
+                            max={f.max}
+                            value={maParams[f.key]}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setMaParams((p) => ({ ...p, [f.key]: v === "" ? p[f.key] : Number(v) }));
+                            }}
+                            className="bg-[var(--surface)] border border-[var(--border)] rounded-[1px] px-1.5 py-1 text-[10.5px] text-[var(--text)] font-mono focus:outline-none focus:border-[var(--accent)]"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      <button
+                        onClick={runTunedBacktest}
+                        disabled={tuning}
+                        className="px-2.5 py-1 text-[10px] font-bold rounded-[1px] bg-[var(--accent)] text-[var(--accent-fg)] disabled:opacity-50 cursor-pointer transition"
+                      >
+                        {tuning ? "回测中…" : "▶ 重跑回测"}
+                      </button>
+                      <button
+                        onClick={() => { setMaParams(DEFAULT_MA_PARAMS); setTuned(null); setTuneErr(""); }}
+                        className="px-2.5 py-1 text-[10px] font-semibold rounded-[1px] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] cursor-pointer transition"
+                      >
+                        恢复默认
+                      </button>
+                      {tuned && <span className="text-[9px] text-[var(--accent)] ml-0.5">已应用调参结果</span>}
+                    </div>
+                    {tuneErr && <div className="text-[9px] text-emerald-400">{tuneErr}</div>}
+                    <div className="text-[8.5px] text-[var(--faint)] leading-relaxed">调参仅作用于本「传统均线突破策略」，按当前复权/周期口径即时重跑；收益已计入交易成本。</div>
+                  </div>
+
                   {/* 策略胜率/收益率面板 */}
                   <div className="border border-[var(--border)] bg-[var(--bg)] p-3 rounded-[2px] space-y-2 font-mono text-[11px]">
-                    <div className="font-bold text-[var(--text)] border-b border-[var(--border)] pb-1.5 text-[10.5px] uppercase">
-                      回测统计 (BACKTEST STATS)
+                    <div className="font-bold text-[var(--text)] border-b border-[var(--border)] pb-1.5 text-[10.5px] uppercase flex items-center justify-between">
+                      <span>回测统计 (BACKTEST STATS)</span>
+                      {tuned && <span className="text-[8.5px] text-[var(--accent)] normal-case">调参 · 传统均线</span>}
                     </div>
                     <div className="flex justify-between py-1 border-b border-[var(--border)]/20">
                       <span className="text-[var(--faint)]">策略胜率:</span>
                       <span className="font-bold text-[var(--accent)]">
-                        {((data.quant.backtest?.winRate || 0.5) * 100).toFixed(1)}%
+                        {(bt?.winRate ?? 0).toFixed(1)}%
                       </span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-[var(--border)]/20">
                       <span className="text-[var(--faint)]">策略累计收益:</span>
-                      <span className="font-bold text-red-400">
-                        +{data.quant.backtest?.strategyReturn.toFixed(1)}%
+                      <span className={`font-bold ${(bt?.strategyReturn ?? 0) >= 0 ? "text-red-400" : "text-emerald-500"}`}>
+                        {(bt?.strategyReturn ?? 0) >= 0 ? "+" : ""}{bt?.strategyReturn?.toFixed(1)}%
                       </span>
                     </div>
                     <div className="flex justify-between py-1">
                       <span className="text-[var(--faint)]">个股同期基准:</span>
-                      <span className={`font-bold ${data.quant.backtest?.stockReturn >= 0 ? "text-red-500" : "text-emerald-500"}`}>
-                        {data.quant.backtest?.stockReturn >= 0 ? "+" : ""}{data.quant.backtest?.stockReturn.toFixed(1)}%
+                      <span className={`font-bold ${(bt?.stockReturn ?? 0) >= 0 ? "text-red-500" : "text-emerald-500"}`}>
+                        {(bt?.stockReturn ?? 0) >= 0 ? "+" : ""}{bt?.stockReturn?.toFixed(1)}%
                       </span>
                     </div>
                   </div>
+
+                  {/* 调参后的标准化绩效报表（Sharpe/Sortino/Calmar/回撤/权益曲线） */}
+                  {tuned && (
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] font-bold text-[var(--faint)] uppercase tracking-wider">调参绩效报表</div>
+                      <BacktestReport report={tuned.report} history={tuned.backtest.history} />
+                    </div>
+                  )}
 
                   {/* 交易历史卡片列表 */}
                   <div className="space-y-2">
                     <div className="text-[10px] font-bold text-[var(--faint)] uppercase tracking-wider">
                       量化策略历史交易信号明细
                     </div>
-                    {data.quant.backtest?.trades && data.quant.backtest.trades.length > 0 ? (
+                    {bt?.trades && bt.trades.length > 0 ? (
                       <div className="border border-[var(--border)] bg-[var(--surface)] rounded-[2px] overflow-hidden">
                         <div className="p-3">
                           <div className="space-y-3 divide-y divide-[var(--border)]/40">
-                            {[...data.quant.backtest.trades].reverse().map((t: any, i: number) => {
+                            {[...bt.trades].reverse().map((t: any, i: number) => {
                               const isBuy = t.type === "buy";
                               return (
                                 <div key={i} className={`pt-3 first:pt-0 text-[10.5px] font-mono space-y-1.5`}>
@@ -696,7 +795,8 @@ function ChartInner() {
                     )}
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
             </div>
           </div>

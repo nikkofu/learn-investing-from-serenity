@@ -183,32 +183,70 @@ export function calculateChipDistribution(
 }
 
 /**
- * 运行传统 20 日线突破策略模拟交易回测。
- * 策略定义：
- *   - 买入信号：收盘价上穿 20日均线 (MA20)，且股价处于近 120 日下半区 (rangePosition < 0.45)，且 5 日均换手率突破 20 日均换手的 1.3 倍以上。
- *   - 卖出信号：收盘价跌破 MA20 均线，或个股累计最高涨幅达 35% 止盈，或股价极度超买 (rangePosition > 0.85 且今日天量收跌)。
+ * 传统均线突破策略可调参数。默认值完全还原原「20日线突破」行为。
  */
-export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
+export interface MaStrategyParams {
+  maPeriod: number;           // 收盘均线 / 换手长均线周期（默认 20）
+  takeProfitPct: number;      // 止盈涨幅 %（默认 35）
+  volMultiple: number;        // 放量倍数：5日均换手 / 长均换手（默认 1.3）
+  safeRangePos: number;       // 安全价格位上限 0~1（默认 0.65）
+  overboughtPos: number;      // 超买价格位 0~1（默认 0.85）
+  overboughtTurnover: number; // 超买天量换手 %（默认 15）
+}
+
+export const DEFAULT_MA_PARAMS: MaStrategyParams = {
+  maPeriod: 20,
+  takeProfitPct: 35,
+  volMultiple: 1.3,
+  safeRangePos: 0.65,
+  overboughtPos: 0.85,
+  overboughtTurnover: 15,
+};
+
+/** 将外部传入参数夹紧到安全范围，防止非法值导致回测异常。 */
+export function sanitizeMaParams(p: Partial<MaStrategyParams> | undefined): MaStrategyParams {
+  const d = DEFAULT_MA_PARAMS;
+  const num = (v: unknown, fb: number) => (typeof v === "number" && Number.isFinite(v) ? v : fb);
+  return {
+    maPeriod: Math.max(2, Math.min(250, Math.round(num(p?.maPeriod, d.maPeriod)))),
+    takeProfitPct: Math.max(1, Math.min(500, num(p?.takeProfitPct, d.takeProfitPct))),
+    volMultiple: Math.max(0.5, Math.min(10, num(p?.volMultiple, d.volMultiple))),
+    safeRangePos: Math.max(0.1, Math.min(1, num(p?.safeRangePos, d.safeRangePos))),
+    overboughtPos: Math.max(0.1, Math.min(1, num(p?.overboughtPos, d.overboughtPos))),
+    overboughtTurnover: Math.max(1, Math.min(100, num(p?.overboughtTurnover, d.overboughtTurnover))),
+  };
+}
+
+/**
+ * 运行传统均线突破策略回测（参数可调，默认还原 20 日线口径）。
+ * 买入：收盘上穿 MA(maPeriod)，或平台整理后放量突破前高；且价格位 < safeRangePos；且 5 日均换手 > 长均换手 × volMultiple。
+ * 卖出：收盘跌破 MA(maPeriod)；或较买入价涨幅达 takeProfitPct%；或价格位 > overboughtPos 且天量换手 > overboughtTurnover%。
+ */
+export function runTraditionalMaBacktest(
+  candles: Candle[],
+  params: MaStrategyParams = DEFAULT_MA_PARAMS
+): BacktestResult {
+  const { maPeriod, takeProfitPct, volMultiple, safeRangePos, overboughtPos, overboughtTurnover } = params;
   const history: BacktestResult["history"] = [];
   const trades: TradeAction[] = [];
 
-  if (candles.length < 25) {
+  if (candles.length < maPeriod + 5) {
     return { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
   }
 
-  // 1. 预先计算均线 (MA20 和换手率 MA5/MA20)
+  // 1. 预先计算收盘均线 MA(maPeriod) 与换手率均线（短 5 日 / 长 maPeriod 日）
   const prices = candles.map((c) => c.close);
-  const ma20List: number[] = [];
+  const maList: number[] = [];
   const volMa5: number[] = [];
-  const volMa20: number[] = [];
+  const volMaLong: number[] = [];
 
   for (let i = 0; i < candles.length; i++) {
     // 收盘均线
-    if (i < 19) {
-      ma20List.push(prices[i]);
+    if (i < maPeriod - 1) {
+      maList.push(prices[i]);
     } else {
-      const sum = prices.slice(i - 19, i + 1).reduce((s, p) => s + p, 0);
-      ma20List.push(sum / 20);
+      const sum = prices.slice(i - (maPeriod - 1), i + 1).reduce((s, p) => s + p, 0);
+      maList.push(sum / maPeriod);
     }
 
     // 换手均线
@@ -219,11 +257,11 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
       const sum = turnovers.slice(i - 4, i + 1).reduce((s, t) => s + t, 0);
       volMa5.push(sum / 5);
     }
-    if (i < 19) {
-      volMa20.push(turnovers[i]);
+    if (i < maPeriod - 1) {
+      volMaLong.push(turnovers[i]);
     } else {
-      const sum = turnovers.slice(i - 19, i + 1).reduce((s, t) => s + t, 0);
-      volMa20.push(sum / 20);
+      const sum = turnovers.slice(i - (maPeriod - 1), i + 1).reduce((s, t) => s + t, 0);
+      volMaLong.push(sum / maPeriod);
     }
   }
 
@@ -232,19 +270,18 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
   let shares = 0;
   let holding = false;
   let buyPrice = 0;
-  let buyDate = "";
   let winCount = 0;
   let tradeCount = 0;
 
-  const initialStockWorth = prices[20]; // 以第 20 天收盘价作为对照组基准
+  const initialStockWorth = prices[maPeriod]; // 以第 maPeriod 天收盘价作为对照组基准
 
-  for (let i = 20; i < candles.length; i++) {
+  for (let i = maPeriod; i < candles.length; i++) {
     const c = candles[i];
     const close = c.close;
     const date = c.date;
-    const ma20 = ma20List[i];
+    const ma = maList[i];
     const t5 = volMa5[i];
-    const t20 = volMa20[i];
+    const tLong = volMaLong[i];
 
     // 计算局部的 rangePosition
     const prevWindow = prices.slice(Math.max(0, i - 120), i + 1);
@@ -257,34 +294,33 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
     const isPlateauConsolidation = recentWindow.length >= 5 && (Math.max(...recentWindow) - Math.min(...recentWindow)) / Math.min(...recentWindow) < 0.08;
 
     if (!holding) {
-      const isBreakout = close > ma20 && prices[i - 1] <= ma20List[i - 1];
-      const isPlateauBreakout = close > ma20 && isPlateauConsolidation && close > Math.max(...recentWindow);
-      const isVolumeIncrease = t5 > t20 * 1.3;
-      const isSafePosition = rangePos < 0.65; // 放宽安全价格位限制，防止右侧大阳踏空
+      const isBreakout = close > ma && prices[i - 1] <= maList[i - 1];
+      const isPlateauBreakout = close > ma && isPlateauConsolidation && close > Math.max(...recentWindow);
+      const isVolumeIncrease = t5 > tLong * volMultiple;
+      const isSafePosition = rangePos < safeRangePos; // 安全价格位限制，防止右侧大阳踏空
 
       if ((isBreakout || isPlateauBreakout) && isSafePosition && isVolumeIncrease) {
         shares = buyShares(cash, close, DEFAULT_COST_MODEL);
         cash = 0;
         holding = true;
         buyPrice = close;
-        buyDate = date;
         trades.push({
           type: "buy",
           date,
           price: close,
           reason: isPlateauBreakout
-            ? `【传统平台整理突破】股价在 20日线之上平台盘整后放量突破前高，5日均换手放大至 ${(t5 / t20).toFixed(1)} 倍。`
-            : `【传统均线突破】股价上穿 20 日均线，5日均换手放大至 ${(t5 / t20).toFixed(1)} 倍。`,
+            ? `【平台整理突破】股价在 ${maPeriod}日线之上平台盘整后放量突破前高，5日均换手放大至 ${(t5 / tLong).toFixed(1)} 倍。`
+            : `【均线突破】股价上穿 ${maPeriod} 日均线，5日均换手放大至 ${(t5 / tLong).toFixed(1)} 倍。`,
         });
       }
     } else {
       // 卖出条件：
-      // 1. 均线破位：收盘价下穿 MA20
-      // 2. 止盈：涨幅达 35% 以上
-      // 3. 超买滞涨：处于极高位置（rangePosition > 0.85）且换手创天量
-      const isBreakdown = close < ma20;
-      const isTakeProfit = close >= buyPrice * 1.35;
-      const isOverbought = rangePos > 0.85 && c.turnoverPct && c.turnoverPct > 15; // 天量滞涨
+      // 1. 均线破位：收盘价下穿 MA(maPeriod)
+      // 2. 止盈：涨幅达 takeProfitPct% 以上
+      // 3. 超买滞涨：价格位 > overboughtPos 且换手创天量
+      const isBreakdown = close < ma;
+      const isTakeProfit = close >= buyPrice * (1 + takeProfitPct / 100);
+      const isOverbought = rangePos > overboughtPos && !!c.turnoverPct && c.turnoverPct > overboughtTurnover; // 天量滞涨
 
       if (isBreakdown || isTakeProfit || isOverbought) {
         cash = sellProceeds(shares, close, DEFAULT_COST_MODEL);
@@ -294,8 +330,8 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
         const profit = close - buyPrice;
         if (profit > 0) winCount++;
 
-        let reason = "跌破20日线止损";
-        if (isTakeProfit) reason = `达到 35% 止盈目标 (买入价: ${buyPrice.toFixed(2)})`;
+        let reason = `跌破${maPeriod}日线止损`;
+        if (isTakeProfit) reason = `达到 ${takeProfitPct}% 止盈目标 (买入价: ${buyPrice.toFixed(2)})`;
         else if (isOverbought) reason = "高位筹码松动滞涨滞销";
 
         trades.push({
