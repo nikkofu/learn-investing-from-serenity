@@ -55,6 +55,8 @@ function ChartInner() {
   const [activeTab, setActiveTab] = useState<"ai" | "trades" | "terminal">("ai");
   const [chartHeight, setChartHeight] = useState(520);
   const [period, setPeriod] = useState<"1D" | "1W" | "1M">("1D");
+  // 复权口径：qfq=前复权（贴现价看操作）/ hfq=后复权（长周期真实回测）。图表/筹码/交易标记/回测同口径切换。
+  const [fq, setFq] = useState<"qfq" | "hfq">("qfq");
   
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -89,7 +91,7 @@ function ChartInner() {
   }, []);
 
   // 执行核心诊断与图表数据载入 (并行优化：行情秒开 + AI 诊断后台同时并发)
-  async function loadStock(code: string, currentPeriod = period) {
+  async function loadStock(code: string, currentPeriod = period, currentFq = fq) {
     if (!/^\d{6}$/.test(code)) return;
     setLoading(true);
     setError("");
@@ -101,11 +103,11 @@ function ChartInner() {
     setAiError("");
     
     // 同时并发发起行情基础数据与 AI 诊断请求，互不阻塞
-    const chartPromise = fetch(`/api/market/chart-data?code=${code}&period=${currentPeriod}`);
+    const chartPromise = fetch(`/api/market/chart-data?code=${code}&period=${currentPeriod}&fq=${currentFq}`);
     const aiPromise = fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, fq: currentFq }),
     });
 
     // 阶段1：优先 await 轻量行情数据（~300ms），立即渲染 K 线首屏
@@ -336,6 +338,29 @@ function ChartInner() {
             ))}
           </div>
 
+          {/* 复权口径切换（对标通达信前复权/后复权）：图表/筹码/交易标记/回测整体同口径 */}
+          <div className="flex items-center gap-1 border-l border-[var(--border)] pl-3 ml-1">
+            {(["qfq", "hfq"] as const).map((m) => (
+              <button
+                key={m}
+                title={m === "qfq" ? "前复权：贴合现价，看操作买卖" : "后复权：早年价不为负，长周期真实回测（解决五粮液/茅台类）"}
+                onClick={() => {
+                  if (fq === m) return;
+                  setFq(m);
+                  const code = data?.quote.code || params.get("code") || "300308";
+                  loadStock(code, period, m);
+                }}
+                className={`px-2 py-0.5 text-[10px] font-bold font-mono rounded-[1px] transition cursor-pointer ${
+                  fq === m
+                    ? "bg-[var(--accent)] text-[var(--accent-fg)]"
+                    : "bg-[var(--bg)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                {m === "qfq" ? "前复权" : "后复权"}
+              </button>
+            ))}
+          </div>
+
           {data && (
             <div className="flex items-baseline gap-2 border-l border-[var(--border)] pl-3">
               <span className="text-xs font-bold text-[var(--text)] font-mono">{data.quote.name}</span>
@@ -383,7 +408,7 @@ function ChartInner() {
             <div className="flex-1 overflow-hidden" ref={containerRef}>
               <QuantChart
                 quantData={data.quant}
-                currentPrice={data.quote.price}
+                currentPrice={data.quant.refPrice ?? data.quote.price}
                 height={chartHeight}
               />
             </div>

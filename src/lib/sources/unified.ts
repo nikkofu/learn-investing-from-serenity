@@ -14,7 +14,7 @@ import type { StockQuote, Candle, StockFinancials } from "../types";
 import { getTencentQuotes } from "./tencent";
 import { getSinaFinancialReport } from "./sina";
 import { getEmQuote, getEmStockInfo, getEmAnalystConsensus } from "./eastmoney";
-import { getDailyHistory, HISTORY_LIMIT } from "./klineStore";
+import { getDailyHistory, HISTORY_LIMIT, type FqMode } from "./klineStore";
 import type { EmAnalystConsensus } from "./eastmoney";
 import type { Candidate, EmStockInfo, SinaReportPeriod, Sourced, SourceAttempt, TencentQuote } from "./types";
 
@@ -193,10 +193,11 @@ export function getDailyKline(
   code: string,
   limit = 120,
   order: "em-first" | "baidu-first" = "em-first",
+  fq: FqMode = "qfq",
 ): Promise<Sourced<Candle[]>> {
   return globalCache.getOrCreate(
-    `u:kline:${code}:${limit}:${order}`,
-    () => getDailyKlineUncached(code, limit, order),
+    `u:kline:${code}:${limit}:${order}:${fq}`,
+    () => getDailyKlineUncached(code, limit, order, fq),
     getAdaptiveTTL("kline"),
   );
 }
@@ -207,8 +208,9 @@ async function getDailyKlineUncached(
   code: string,
   limit: number,
   order: "em-first" | "baidu-first",
+  fq: FqMode,
 ): Promise<Sourced<Candle[]>> {
-  const { data, source, attempts } = await getDailyHistory(code, order);
+  const { data, source, attempts } = await getDailyHistory(code, order, fq);
   return { data: data.slice(-limit), source, attempts };
 }
 
@@ -265,12 +267,12 @@ function resampleCandles(daily: Candle[], unit: "week" | "month"): Candle[] {
  * klt: 101=日 / 102=周 / 103=月。周/月由日 K 重采样，全程不依赖东财 push2his。
  * 任一源（百度/新浪/push2his）成功即返回；全失败返回空数组（与 getKlineSafe 行为一致）。
  */
-export async function getKlineFailover(code: string, limit = 120, klt = 101): Promise<Candle[]> {
+export async function getKlineFailover(code: string, limit = 120, klt = 101, fq: FqMode = "qfq"): Promise<Candle[]> {
   // 周/月需更多日线作重采样的原料。底层是落盘的全量历史，按需切片即可（上限 HISTORY_LIMIT）。
   const span = klt === 103 ? 22 : klt === 102 ? 5 : 1;
   const dailyLimit = Math.min(HISTORY_LIMIT, limit * span + 30);
   try {
-    const { data } = await getDailyKline(code, dailyLimit, "baidu-first");
+    const { data } = await getDailyKline(code, dailyLimit, "baidu-first", fq);
     if (klt === 102) return resampleCandles(data, "week").slice(-limit);
     if (klt === 103) return resampleCandles(data, "month").slice(-limit);
     return data.slice(-limit);

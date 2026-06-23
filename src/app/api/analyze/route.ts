@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { deriveStats, getQuoteFailover, getKlineFailover, HISTORY_LIMIT } from "@/lib/sources";
+import { deriveStats, getQuoteFailover, getKlineFailover, getHfqDailyHistory, HISTORY_LIMIT, type FqMode } from "@/lib/sources";
 import { calculateChipDistribution, runWalkForwardWinRate, analyzeTechnicalPatterns, generatePriceProjection } from "@/lib/quant";
 import { runAllStrategies, pickDefaultResult, DEFAULT_STRATEGY_ID } from "@/lib/strategies";
 import { buildAnalyzePrompt } from "@/lib/serenity";
@@ -162,11 +162,13 @@ async function findSerenityKnowledge(code: string, name: string) {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { code?: string; context?: string; refresh?: boolean };
+  const body = (await req.json()) as { code?: string; context?: string; refresh?: boolean; fq?: string };
   const code = body.code?.trim();
   if (!code || !/^\d{6}$/.test(code)) {
     return NextResponse.json({ error: "请提供 6 位股票代码" }, { status: 400 });
   }
+  // 复权口径：qfq=前复权（贴现价，看操作）/ hfq=后复权（长周期真实回测）。决定筹码/交易标记/回测/投影的统一口径。
+  const fq: FqMode = body.fq === "hfq" ? "hfq" : "qfq";
 
   return ndjsonStream(async (send) => {
     const tStart = performance.now();
@@ -175,6 +177,8 @@ export async function POST(req: Request) {
     const tQuoteStart = performance.now();
     send({ type: "stage", key: "quote", status: "start" });
     let quote, candles, candlesFull, backtestCandles, stats;
+    // 展示/量化口径序列：前复权 = 与 AI 口径一致；后复权 = 仅用于筹码/交易标记/回测/投影，AI 打分仍走前复权（基本面与绝对价位无关）。
+    let dispCandles, dispBacktestCandles, dispRefPrice: number;
     try {
       // 打分/筹码/技术形态用前复权近端窗口（贴合现价，口径不变）。
       [quote, candlesFull] = await Promise.all([getQuoteFailover(code), getKlineFailover(code, HISTORY_LIMIT)]);
@@ -185,6 +189,20 @@ export async function POST(req: Request) {
       // 算筹码——这样交易标记、理由文案（内嵌价位）、筹码定位、现价口径全程一致，且彻底消除负价失真。
       // （注：负价是源数据前复权的固有现象，正价区间内的前复权是业界通行的回测口径。）
       backtestCandles = candlesFull.filter((c) => c.close > 0 && c.open > 0 && c.high > 0 && c.low > 0);
+
+      // 默认前复权口径（与 AI 打分一致）。
+      dispBacktestCandles = backtestCandles;
+      dispCandles = candles;
+      dispRefPrice = quote.price;
+      // 后复权口径：早年价不为负、长周期收益正确（彻底解决五粮液/茅台类）。仅东财 fqt=2，失败则回退前复权。
+      if (fq === "hfq") {
+        const hfqFull = (await getHfqDailyHistory(code)).filter((c) => c.close > 0 && c.open > 0 && c.high > 0 && c.low > 0);
+        if (hfqFull.length > 0) {
+          dispBacktestCandles = hfqFull;
+          dispCandles = hfqFull.slice(-DISPLAY_WINDOW);
+          dispRefPrice = hfqFull[hfqFull.length - 1]?.close ?? quote.price;
+        }
+      }
     } catch (e) {
       send({ type: "error", message: `行情获取失败：${e instanceof Error ? e.message : e}` });
       return;
@@ -365,14 +383,15 @@ export async function POST(req: Request) {
 
     // ── 共享尾段：量化计算 + 校准 + 结果下发。
     const tSummaryStart = performance.now();
-    const chips = calculateChipDistribution(candles, quote.price);
-    const strategies = runAllStrategies(backtestCandles, { chokepointScore: assessment.totalScore, code: quote.code });
+    // 量化层（筹码/回测/交易标记/技术形态/投影）统一走所选复权口径序列；现价基准用该序列口径（hfq 用其末根收盘价）。
+    const chips = calculateChipDistribution(dispCandles, dispRefPrice);
+    const strategies = runAllStrategies(dispBacktestCandles, { chokepointScore: assessment.totalScore, code: quote.code });
     const defaultBacktest = pickDefaultResult(strategies)!;
     const traditionalBacktest = strategies.find((s) => s.meta.id === "traditional-ma")?.result ?? defaultBacktest;
-    const walkForward = runWalkForwardWinRate(backtestCandles);
+    const walkForward = runWalkForwardWinRate(dispBacktestCandles);
     assessment.winRate = deriveWinRate(walkForward, defaultBacktest);
-    const technical = analyzeTechnicalPatterns(candles, quote.price, chips);
-    const projections = generatePriceProjection(candles, assessment.totalScore);
+    const technical = analyzeTechnicalPatterns(dispCandles, dispRefPrice, chips);
+    const projections = generatePriceProjection(dispCandles, assessment.totalScore);
 
     let calibration: CalibrationSummary | null = null;
     try {
@@ -416,8 +435,10 @@ export async function POST(req: Request) {
         strategies,
         defaultStrategyId: DEFAULT_STRATEGY_ID,
         technical,
-        candles: backtestCandles,
+        candles: dispBacktestCandles,
         projections,
+        fq,
+        refPrice: dispRefPrice,
       },
       timings: {
         quoteMs: quoteElapsed,
