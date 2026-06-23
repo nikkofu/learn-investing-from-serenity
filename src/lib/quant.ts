@@ -1,4 +1,5 @@
 import type { Candle } from "./types";
+import { DEFAULT_COST_MODEL, buyShares, sellProceeds } from "./costs";
 
 interface ChipBin {
   price: number;
@@ -262,7 +263,7 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
       const isSafePosition = rangePos < 0.65; // 放宽安全价格位限制，防止右侧大阳踏空
 
       if ((isBreakout || isPlateauBreakout) && isSafePosition && isVolumeIncrease) {
-        shares = cash / close;
+        shares = buyShares(cash, close, DEFAULT_COST_MODEL);
         cash = 0;
         holding = true;
         buyPrice = close;
@@ -286,7 +287,7 @@ export function runTraditionalMaBacktest(candles: Candle[]): BacktestResult {
       const isOverbought = rangePos > 0.85 && c.turnoverPct && c.turnoverPct > 15; // 天量滞涨
 
       if (isBreakdown || isTakeProfit || isOverbought) {
-        cash = shares * close;
+        cash = sellProceeds(shares, close, DEFAULT_COST_MODEL);
         shares = 0;
         holding = false;
         tradeCount++;
@@ -453,7 +454,7 @@ export function runChokepointMomentumBacktest(
       const isStrongHighBreakout = chokepointScore >= 75 && rangePos >= 0.60 && rangePos <= 0.85 && t5 > t20 * 1.6 && close > Math.max(...recentWindow);
 
       if (isBreakoutGoldCross || isVcpBreakout || isStrongHighBreakout) {
-        shares = cash / close;
+        shares = buyShares(cash, close, DEFAULT_COST_MODEL);
         cash = 0;
         holding = true;
         buyPrice = close;
@@ -486,7 +487,7 @@ export function runChokepointMomentumBacktest(
       const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
 
       if (isSupportBroken || isTakeProfit || isClimaxRun) {
-        cash = shares * close;
+        cash = sellProceeds(shares, close, DEFAULT_COST_MODEL);
         shares = 0;
         holding = false;
         tradeCount++;
@@ -635,7 +636,7 @@ export function runChokepointMomentumBacktestV2(
         close > ma20 && ma20Rising && pulledBackToMa && close > prices[i - 1] && t5 > t20 * 1.1;
 
       if (isBreakoutGoldCross || isVcpBreakout || isStrongHighBreakout || isTrendResume) {
-        shares = cash / close;
+        shares = buyShares(cash, close, DEFAULT_COST_MODEL);
         cash = 0;
         holding = true;
         buyPrice = close;
@@ -669,7 +670,7 @@ export function runChokepointMomentumBacktestV2(
       const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
 
       if (isSupportBroken || isTrailingStop || isClimaxRun) {
-        cash = shares * close;
+        cash = sellProceeds(shares, close, DEFAULT_COST_MODEL);
         shares = 0;
         holding = false;
         tradeCount++;
@@ -904,7 +905,7 @@ export function runChokepointMomentumBacktestV3(
         isDoubleBottomBreak ||
         isOldDuckHead
       ) {
-        shares = cash / close;
+        shares = buyShares(cash, close, DEFAULT_COST_MODEL);
         cash = 0;
         holding = true;
         buyPrice = close;
@@ -939,7 +940,7 @@ export function runChokepointMomentumBacktestV3(
       const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
 
       if (isSupportBroken || isTrailingStop || isClimaxRun) {
-        cash = shares * close;
+        cash = sellProceeds(shares, close, DEFAULT_COST_MODEL);
         shares = 0;
         holding = false;
         tradeCount++;
@@ -1191,7 +1192,7 @@ export function runChokepointMomentumBacktestV4(
         isDoubleBottomBreak ||
         isOldDuckHead
       ) {
-        shares = cash / close;
+        shares = buyShares(cash, close, DEFAULT_COST_MODEL);
         cash = 0;
         holding = true;
         buyPrice = close;
@@ -1228,7 +1229,7 @@ export function runChokepointMomentumBacktestV4(
       const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
 
       if (isSupportBroken || isTrailingStop || isClimaxRun) {
-        cash = shares * close;
+        cash = sellProceeds(shares, close, DEFAULT_COST_MODEL);
         shares = 0;
         holding = false;
         tradeCount++;
@@ -1573,7 +1574,7 @@ export function runChokepointMomentumBacktestV5(
         isDoubleBottomBreak ||
         isOldDuckHead
       ) {
-        shares = cash / close;
+        shares = buyShares(cash, close, DEFAULT_COST_MODEL);
         cash = 0;
         holding = true;
         buyPrice = close;
@@ -1614,7 +1615,7 @@ export function runChokepointMomentumBacktestV5(
       const isClimaxRun = rangePos > 0.95 && c.turnoverPct && c.turnoverPct > 15;
 
       if (isSupportBroken || isAtrStop || isClimaxRun) {
-        cash = shares * close;
+        cash = sellProceeds(shares, close, DEFAULT_COST_MODEL);
         shares = 0;
         holding = false;
         tradeCount++;
@@ -1795,7 +1796,7 @@ export function runChokepointMomentumBacktestV6(
     if (useFrac <= 1e-9) return;
     const spend = Math.min(cash, useFrac * 100000);
     if (spend <= 0) return;
-    const sharesBought = spend / px;
+    const sharesBought = buyShares(spend, px, DEFAULT_COST_MODEL);
     const newShares = shares + sharesBought;
     avgCost = newShares > 0 ? (avgCost * shares + px * sharesBought) / newShares : px;
     shares = newShares;
@@ -1809,7 +1810,7 @@ export function runChokepointMomentumBacktestV6(
   const sellFrac = (sf: number, px: number, date: string, reason: string): void => {
     const sharesSold = sf >= 1 ? shares : shares * sf;
     if (sharesSold <= 1e-12) return;
-    const proceeds = sharesSold * px;
+    const proceeds = sellProceeds(sharesSold, px, DEFAULT_COST_MODEL);
     cash += proceeds;
     shares -= sharesSold;
     posProceedsCash += proceeds;
@@ -2164,7 +2165,7 @@ export function runChokepointMomentumBacktestV7(
     if (useFrac <= 1e-9) return;
     const spend = Math.min(cash, useFrac * 100000);
     if (spend <= 0) return;
-    const sharesBought = spend / px;
+    const sharesBought = buyShares(spend, px, DEFAULT_COST_MODEL);
     const newShares = shares + sharesBought;
     avgCost = newShares > 0 ? (avgCost * shares + px * sharesBought) / newShares : px;
     shares = newShares;
@@ -2178,7 +2179,7 @@ export function runChokepointMomentumBacktestV7(
   const sellFrac = (sf: number, px: number, date: string, reason: string): void => {
     const sharesSold = sf >= 1 ? shares : shares * sf;
     if (sharesSold <= 1e-12) return;
-    const proceeds = sharesSold * px;
+    const proceeds = sellProceeds(sharesSold, px, DEFAULT_COST_MODEL);
     cash += proceeds;
     shares -= sharesSold;
     posProceedsCash += proceeds;
@@ -2575,7 +2576,7 @@ export function runChokepointMomentumBacktestV8(
     if (useFrac <= 1e-9) return;
     const spend = Math.min(cash, useFrac * 100000);
     if (spend <= 0) return;
-    const sharesBought = spend / px;
+    const sharesBought = buyShares(spend, px, DEFAULT_COST_MODEL);
     const newShares = shares + sharesBought;
     avgCost = newShares > 0 ? (avgCost * shares + px * sharesBought) / newShares : px;
     shares = newShares;
@@ -2589,7 +2590,7 @@ export function runChokepointMomentumBacktestV8(
   const sellFrac = (sf: number, px: number, date: string, reason: string): void => {
     const sharesSold = sf >= 1 ? shares : shares * sf;
     if (sharesSold <= 1e-12) return;
-    const proceeds = sharesSold * px;
+    const proceeds = sellProceeds(sharesSold, px, DEFAULT_COST_MODEL);
     cash += proceeds;
     shares -= sharesSold;
     posProceedsCash += proceeds;
@@ -2956,7 +2957,7 @@ export function runGridMeanReversionBacktest(
       const touchLower = close <= lower * 1.01;
       const stabilized = close >= prices[i - 1];
       if (isBoxRegime && touchLower && stabilized) {
-        shares = cash / close;
+        shares = buyShares(cash, close, DEFAULT_COST_MODEL);
         cash = 0;
         holding = true;
         buyPrice = close;
@@ -2973,7 +2974,7 @@ export function runGridMeanReversionBacktest(
       const reachUpper = close >= upper;
       const trendBreakout = close > upper && ma60Slope > FLAT_SLOPE_MAX;
       if (breakBox || reachUpper || trendBreakout) {
-        cash = shares * close;
+        cash = sellProceeds(shares, close, DEFAULT_COST_MODEL);
         shares = 0;
         holding = false;
         tradeCount++;

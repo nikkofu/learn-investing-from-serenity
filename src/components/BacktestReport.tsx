@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { PerformanceReport } from "@/lib/performance";
+import { DEFAULT_COST_MODEL, roundTripCostPct } from "@/lib/costs";
 
 interface BacktestReportProps {
   report: PerformanceReport;
@@ -121,6 +122,7 @@ export default function BacktestReport({ report, history }: BacktestReportProps)
             <path d={curves.stratPath} fill="none" stroke="var(--accent)" strokeWidth="1.3" />
           </svg>
 
+          <div className="text-[9px] font-mono text-[var(--faint)] mt-1.5 mb-0.5" title="佣金万2.5、1笔最低5元；印花税0.05%(卖)；过户费0.001%(双边)；滑点0.05%(单边)。">⚡ 回测已计入交易成本（佣金+印花税+过户费+滑点，往返约 {roundTripCostPct(DEFAULT_COST_MODEL).toFixed(2)}%）。</div>
           <div className="text-[9px] font-mono text-[var(--faint)] mt-1 mb-0.5">回撤曲线（水下图，最大 {fmtPct(report.maxDrawdown)}）</div>
           <svg viewBox={`0 0 ${W} ${ddTop + ddH + 4}`} className="w-full" preserveAspectRatio="none">
             <path d={curves.ddArea} fill={GREEN} fillOpacity="0.18" stroke={GREEN} strokeWidth="0.8" />

@@ -4,6 +4,21 @@
 
 ---
 
+## [0.20.0] - 2026-06-23
+
+> **回测交易成本模型（A股口径）**。所有策略（v1–v8 / 网格 / 传统均线）在每个买卖成交点统一扣减真实成本，回测收益从"理想毛收益"变为"可下单的净收益"，杜绝高频策略在零成本假设下的虚高。
+
+### 新增：交易成本
+- 新文件 `src/lib/costs.ts`：`CostModel` + `DEFAULT_COST_MODEL`（佣金万2.5、单笔最低 5 元；印花税 0.05% 仅卖出；过户费 0.001% 双边；滑点 0.05% 单边）+ `buyShares` / `sellProceeds` / `roundTripCostPct` 纯函数。往返约当成本 **0.202%**。
+- `src/lib/quant.ts`：全部策略的买卖成交点改用 `buyShares` / `sellProceeds`（整仓 7 处 + 分批 v6/v7/v8 各 1 处），成本计入每日净值与最终收益。
+- `src/components/BacktestReport.tsx`：绩效报表新增成本披露脚注。
+- 数值验证：零成本模型与旧行为完全等价（`buyShares(10万,10)=1万股`、`sellProceeds(1万,10)=10万`）；默认模型下买入股数/卖回现金均下降，往返实测拖累 0.202%。
+
+### ✅ 质量
+- `tsc --noEmit`、`eslint`（改动文件，仅余 3 条历史无关 warning）、`next build` 全通过。
+
+---
+
 ## [0.19.0] - 2026-06-23
 
 > **引入 TradingView 官方开源 lightweight-charts 画布引擎（Pro 视图）**。图表工作区新增「图表引擎：经典 SVG / Pro 画布」一键切换，二者并存、互不影响：经典 SVG 保留我们独有的筹码分布 / 价格投影 / VRVP 自绘叠加；Pro 画布主打专业交互与性能。
