@@ -13,6 +13,8 @@ import {
   runChokepointMomentumBacktestV4,
   runChokepointMomentumBacktestV5,
   runChokepointMomentumBacktestV6,
+  runChokepointMomentumBacktestV7,
+  runChokepointMomentumBacktestV8,
   runGridMeanReversionBacktest,
   type BacktestResult,
 } from "./quant";
@@ -45,7 +47,7 @@ export interface StrategyBacktest {
 }
 
 /** 默认策略 id（页面首次加载与胜率口径采用此策略）。 */
-export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v6";
+export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v7";
 
 /**
  * 已登记策略。顺序即 UI 下拉顺序（默认策略置顶）。
@@ -53,12 +55,34 @@ export const DEFAULT_STRATEGY_ID = "chokepoint-momentum-v6";
 const STRATEGIES: Strategy[] = [
   {
     meta: {
+      id: "chokepoint-momentum-v8",
+      name: "Serenity 瓶颈动量突破",
+      version: "8.0",
+      description:
+        "v7 的「最优停止 / 秘书问题」出场版（入场信号与 v4~v7 完全一致，七类买点 + MA60 闸门，可对照）。核心思路：股价能涨到多高永远未知，不该「猜顶」。故放弃 v7 固定 +25% 目标位的分批止盈，改为高水位新高阶梯减仓：①观察期——峰值先站上成本 +15% 建立基准高（对应秘书问题 1/e 观察阶段，不在起步期乱减）；②逐级落袋——之后价格每创约 +10% 新高就减约 1/5 仓位，不预测最高点、逐档兑现升势利润；③剩余底仓继续随 6×ATR 宽跟踪奔跑、回撤触线再清。保留 v7 的 +8% 前移止盈（首档锁利）、箱体高抛、结构+时间止损、筹码支撑 / 天量滞涨。适合「会走出连续新高」的趋势股，逼近顶部逐步减而非一次拍光。",
+      tags: ["momentum", "reversal", "pattern", "trend-filter", "atr-stop", "scale-out", "regime-adaptive", "optimal-stopping"],
+    },
+    run: (candles, ctx) => runChokepointMomentumBacktestV8(candles, ctx.chokepointScore, { code: ctx.code }),
+  },
+  {
+    meta: {
+      id: "chokepoint-momentum-v7",
+      name: "Serenity 瓶颈动量突破",
+      version: "7.0",
+      description:
+        "v6 的 regime 自适应出场版（入场信号与 v4/v5/v6 完全一致，七类买点 + MA60 闸门，可对照）。针对 v6 在箱体震荡票上「只买不卖、坐电梯回吐」的痛点，升级出场逻辑：①regime 判定——用 ADX(14) + MA60 斜率区分趋势 / 箱体；②箱体高抛（核心修复）——确认箱体（ADX<22 且 MA60 走平）时价升至区间上沿（rangePos≥0.82）且当根滞涨/收阴即均值回归清仓，让箱体里终于有卖点；③前移止盈阶梯——浮盈 +8% 先减约 1/3 落袋（箱体反弹也能兑现），保留 v6 的 +25% 再减 + 6×ATR 宽 runner；④结构+时间止损——买入后迟迟未站上成本 +6%（跟踪未激活）、持仓超 15 根又跌破 MA20，判定突破失败砍掉死钱。趋势行情下 ADX 走高则不判为箱体、仍按 v6 让利润奔跑，是「趋势照旧奔跑、箱体主动高抛」的自适应版。其余风控（筹码支撑止损 / 天量滞涨）与 v6 一致。",
+      tags: ["momentum", "reversal", "pattern", "trend-filter", "atr-stop", "scale-out", "regime-adaptive", "default"],
+    },
+    run: (candles, ctx) => runChokepointMomentumBacktestV7(candles, ctx.chokepointScore, { code: ctx.code }),
+  },
+  {
+    meta: {
       id: "chokepoint-momentum-v6",
       name: "Serenity 瓶颈动量突破",
       version: "6.0",
       description:
         "v5 的分批止盈 + 宽 runner 版（仓位管理升级，入场信号与 v4/v5 完全一致）。源自「策略只赚 +5%、个股同期涨 +66%」的真实疑问：趋势跟随带止损会在大牛股上被洗/踏空回吐。①分批止盈（逐步卖出 / 留 runner，实测有效）——浮盈 +25% 先止盈 1/4 落袋锁利，剩余 3/4 底仓改挂更宽的 6.0×ATR 跟踪止损（远宽于 v5 收紧档 3.0×）继续奔跑吃趋势尾段；②金字塔加仓（逐步买入，实测证伪、默认关闭）——加仓抬高均价、震荡票被洗，净收益与捕获率反降，代码保留为可调项但默认整仓建仓不加仓；③跌破筹码支撑 / 高位天量滞涨清掉全部剩余仓位。15 只池真实数据 A/B：平均每股收益、正收益股数、对买入持有捕获率（81%→109%）、组合复利净值（10.4→26.6）全面优于 v5。诚实权衡：分批止盈在极端单边里仍会少赚卖飞的那 1/4。",
-      tags: ["momentum", "reversal", "pattern", "trend-filter", "atr-stop", "scale-out", "default"],
+      tags: ["momentum", "reversal", "pattern", "trend-filter", "atr-stop", "scale-out"],
     },
     run: (candles, ctx) => runChokepointMomentumBacktestV6(candles, ctx.chokepointScore, { code: ctx.code }),
   },
