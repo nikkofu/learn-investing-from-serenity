@@ -4,6 +4,20 @@
 
 ---
 
+## [0.18.0] - 2026-06-23
+
+> **标准化回测绩效报表（对标 TradingView Strategy Tester / 券商回测报告）**。回测不再只看「收益率 + 胜率」，补齐专业风险/收益指标与可视化，让回测可信到能指导下单。随所选策略实时重算。
+
+### 新增：绩效报表
+- 新文件 `src/lib/performance.ts`：`computePerformanceReport(history, trades)` 纯函数，从净值序列 + 交易明细算出：年化收益/波动、**Sharpe / Sortino / Calmar**、**最大回撤**（含峰谷日期）、**Profit Factor**、平仓胜率、平均盈/亏与盈亏比、**最大连亏**、**平均持仓天数**（FIFO 配对）、持仓占比。
+- 新组件 `src/components/BacktestReport.tsx`：指标卡片阵 + **权益曲线**（策略 vs 买入持有，起点归一 1.0）+ **回撤水下图**。
+- `src/components/QuantChart.tsx`：交易面板新增「绩效报表」页签（置顶默认），与策略切换联动。
+
+### ✅ 质量
+- `tsc --noEmit`、`eslint`（改动文件）、`next build` 全通过。
+
+---
+
 ## [0.17.0] - 2026-06-23
 
 > **可插拔副图框架 + 首批技术指标（MACD / RSI / KDJ / BOLL，对标 TradingView）**。同花顺/通达信用户熟悉的主图叠加（布林带）+ 副图振荡指标一键切换。口径对齐常见券商软件默认参数，便于拿同花顺/通达信数值互校。

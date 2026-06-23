@@ -4,6 +4,8 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { calculateChipDistribution } from "@/lib/quant";
 import type { ChipDistributionResult, BacktestResult, TradeAction, TechnicalAssessment } from "@/lib/quant";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL } from "@/lib/indicators";
+import { computePerformanceReport } from "@/lib/performance";
+import BacktestReport from "./BacktestReport";
 import type { Candle } from "@/lib/types";
 
 interface QuantChartProps {
@@ -268,7 +270,10 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
 
   const { history, trades, winRate, strategyReturn, stockReturn } = currentBacktest;
 
-  const [activeTab, setActiveTab] = useState<"backtest" | "trades">("backtest");
+  // 标准化绩效报表（随所选策略重算）。
+  const perfReport = useMemo(() => computePerformanceReport(history, trades), [history, trades]);
+
+  const [activeTab, setActiveTab] = useState<"report" | "backtest" | "trades">("report");
   const [periodMode, setPeriodMode] = useState<"1D" | "1W" | "1M">("1D");
   const [chartType, setChartType] = useState<"kline" | "worth">("kline");
 
@@ -2318,6 +2323,16 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
       <div className="border-t border-[var(--border)] pt-3">
         <div className="flex gap-2 border-b border-[var(--border)] pb-2 mb-2">
           <button
+            onClick={() => setActiveTab("report")}
+            className={`px-3 py-1 text-xs font-semibold tracking-wider cursor-pointer ${
+              activeTab === "report"
+                ? "border-b-2 border-[var(--accent)] text-[var(--text)]"
+                : "text-[var(--muted)] hover:text-[var(--text)]"
+            }`}
+          >
+            绩效报表
+          </button>
+          <button
             onClick={() => setActiveTab("backtest")}
             className={`px-3 py-1 text-xs font-semibold tracking-wider cursor-pointer ${
               activeTab === "backtest"
@@ -2339,7 +2354,9 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
           </button>
         </div>
 
-        {activeTab === "backtest" ? (
+        {activeTab === "report" ? (
+          <BacktestReport report={perfReport} history={history} />
+        ) : activeTab === "backtest" ? (
           <div className="text-[11px] leading-relaxed text-[var(--muted)] grid grid-cols-1 md:grid-cols-3 gap-4 font-mono">
             <div className="border border-[var(--border)] p-2.5 bg-[var(--inset)]">
               <span className="text-[9px] uppercase tracking-wider text-[var(--accent)] font-bold block mb-1">
