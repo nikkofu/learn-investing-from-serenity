@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { deriveStats, getQuoteFailover, getKlineFailover } from "@/lib/sources";
+import { deriveStats, getQuoteFailover, getKlineFailover, HISTORY_LIMIT } from "@/lib/sources";
 import { calculateChipDistribution, runWalkForwardWinRate, analyzeTechnicalPatterns, generatePriceProjection } from "@/lib/quant";
 import { runAllStrategies, pickDefaultResult, DEFAULT_STRATEGY_ID } from "@/lib/strategies";
 import { buildAnalyzePrompt } from "@/lib/serenity";
@@ -27,6 +27,9 @@ import {
 export const dynamic = "force-dynamic";
 
 const ANALYZE_CACHE_NS = "analyze";
+
+/** 打分/筹码/技术形态等「近端」分析所用的窗口长度（保持原 360 根口径不变）。 */
+const DISPLAY_WINDOW = 360;
 
 /** 完整（缓存未命中）管线展示的阶段。 */
 const FULL_STAGES = [
@@ -171,10 +174,17 @@ export async function POST(req: Request) {
     // Stage 1: fetch market data (the "tool call").
     const tQuoteStart = performance.now();
     send({ type: "stage", key: "quote", status: "start" });
-    let quote, candles, stats;
+    let quote, candles, candlesFull, backtestCandles, stats;
     try {
-      [quote, candles] = await Promise.all([getQuoteFailover(code), getKlineFailover(code, 360)]);
+      // 打分/筹码/技术形态用前复权近端窗口（贴合现价，口径不变）。
+      [quote, candlesFull] = await Promise.all([getQuoteFailover(code), getKlineFailover(code, HISTORY_LIMIT)]);
+      candles = candlesFull.slice(-DISPLAY_WINDOW);
       stats = deriveStats(candles);
+      // 关键修复：前复权（减式除权）对高分红老股拉到早年会把价格压成负数（如五粮液/茅台早年 < 0），
+      // 直接喂回测会算出 -2600% 这类失真收益。这里裁掉非正价坏 bar，只在「前复权有效正价区间」内回测、画图、
+      // 算筹码——这样交易标记、理由文案（内嵌价位）、筹码定位、现价口径全程一致，且彻底消除负价失真。
+      // （注：负价是源数据前复权的固有现象，正价区间内的前复权是业界通行的回测口径。）
+      backtestCandles = candlesFull.filter((c) => c.close > 0 && c.open > 0 && c.high > 0 && c.low > 0);
     } catch (e) {
       send({ type: "error", message: `行情获取失败：${e instanceof Error ? e.message : e}` });
       return;
@@ -356,10 +366,10 @@ export async function POST(req: Request) {
     // ── 共享尾段：量化计算 + 校准 + 结果下发。
     const tSummaryStart = performance.now();
     const chips = calculateChipDistribution(candles, quote.price);
-    const strategies = runAllStrategies(candles, { chokepointScore: assessment.totalScore, code: quote.code });
+    const strategies = runAllStrategies(backtestCandles, { chokepointScore: assessment.totalScore, code: quote.code });
     const defaultBacktest = pickDefaultResult(strategies)!;
     const traditionalBacktest = strategies.find((s) => s.meta.id === "traditional-ma")?.result ?? defaultBacktest;
-    const walkForward = runWalkForwardWinRate(candles);
+    const walkForward = runWalkForwardWinRate(backtestCandles);
     assessment.winRate = deriveWinRate(walkForward, defaultBacktest);
     const technical = analyzeTechnicalPatterns(candles, quote.price, chips);
     const projections = generatePriceProjection(candles, assessment.totalScore);
@@ -406,7 +416,7 @@ export async function POST(req: Request) {
         strategies,
         defaultStrategyId: DEFAULT_STRATEGY_ID,
         technical,
-        candles,
+        candles: backtestCandles,
         projections,
       },
       timings: {

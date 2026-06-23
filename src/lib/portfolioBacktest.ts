@@ -1,5 +1,5 @@
 import type { Candle } from "./types";
-import { getKlinesBatch } from "./sources";
+import { getKlinesBatch, HISTORY_LIMIT } from "./sources";
 
 /**
  * 组合级回测引擎（对标 SCS web/lib/backtest.ts，纯 TS 实现）。
@@ -376,16 +376,19 @@ export async function backtestPortfolioByCodes(
   cfg: PortfolioBacktestConfig = {},
   opts: { limit?: number; names?: Record<string, string>; scorer?: PortfolioScorer } = {},
 ): Promise<PortfolioBacktestResult> {
-  const limit = Math.max(60, Math.min(800, opts.limit ?? 400));
+  const limit = Math.max(60, Math.min(HISTORY_LIMIT, opts.limit ?? 400));
   const klineMap = await getKlinesBatch(codes, limit, "baidu-first");
   const series: PortfolioSeries[] = [];
   for (const code of codes) {
     const item = klineMap.get(code);
     if (!item || item.candles.length < 30) continue;
+    // 前复权（减式除权）对高分红老股早年价会压成负数/近零，污染回测。只取「正价区间」。
+    const clean = item.candles.filter((k) => k.close > 0 && k.open > 0 && k.high > 0 && k.low > 0);
+    if (clean.length < 30) continue;
     series.push({
       code,
       name: opts.names?.[code] ?? code,
-      candles: [...item.candles].sort((a, b) => (a.date < b.date ? -1 : 1)),
+      candles: clean.sort((a, b) => (a.date < b.date ? -1 : 1)),
     });
   }
   if (series.length === 0) throw new Error("无可用 K 线数据，无法回测");

@@ -1,5 +1,5 @@
 import type { Candle } from "./types";
-import { getKlinesBatch } from "./sources";
+import { getKlinesBatch, HISTORY_LIMIT } from "./sources";
 import { calculateChipDistribution } from "./quant";
 import { priceLimitFraction } from "./portfolioBacktest";
 import { getStrategy, strategyCount, type Strategy } from "./strategies";
@@ -811,16 +811,19 @@ export async function backtestRecommendationByCodes(
   cfg: RecommendationBacktestConfig = {},
   opts: { limit?: number; names?: Record<string, string> } = {},
 ): Promise<RecommendationBacktestResult> {
-  const limit = Math.max(120, Math.min(800, opts.limit ?? 500));
+  const limit = Math.max(120, Math.min(HISTORY_LIMIT, opts.limit ?? 500));
   const klineMap = await getKlinesBatch(codes, limit, "baidu-first");
   const series: RecommendationSeries[] = [];
   for (const code of codes) {
     const item = klineMap.get(code);
     if (!item || item.candles.length < 60) continue;
+    // 前复权早年负价/近零会污染回测，只取正价区间。
+    const clean = item.candles.filter((k) => k.close > 0 && k.open > 0 && k.high > 0 && k.low > 0);
+    if (clean.length < 60) continue;
     series.push({
       code,
       name: opts.names?.[code] ?? code,
-      candles: [...item.candles].sort((a, b) => (a.date < b.date ? -1 : 1)),
+      candles: clean.sort((a, b) => (a.date < b.date ? -1 : 1)),
     });
   }
   if (series.length === 0) throw new Error("无可用 K 线数据，无法回测");

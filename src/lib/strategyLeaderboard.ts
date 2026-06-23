@@ -10,7 +10,7 @@
  * - 牛市样本里择时策略普遍跑不赢买入持有，这是行情属性；故榜单同时给出「跑赢买入持有比例」，
  *   不以单一收益论英雄。
  */
-import { getKlinesBatch } from "./sources";
+import { getKlinesBatch, HISTORY_LIMIT } from "./sources";
 import { runAllStrategies, type StrategyMeta } from "./strategies";
 import { globalCache } from "./cache";
 
@@ -31,7 +31,7 @@ export const REPRESENTATIVE_BASKET: { code: string; name: string }[] = [
 ];
 
 const NEUTRAL_SCORE = 75;
-const DEFAULT_LIMIT = 500;
+const DEFAULT_LIMIT = HISTORY_LIMIT; // 约 10 年日线，回测样本更充分
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 export interface StrategyTrackRecord {
@@ -190,8 +190,10 @@ export async function computeStrategyLeaderboard(opts: { limit?: number; force?:
       for (const { code } of REPRESENTATIVE_BASKET) {
         const item = batch.get(code);
         if (!item || item.candles.length < 60) continue;
+        // 前复权早年负价/近零会污染回测，只取正价区间。
+        const candles = item.candles.filter((k) => k.close > 0 && k.open > 0 && k.high > 0 && k.low > 0);
+        if (candles.length < 60) continue;
         usedStocks++;
-        const candles = item.candles;
         if (!windowStart || candles[0].date < windowStart) windowStart = candles[0].date;
         if (!windowEnd || candles[candles.length - 1].date > windowEnd) windowEnd = candles[candles.length - 1].date;
 

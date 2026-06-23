@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getKlinesBatch } from "@/lib/sources";
+import { getKlinesBatch, HISTORY_LIMIT } from "@/lib/sources";
 import { runPairScan } from "@/lib/pairTrading";
 import type { Candle } from "@/lib/types";
 
@@ -39,11 +39,12 @@ export async function POST(req: Request) {
   }
 
   try {
-    const limit = Math.max(250, Math.min(800, body.limit ?? 500));
+    const limit = Math.max(250, Math.min(HISTORY_LIMIT, body.limit ?? 500));
     const km = await getKlinesBatch(codes, limit, "baidu-first");
     const candles: Record<string, Candle[]> = {};
     for (const code of codes) {
-      const cs = km.get(code)?.candles ?? [];
+      // 前复权早年负价/近零会污染回测，只取正价区间。
+      const cs = (km.get(code)?.candles ?? []).filter((k) => k.close > 0 && k.open > 0 && k.high > 0 && k.low > 0);
       if (cs.length >= 250) candles[code] = cs;
     }
     if (Object.keys(candles).length < 3) {
