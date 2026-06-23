@@ -90,7 +90,16 @@ function ScannerContent() {
         throw new Error(`请求股票数据错误: ${res.status}`);
       }
       const json = await res.json();
-      setList(json.list ?? []);
+      // 按证券代码去重，避免接口返回重复股票导致 React 重复 key 警告
+      const incoming: HotStockItem[] = json.list ?? [];
+      const seen = new Set<string>();
+      const uniqueList: HotStockItem[] = [];
+      for (const it of incoming) {
+        if (seen.has(it.code)) continue;
+        seen.add(it.code);
+        uniqueList.push(it);
+      }
+      setList(uniqueList);
       setHotRankRetryCount(0); // 成功后重置
       setLoading(false);
     } catch (e) {
