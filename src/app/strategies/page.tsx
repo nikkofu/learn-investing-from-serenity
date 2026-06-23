@@ -188,7 +188,7 @@ export default function StrategyMarketPage() {
   }, [load]);
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+    <main className="w-full px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">策略市场</h1>

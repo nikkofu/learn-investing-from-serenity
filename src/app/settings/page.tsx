@@ -316,7 +316,7 @@ export default function SettingsPage() {
   }));
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
+    <div className="w-full space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">设置 · 多账户 LLM 接入</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">

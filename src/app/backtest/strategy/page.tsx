@@ -243,7 +243,7 @@ export default function StrategyBacktestPage() {
   const inputCls = "rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm tabular-nums";
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="w-full space-y-6">
       <div>
         <div className="mb-2 flex gap-2 text-xs">
           <Link href="/backtest" className="rounded-md border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:text-[var(--text)]">
