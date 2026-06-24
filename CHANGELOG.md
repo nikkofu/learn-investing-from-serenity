@@ -4,6 +4,35 @@
 
 ---
 
+## [0.41.0] - 2026-06-24
+
+> **复刻 TradingView 社区脚本框架 · 首发 Modern Adaptive Supertrend [GBB]**。新方向：把 TradingView 社区里值得复刻的 Pine 脚本**逆向出核心算法**、本地实现，并为每个策略配套实现可叠加到 K 线主图的**分析图层**（方向线 / 翻多翻空标记 / regime 读数），从而脱离 TradingView 把这些策略直接套用到 A 股个股行情上。本轮交付**复刻框架** + **第一个策略端到端打通**作为模板，后续脚本照此范式逐个复刻。**零新依赖**。
+
+### 新增：`src/lib/tvStrategies.ts`（TV 社区脚本复刻库 · 带版本号注册表）
+- 与经典指标组 `indicatorStrategies.ts` **平行**：那一组是「对标教科书指标的自研改进版」，本库是「逐一复刻具名社区脚本」。每个策略 = 元信息（`id` / 版本 / **原作者** / **原作链接** / 与原版的差异与诚实说明 / 标签）+ `compute(candles)→TvStrategyLayers`（纯函数，产出与 K 线等长的 `line`(方向线) / `dir`(每根方向) / `flips`(翻转点) / `regime`(每根状态) / `regimeValue`(效率比分位)）+ 可选 `backtest(candles)→BacktestResult`（纯多头可回测包装）。
+- `listTvStrategies()` / `getTvStrategy(id)` 供 UI 下拉与渲染消费；新增脚本只需在 `TV_STRATEGIES` 数组追加一项，UI 与接口自动跟随。
+
+### 逆向：Modern Adaptive Supertrend [GBB]（作者 goodBadBitcoin）
+- 原作链接 https://cn.tradingview.com/script/Wagz8RF1-Modern-Adaptive-Supertrend-GBB/ 。本质是经典 Supertrend（ATR(10)×3 波动率跟踪线，价上方/下方翻转，收盘越线即翻）+ 两层现代化改造：
+  - **① Commit filter（迟滞过滤，真正起作用的一层）**：不再「碰线即翻」，收盘要越过线 **≥ `commitBuffer`×ATR（默认 0.5）** 并保持 `persistence` 根（默认 1）才确认翻转。作者实测假翻转减少约 60%。
+  - **② Adaptive distance（regime 自适应带宽）**：用市场**自身近况**而非固定阈值判趋势/震荡——取效率比（Kaufman ER）在近 `pctlWindow`（默认 500）根里的**分位** `pr`，`effMult = baseMult×(1 + trendGain·max(0,(pr−.5)/.5) + chopGain·max(0,(.5−pr)/.5))`。干净趋势（`trendGain` 0.8）与震荡（`chopGain` 0.5）均加宽抗洗，仅「转折」（`pr≈0.5`）收紧到基准、让线灵敏。
+  - **③ Adaptive period（自适应周期）**：作者承认无效、原脚本默认关，本复刻**未实现**（仅保留口径说明）。
+- **诚实口径（沿用原作）**：这是趋势**过滤器**而非择时系统，裸方向胜率≈48%（约等于抛硬币，因为 Supertrend 跟随趋势而不预测趋势），价值在更干净的趋势读数与更低回撤、而非抄顶摸底。
+
+### 新增：分析图层（`/chart`「策略图层」下拉）
+- `src/components/LightweightChart.tsx`：新增「策略图层」下拉，选中复刻策略后在主图叠加——Supertrend **方向线**（A 股配色：多头红 / 空头绿，翻转处断开线段避免画出跨越价格的斜线）、**翻多 / 翻空标记**（箭头）、读数条显示当前**方向 · regime · 线值**；随周期切换 / 逐根回放自动对齐，关闭即移除（复用既有「按可见 K 线重绘」的 painter 结构，不重建图表）。
+
+### 变更：登记进证明引擎
+- `strategies.ts` 登记 **`tv-supertrend-adaptive-v1`**（翻多入场 / 翻空离场，单仓位、纯多头、含双边手续费；翻空即为离场/止损，不再叠加额外 ATR 跟踪止损以忠实原策略口径），登记即自动接入 `/backtest/strategy` 证明引擎（z 检验 / PSR / DSR）与 `/analyze`、策略榜。
+- `indicatorStrategies.ts` 导出 `runSignalBacktest` / `SignalSpec` / `HoldState` 供 `tvStrategies.ts` 复用，统一回测口径与统计（净值 / 夏普 / 对照买入持有 / A 股双边费）。
+
+### 质量门禁（本机执行）
+- `npm run type-check`（`tsc --noEmit`）0 error；`npm run lint` 0 error（27 个历史遗留 warning，与上一版同数、非本次引入）；`npm run build` 通过，注册表新增策略自动接入、全部路由如常注册。
+- 数值校验（近 600 根日线缓存 000001/000333/000651/600519）：commit filter 实测**降噪 62~75%**（默认 `buffer=0.5` 对比 `buffer=0` 的翻转次数），与原作「约 60%」吻合；方向线在多头时贴价下方、空头时贴价上方（仅迟滞确认窗口内允许短暂越线，符合 commit filter 设计）；regime 趋势/震荡/转折分布均衡；纯多头回测无 NaN/Infinity、买卖配对、交易点带可读理由。
+- 诚实边界：回测结果**不代表未来收益**；该策略为趋势过滤器、裸方向≈抛硬币，请结合其它信号使用（已在策略简介与 `compute` 注释中如实声明）。
+
+---
+
 ## [0.40.0] - 2026-06-24
 
 > **经典技术指标策略组 · 对标 TradingView「七个值得尝试的指标」**。研读 CMC Markets《七个值得尝试的 TradingView 指标》（RSI / 移动均线 / MACD / 布林带 / 斐波那契回撤 / 随机指标(KDJ) / 成交量）后，结合本项目既有指标库（`indicators.ts`）、回测**证明引擎**（`/backtest/strategy` 带 z 检验 / PSR / DSR / Purged-CV）与**带版本号的策略注册表**（`strategies.ts`），落地 **5 个「比原文裸口径更优」的策略**。原文反复强调「**任何单一指标都应与其他指标结合使用**」——故每个策略都在裸指标上叠加：①**MA60 趋势闸门**（避开 A 股单边下跌里接飞刀）；②**多重确认**（零轴 / 放量 / 低位金叉企稳）；③**ATR(14) 自适应跟踪止损**（回撤距离随个股波动伸缩、不猜顶）。全部**纯多头、A 股主板、含双边手续费**，各带独立 `id@版本号`便于后续单独迭代。**零新依赖**。

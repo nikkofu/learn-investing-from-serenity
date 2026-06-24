@@ -16,12 +16,15 @@ import {
   type ISeriesMarkersPluginApi,
   type Time,
   type CandlestickData,
+  type LineData,
+  type WhitespaceData,
 } from "lightweight-charts";
 import type { Candle } from "@/lib/types";
 import type { TradeAction } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance } from "@/lib/indicators";
 import type { ChartDrawing, MarkerDrawing, DrawingColor } from "@/lib/drawings";
+import { listTvStrategies, getTvStrategy, type TvStrategyLayers } from "@/lib/tvStrategies";
 
 interface LightweightChartProps {
   candles: Candle[];
@@ -101,8 +104,10 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [indKdj, setIndKdj] = useState(true);
   const [showBoll, setShowBoll] = useState(true);
   const [showResonance, setShowResonance] = useState(true);
+  // 策略图层：选中的 TradingView 复刻策略 id（""=关闭）
+  const [tvStrategyId, setTvStrategyId] = useState("");
   const [maOn, setMaOn] = useState<Record<string, boolean>>({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma250: false });
-  const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string } | null>(null);
+  const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string; st?: string } | null>(null);
 
   // 逐根回放：replayN = 当前显露的 K 线根数（null = 关闭，显示全部）
   const [replayN, setReplayN] = useState<number | null>(null);
@@ -130,6 +135,26 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     for (const r of resonance) { const c = candles[r.index]; if (c) m.set(c.date, r); }
     return m;
   }, [resonance, candles]);
+
+  // 策略图层：已复刻的 TV 策略列表 + 当前选中策略算出的图层（方向线/翻转点/regime）
+  const tvMetas = useMemo(() => listTvStrategies(), []);
+  const tvLayers = useMemo<TvStrategyLayers | null>(
+    () => (tvStrategyId ? getTvStrategy(tvStrategyId)?.compute(candles) ?? null : null),
+    [tvStrategyId, candles]
+  );
+  // 某根的策略读数（多空 / regime / 线值），供读数条展示。
+  const tvReadout = useCallback(
+    (idx: number): string | undefined => {
+      if (!tvLayers || idx < 0 || idx >= candles.length) return undefined;
+      const d = tvLayers.dir[idx];
+      const rg = tvLayers.regime[idx];
+      const lv = tvLayers.line[idx];
+      const dirTxt = d === 1 ? "多头" : d === -1 ? "空头" : "--";
+      const rgTxt = rg === "trend" ? "趋势" : rg === "chop" ? "震荡" : "转折";
+      return `${dirTxt} · ${rgTxt}${Number.isFinite(lv as number) ? ` · 线 ${(lv as number).toFixed(2)}` : ""}`;
+    },
+    [tvLayers, candles]
+  );
 
   const startN = useMemo(() => Math.min(60, candles.length), [candles.length]);
   const viewCandles = useMemo(
@@ -190,6 +215,20 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     const drawMarkers: SeriesMarker<Time>[] = (intraday ? [] : drawings)
       .filter((d): d is MarkerDrawing => d.type === "marker")
       .map((d) => ({ time: toTime(d.date), position: "aboveBar", color: drawColor(d.color), shape: "circle", text: d.text }));
+    const stFlipMarkers: SeriesMarker<Time>[] = tvLayers
+      ? tvLayers.flips
+          .filter((f) => f.index <= vc.length - 1)
+          .map((f): SeriesMarker<Time> => {
+            const c = candles[f.index];
+            return {
+              time: toTime(c.date),
+              position: f.dir === "up" ? "belowBar" : "aboveBar",
+              color: f.dir === "up" ? UP : DOWN,
+              shape: f.dir === "up" ? "arrowUp" : "arrowDown",
+              text: f.dir === "up" ? "翻多" : "翻空",
+            };
+          })
+      : [];
     const resoMarkers: SeriesMarker<Time>[] = showResonance
       ? resonance
           .filter((r) => r.index <= vc.length - 1)
@@ -204,16 +243,16 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             };
           })
       : [];
-    const all = [...markers, ...drawMarkers, ...resoMarkers].sort((a, b) =>
+    const all = [...markers, ...drawMarkers, ...resoMarkers, ...stFlipMarkers].sort((a, b) =>
       typeof a.time === "number" && typeof b.time === "number" ? a.time - b.time : String(a.time).localeCompare(String(b.time))
     );
     markersApiRef.current?.setMarkers(all);
     const last = vc[vc.length - 1];
     if (last) {
       const r = resoByDate.get(last.date);
-      setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0, reso: r ? `${r.dir === "bull" ? "看多共振" : "看空共振"}：${r.reasons.join("+")}` : undefined });
+      setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0, reso: r ? `${r.dir === "bull" ? "看多共振" : "看空共振"}：${r.reasons.join("+")}` : undefined, st: tvReadout(vc.length - 1) });
     }
-  }, [trades, toTime, drawings, intraday, showResonance, resonance, candles, resoByDate]);
+  }, [trades, toTime, drawings, intraday, showResonance, resonance, candles, resoByDate, tvLayers, tvReadout]);
 
   // 结构层：仅在「指标/周期/纵轴/副图」变化时重建图表与序列（不随回放游标变动）
   useEffect(() => {
@@ -269,6 +308,24 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       mk((b) => b.upper, false);
       mk((b) => b.mid, true);
       mk((b) => b.lower, false);
+    }
+
+    // 策略图层：TradingView 复刻策略叠加（方向线，A 股配色多头红/空头绿，翻转处断开；翻多/翻空标记在 paint 中统一打）
+    if (tvLayers) {
+      const stSeries = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+      paintersRef.current.push((vc) => {
+        const data: (LineData<Time> | WhitespaceData<Time>)[] = [];
+        for (let i = 0; i < vc.length; i++) {
+          const v = tvLayers.line[i];
+          const d = tvLayers.dir[i];
+          // 方向翻转处断开线段（避免画出从下方跳到上方的斜线）
+          const flip = i > 0 && d !== 0 && tvLayers.dir[i - 1] !== 0 && d !== tvLayers.dir[i - 1];
+          if (flip) { data.push({ time: toTime(vc[i].date) }); continue; }
+          if (v == null || !Number.isFinite(v)) continue;
+          data.push({ time: toTime(vc[i].date), value: v, color: d === 1 ? UP : DOWN });
+        }
+        stSeries.setData(data);
+      });
     }
 
     // 副图振荡指标：各占独立窗格（分开显示，量纲互不干扰）
@@ -332,10 +389,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       if (!param.time) return;
       const cd = param.seriesData.get(candleSeries) as CandlestickData | undefined;
       if (!cd) return;
-      const match = candles.find((c) => toTime(c.date) === param.time);
+      const matchIdx = candles.findIndex((c) => toTime(c.date) === param.time);
+      const match = matchIdx >= 0 ? candles[matchIdx] : undefined;
       const dateStr = match?.date ?? String(param.time);
       const r = resoByDate.get(dateStr);
-      setLegend({ date: dateStr, o: cd.open, h: cd.high, l: cd.low, c: cd.close, v: match?.volume || 0, chg: match?.changePct ?? 0, reso: r ? `${r.dir === "bull" ? "看多共振" : "看空共振"}：${r.reasons.join("+")}` : undefined });
+      setLegend({ date: dateStr, o: cd.open, h: cd.high, l: cd.low, c: cd.close, v: match?.volume || 0, chg: match?.changePct ?? 0, reso: r ? `${r.dir === "bull" ? "看多共振" : "看空共振"}：${r.reasons.join("+")}` : undefined, st: tvReadout(matchIdx) });
     });
     void onMove;
 
@@ -348,7 +406,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     };
     // 故意不依赖 viewCandles：回放游标变化由下方数据层处理，避免重建图表导致闪烁。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, macd, rsi, kdj, boll, resoByDate, maOn, showBoll, indMacd, indRsi, indKdj, yScaleMode, intraday, drawings, toTime, paint]);
+  }, [candles, macd, rsi, kdj, boll, resoByDate, maOn, showBoll, indMacd, indRsi, indKdj, yScaleMode, intraday, drawings, toTime, paint, tvLayers]);
 
   // 数据层：回放游标（viewCandles）变化时仅重绘数据，并把最新显露的 K 线滚入视野。
   useEffect(() => {
@@ -441,6 +499,20 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           </button>
         </div>
 
+        <div className="flex items-center gap-1" title="策略图层：把复刻的 TradingView 社区策略叠加到主图（方向线 + 翻多/翻空标记 + regime 读数），可套用到任意个股行情">
+          <span className="text-[9px] uppercase tracking-wider text-[var(--faint)]">策略图层</span>
+          <select
+            value={tvStrategyId}
+            onChange={(e) => setTvStrategyId(e.target.value)}
+            className="bg-[var(--inset)] border border-[var(--border)] text-[9.5px] font-semibold px-1.5 py-0.5 rounded-[1px] text-[var(--text)] cursor-pointer max-w-[200px]"
+          >
+            <option value="">关闭</option>
+            {tvMetas.map((m) => (
+              <option key={m.id} value={m.id}>{m.name} v{m.version}</option>
+            ))}
+          </select>
+        </div>
+
         {/* 逐根回放（对标 TradingView Bar Replay） */}
         <div className="flex items-center gap-1" title="逐根回放：隐藏未来 K 线，单步或自动逐根显露，练习/复盘临场决策">
           <span className="text-[9px] uppercase tracking-wider text-[var(--faint)]">回放</span>
@@ -483,6 +555,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             <span className="text-[var(--faint)]">量 {(legend.v / 100).toFixed(0)} 手</span>
             {replayOn && <span className="text-[var(--accent)]">● 回放中</span>}
             {legend.reso && <span style={{ color: RESONANCE }}>● {legend.reso}</span>}
+            {legend.st && <span className="text-[var(--accent)]">▣ 策略 {legend.st}</span>}
           </div>
         )}
         <div ref={containerRef} className="w-full h-full" />

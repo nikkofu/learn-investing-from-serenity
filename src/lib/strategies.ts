@@ -25,6 +25,7 @@ import {
   runFibKdjPullbackV1,
   runConfluenceV1,
 } from "./indicatorStrategies";
+import { runTvSupertrendAdaptiveV1 } from "./tvStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -158,6 +159,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["mean-reversion", "grid", "regime-gated"],
     },
     run: (candles) => runGridMeanReversionBacktest(candles),
+  },
+  {
+    meta: {
+      id: "tv-supertrend-adaptive-v1",
+      name: "Modern Adaptive Supertrend [GBB] 复刻",
+      version: "1.0",
+      description:
+        "复刻 TradingView 社区脚本 Modern Adaptive Supertrend [GBB]（作者 goodBadBitcoin）。经典 Supertrend(ATR10×3) 之上叠两层现代化改造：①Commit filter 迟滞过滤——收盘越线需达 0.5×ATR 并保持 1 根才确认翻转（原作实测假翻转减少约 60%），治「碰线即翻」的来回打脸；②regime 自适应带宽——用效率比(ER)近 500 根分位判趋势/震荡，趋势(增益 0.8)与震荡(增益 0.5)均加宽抗洗、仅转折处收紧让线灵敏，用市场自身近况而非固定阈值。作者承认无效的自适应周期默认关、未实现。回测为纯多头：Supertrend 翻多入场、翻空离场（翻空本身即止损，不另加 ATR 止损），含双边手续费。诚实口径（沿用原作）：这是趋势过滤器而非择时系统，裸方向胜率≈48%，价值在更干净的趋势读数与更低回撤而非抄顶摸底。对应 /chart「策略图层」可叠加方向线/翻多翻空标记/regime 读数。",
+      tags: ["tradingview", "supertrend", "trend-follow", "adaptive", "regime-adaptive", "atr-stop", "reproduction"],
+    },
+    run: (candles) => runTvSupertrendAdaptiveV1(candles),
   },
   {
     meta: {

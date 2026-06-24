@@ -27,7 +27,7 @@ import {
  */
 
 /** 持仓上下文（供主动离场回调判断）。 */
-interface HoldState {
+export interface HoldState {
   buyPrice: number;
   buyIndex: number;
   highSinceEntry: number;
@@ -35,7 +35,7 @@ interface HoldState {
 }
 
 /** 信号式回测规格：预热根数 + 入场/离场回调 + ATR 跟踪止损参数。 */
-interface SignalSpec {
+export interface SignalSpec {
   /** 首个可交易下标（预热不计交易，需覆盖最长指标窗口，如 MA60 取 60）。 */
   warmup: number;
   /** 入场信号：仅用 ≤ i 的数据，命中返回买入理由，否则 null。 */
@@ -73,7 +73,7 @@ const EMPTY: BacktestResult = { winRate: 0, sharpe: 0, strategyReturn: 0, stockR
  * 内建 ATR 自适应跟踪止损，统一产出 BacktestResult（净值曲线对照「同期买入持有」基线）。
  * 把各策略的差异收敛到 entry/exit 两个回调，保证口径与统计一致、便于横向对照与迭代。
  */
-function runSignalBacktest(candles: Candle[], spec: SignalSpec): BacktestResult {
+export function runSignalBacktest(candles: Candle[], spec: SignalSpec): BacktestResult {
   const n = candles.length;
   if (n < spec.warmup + 5) return EMPTY;
 

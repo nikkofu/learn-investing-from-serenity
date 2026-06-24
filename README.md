@@ -14,7 +14,15 @@
 
 ---
 
-## 🆕 v0.40.0 亮点
+## 🆕 v0.41.0 亮点
+
+*   **复刻 TradingView 社区脚本框架 · 首发 Modern Adaptive Supertrend [GBB]**：新方向——把 TradingView 社区里值得复刻的 Pine 脚本**逆向出核心算法**、本地实现，并为每个策略配套实现可叠加到 K 线主图的**分析图层**，从而脱离 TradingView 把这些策略直接套用到 A 股个股行情上。新增 `src/lib/tvStrategies.ts`（**带版本号的 TV 策略复刻注册表**，与经典指标组 `indicatorStrategies.ts` 平行）：每个策略 = 元信息（`id`/版本/**原作者**/**原作链接**/差异说明）+ `compute(candles)→图层`（方向线 / 方向 / 翻转点 / regime）+ 可选**纯多头可回测包装**。新增脚本只需在 `TV_STRATEGIES` 追加一项，UI 与接口自动跟随。
+    *   **逆向出的核心算法**（[Modern Adaptive Supertrend [GBB]](https://cn.tradingview.com/script/Wagz8RF1-Modern-Adaptive-Supertrend-GBB/)，作者 goodBadBitcoin）：经典 Supertrend（ATR(10)×3 波动率跟踪线，收盘越线翻向）+ 两层现代化改造——① **Commit filter（迟滞过滤）**：不再「碰线即翻」，收盘要越过线 **≥0.5×ATR** 并保持 1 根才确认翻转（实测假翻转减少约 60%）；② **regime 自适应带宽**：用效率比（Kaufman ER）近 500 根**分位**判趋势/震荡（而非固定阈值），干净趋势（×0.8）与震荡（×0.5）均加宽抗洗、仅「转折」处收紧让线灵敏；③ 作者承认无效的**自适应周期**默认关、本复刻未实现。**诚实口径沿用原作**：这是趋势过滤器而非择时系统，裸方向胜率≈48%，价值在更干净的趋势读数与更低回撤而非抄顶摸底。
+    *   **分析图层落地**：`/chart` 新增「**策略图层**」下拉，选中即在主图叠加 Supertrend 方向线（A 股配色：**多头红 / 空头绿**，翻转处断开）、**翻多 / 翻空**标记、当前 **regime 读数条**；随周期切换 / 逐根回放自动对齐，关闭即移除。
+    *   **接入证明引擎**：`strategies.ts` 登记 `tv-supertrend-adaptive-v1`（翻多入场 / 翻空离场，纯多头、含双边手续费、翻空即止损不另加 ATR 止损），自动接入 `/backtest/strategy`（z 检验 / PSR / DSR）与 `/analyze`；`indicatorStrategies.ts` 导出 `runSignalBacktest`/`SignalSpec` 供复用，保证统计口径一致。
+    *   三关全绿（type-check / lint 0 error）；近 600 根日线数值校验——commit filter 实测**降噪 62~75%**（与原作「约 60%」吻合），regime 分布均衡，回测口径接通。**零新依赖**。
+
+## v0.40.0 亮点
 
 *   **经典技术指标策略组 · 对标 TradingView「七个值得尝试的指标」**：研读 CMC Markets《七个值得尝试的 TradingView 指标》（RSI / 移动均线 / MACD / 布林带 / 斐波那契回撤 / 随机指标(KDJ) / 成交量）后，结合本项目既有指标库（`indicators.ts`）、回测**证明引擎**（`/backtest/strategy` 带 z 检验 / PSR / DSR / Purged-CV）与**带版本号的策略注册表**（`strategies.ts`），落地 **5 个「比原文裸口径更优」的策略**（新增 `src/lib/indicatorStrategies.ts`，均带独立 `id@1.0` 便于迭代，登记即自动接入回测下拉、证明引擎与 `/analyze`）。原文核心观点是「**任何单一指标都应与其他指标结合使用**」——故每个策略都在裸指标上叠加 ①**MA60 趋势闸门**（避开 A 股单边下跌接飞刀）② **多重确认**（零轴 / 放量 / 低位金叉企稳）③ **ATR(14) 自适应跟踪止损**（回撤随波动伸缩、不猜顶）：
     *   `confluence-v1`「多指标共振（旗舰）」——`computeResonance` 要求 **≥3 指标**（MACD/RSI/KDJ/布林/量能）同向共振 + MA60 闸门，直接回应「指标需组合」。
