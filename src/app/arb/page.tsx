@@ -5,6 +5,7 @@ import { Fragment, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
 import PoolControls from "@/components/PoolControls";
+import RobustnessPanel from "@/components/RobustnessPanel";
 
 interface PairCandidate {
   a: string;
@@ -164,6 +165,7 @@ function ArbRadarInner() {
   const [calError, setCalError] = useState<string | null>(null);
   const [cal, setCal] = useState<CalibrationResult | null>(null);
   const [calOpen, setCalOpen] = useState<Record<string, boolean>>({});
+  const [robustOpen, setRobustOpen] = useState<Record<string, boolean>>({});
   const [sediment, setSediment] = useState<Record<string, { state: "saving" | "done" | "error"; msg: string }>>({});
 
   const codes = useMemo(
@@ -546,6 +548,7 @@ function ArbRadarInner() {
                     <th className="px-3 py-2 text-right">单边胜率</th>
                     <th className="px-3 py-2 text-right">最大逆向z(均)</th>
                     <th className="px-3 py-2">逐笔</th>
+                    <th className="px-3 py-2">体检</th>
                     <th className="px-3 py-2">沉淀</th>
                   </tr>
                 </thead>
@@ -582,6 +585,16 @@ function ArbRadarInner() {
                           <td className="px-3 py-2">
                             <button
                               type="button"
+                              onClick={() => setRobustOpen((m) => ({ ...m, [key]: !m[key] }))}
+                              title="过拟合体检：参数高原热图 + walk-forward 衰减曲线 + 稳健分"
+                              className={`rounded border px-2 py-0.5 text-xs ${robustOpen[key] ? "border-[var(--accent-line)] text-[var(--accent)]" : "border-[var(--border)] text-[var(--accent)] hover:border-[var(--accent-line)]"}`}
+                            >
+                              {robustOpen[key] ? "收起" : "体检"}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
                               disabled={sediment[key]?.state === "saving" || sediment[key]?.state === "done"}
                               onClick={() => sedimentStrategy(c)}
                               title="把该配对 + 当前参数 + 校准战绩沉淀为策略市场里的配对策略"
@@ -591,9 +604,16 @@ function ArbRadarInner() {
                             </button>
                           </td>
                         </tr>
+                        {robustOpen[key] && (
+                          <tr className="border-b border-[var(--border)] last:border-0">
+                            <td colSpan={11} className="bg-[var(--bg)] px-3 py-3">
+                              <RobustnessPanel a={c.pair.a} b={c.pair.b} />
+                            </td>
+                          </tr>
+                        )}
                         {open && (
                           <tr className="border-b border-[var(--border)] last:border-0">
-                            <td colSpan={10} className="bg-[var(--bg)] px-3 py-3">
+                            <td colSpan={11} className="bg-[var(--bg)] px-3 py-3">
                               <div className="overflow-x-auto">
                                 <table className="w-full min-w-[680px] text-xs">
                                   <thead>

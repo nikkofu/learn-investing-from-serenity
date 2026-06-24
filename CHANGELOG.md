@@ -4,6 +4,26 @@
 
 ---
 
+## [0.35.0] - 2026-06-24
+
+> **过拟合体检（稳健性可视化）**。§5.2-A：把「过拟合防护 + 校准」做成显性卖点。对任一协整配对，一键给出两张证据图——**参数高原热图**（入场阈 × z 窗口两维全样本扫描，按净值着色）与 **walk-forward 衰减曲线**（锚定式滚动前推：样本内选最优参 → 紧邻样本外用同参验证），并合成 0~100 稳健分与「稳健 / 脆弱 / 疑似过拟合」结论。全部基于既有 `backtestPair` / `evaluatePair`，零新依赖；产物均为统计信号、非投资建议。
+
+### 新增：稳健性引擎
+- `src/lib/robustness.ts`：
+  - `paramPlateau(pair, a, b, base)`：在 `entryZ ∈ {1.5…3.0}` × `lookback ∈ {30,45,60,90,120}` 网格上逐格跑全样本回测，输出每格净值/胜率/笔数；`best` 取净值最优有效格；`profitableCellPct`（有效格盈利占比，衡量「高原是否成片」）；`neighborRetention`（最优格四邻净值相对保留比，越高越「不挪就崩」=稳）。
+  - `walkForward(pair, a, b, base, folds=4)`：锚定式扩张前推。逐段在样本内 (IS) **重估 β** 并做参数网格寻优（WFO 专用收窄网格 `entryZ ∈ {1.5,2,2.5,3}` × `lookback ∈ {20,40,60}`，避免短窗跑不出交易），用选出的参在紧邻**样本外 (OOS)** 验证（OOS 切窗带 `maxLb` 根预热、只统计 `entryDate ≥ oosStart` 的交易）。输出逐段 IS/OOS 净值、`efficiency=OOS/IS`、`medianEfficiency`、`oosPositivePct`。
+  - `robustnessReport()`：合成稳健分 = 高原盈利占比 35% + 邻域保留 20% + 样本外效率 30% + 样本外为正占比 15%；`grade` 为 `robust`（分≥65 且高原盈利≥55% 且 OOS均≥0）/ `overfit`（分<40 或 IS正而OOS负）/ `fragile`（其余）。
+
+### 新增：API 路由
+- `src/app/api/arb/robustness/route.ts`（`dynamic = "force-dynamic"`）：`POST {a,b}` 复用既有 K 线源拉两腿、`evaluatePair` 估协整、跑 `robustnessReport`，返回 `{report, asOf, note}`；按主板纯净化口径排除非法/受限标的。
+
+### 新增：UI 接入
+- `src/components/RobustnessPanel.tsx`：调 `/api/arb/robustness` 渲染——结论徽标 + 稳健分；**参数高原热图**（SVG 表格，绿盈红亏、色深=幅度、■框标最优格、悬浮显示明细）；**walk-forward 衰减曲线**（SVG 双折线 IS vs OOS + 逐段明细表）。零新图表依赖、纯 SVG 自绘。
+- `src/app/arb/page.tsx`：校准表每行新增「**体检**」按钮，展开内联 `RobustnessPanel`（与「逐笔」「沉淀」并列）。
+
+### 质量门禁
+- `tsc --noEmit` 0 error；改动文件 `eslint` 0 error / 0 warning；`next build` 通过，新路由 `/api/arb/robustness` 已注册。真实行情功能级校验：白酒 600519/000858（高原盈利 85.7%，但 WFO 4 段 IS均 +4.41% → OOS均 −0.46% 判 overfit）、银行 601398/601939（高原盈利仅 6.5%、WFO OOS均 −2.36% 判 overfit）——体检如实暴露样本内强、样本外塌的过拟合特征。
+
 ## [0.34.0] - 2026-06-24
 
 > **信号 → 策略沉淀**。把套利雷达里验证过的**协整配对 + 参数 + 校准战绩**一键沉淀成可复检、可分享的策略，接入「策略市场」。沉淀的不是死快照——可用存的 β 重拉最新 K 线复检「活战绩」与当前 live 信号，并按加权公式打分给 A/B/C/D 评级；支持导出/导入（复制粘贴 JSON 即可分享）。全部复用既有 `.data/` JSON 落盘（`fs/promises` + 原子写）。零新依赖。
