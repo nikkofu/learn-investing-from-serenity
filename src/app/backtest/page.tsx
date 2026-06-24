@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import StockLink from "@/components/StockLink";
 
 interface PortfolioBar {
   date: string;
@@ -272,7 +273,7 @@ export default function BacktestPage() {
                     .map((t, i) => (
                       <tr key={i} className="border-t border-[var(--border)]">
                         <td className="px-3 py-1.5 tabular-nums text-[var(--faint)]">{t.date}</td>
-                        <td className="px-3 py-1.5 font-mono">{t.code}</td>
+                        <td className="px-3 py-1.5 font-mono"><StockLink code={t.code} newTab /></td>
                         <td className={`px-3 py-1.5 ${t.side === "buy" ? "text-rose-500" : "text-emerald-500"}`}>
                           {t.side === "buy" ? "买入" : "卖出"}
                         </td>

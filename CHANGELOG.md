@@ -4,6 +4,30 @@
 
 ---
 
+## [0.28.0] - 2026-06-23
+
+> **全站个股链接 + 套利解读层（LLM 解释 · Phase 2 起步）**。两件事：①把全站出现的个股代码统一接成可跳转链接（→ `/analyze` 个股分析、→ `/chart` 看 K 线）；②给套利雷达每条机会加一层「可证伪 AI 解读」——一句话核心逻辑 + 入场依据 + 回归依据 + 风险 + 可证伪/止损条件 + A 股可对冲性评估。
+
+### 新增：可复用 StockLink 组件 + 全站个股链接
+- `src/components/StockLink.tsx`：新增可复用组件，把个股代码/名称统一渲染为双链接（主体 → `/analyze?code=`，尾随小「图」→ `/chart?code=`），非 6 位 A 股代码自动退化为纯文本；支持 `newTab`（列表页用，避免丢失筛选态）。
+- `src/app/arb/page.tsx`：套利雷达配对 A/B 接入 StockLink。
+- `src/app/scanner/page.tsx`：代码列接 `/chart` 链接（名称列原有 `/analyze`）。
+- `src/app/sectors/page.tsx`：成分股表/龙头标的补「图」→ `/chart` 链接。
+- `src/app/map/page.tsx`：产业链图谱个股节点拆为「名称→分析 / 代码→看图」双链接（避免 anchor 嵌套）。
+- `src/app/backtest/page.tsx`、`src/app/backtest/strategy/page.tsx`：交易流水/分标的统计的代码列接 StockLink。
+
+### 新增：套利 LLM 解读层
+- `src/app/api/arb/interpret/route.ts`：新增 `POST /api/arb/interpret`，输入一条套利机会的统计量（配对/z/方向/β/相关性/ADF-t/半衰期/预计回归天数/估算净收益/近止损），复用 `chatJson`（可证伪 AI 工作流，temperature 0.3）输出结构化 JSON：`{thesis, entryLogic, revertCatalyst, risks[], invalidation, hedgeability}`。系统提示强调只基于统计量推演、不臆造基本面、必须给出失效（止损）条件。
+- `src/app/arb/page.tsx`：每条机会新增「AI 解读」按钮，点开异步拉取并在展开行内渲染（核心逻辑/入场依据/回归依据/风险清单/可证伪条件/可对冲性），含 loading/error 态，附「非投资建议」声明。
+
+### 诚实边界
+- AI 解读基于给定统计量推演，明确标注「非投资建议」；未配置大模型时返回 503 提示去「设置」填 provider/key。
+
+### ✅质量门禁
+- `tsc --noEmit` 0 error；`eslint`（改动文件）0 error（仅历史遗留 warning）；`next build` 通过（`/api/arb/interpret` 已注册）。
+
+---
+
 ## [0.27.0] - 2026-06-23
 
 > **统计套利雷达 StatArb Radar（专业量化套利捕捉 · Phase 1）**。把既有 `pairTrading.ts` 协整引擎从「贴代码→跑回测」的研究工具，升级为「实时机会捕捉」工具：在候选股票池里全两两做 Engle-Granger 协整检验，只报出**当前价差已开口**（|z|≥入场阈）的配对机会，按 **|z|×协整强度** 排序。

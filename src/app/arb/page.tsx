@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
+import StockLink from "@/components/StockLink";
 
 interface PairCandidate {
   a: string;
@@ -37,6 +38,19 @@ interface RadarResult {
   signals: ArbSignal[];
   asOf: string | null;
   note: string;
+}
+interface ArbInterpretation {
+  thesis: string;
+  entryLogic: string;
+  revertCatalyst: string;
+  risks: string[];
+  invalidation: string;
+  hedgeability: string;
+}
+interface InterpState {
+  loading: boolean;
+  error: string | null;
+  data: ArbInterpretation | null;
 }
 
 // 板块预设股票池（同板块更易出协整对）
@@ -87,6 +101,8 @@ export default function ArbRadarPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RadarResult | null>(null);
+  const [interp, setInterp] = useState<Record<string, InterpState>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const codes = useMemo(
     () =>
@@ -122,6 +138,38 @@ export default function ArbRadarPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function toggleInterpret(s: ArbSignal) {
+    const key = `${s.pair.a}-${s.pair.b}`;
+    const isOpen = expanded[key];
+    setExpanded((m) => ({ ...m, [key]: !isOpen }));
+    if (isOpen || interp[key]?.data || interp[key]?.loading) return;
+    setInterp((m) => ({ ...m, [key]: { loading: true, error: null, data: null } }));
+    try {
+      const res = await fetch("/api/arb/interpret", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          a: s.pair.a,
+          b: s.pair.b,
+          z: s.z,
+          side: s.side,
+          beta: s.pair.beta,
+          correlation: s.pair.correlation,
+          adfT: s.pair.adfT,
+          halfLifeDays: s.pair.halfLifeDays,
+          expectedRevertDays: s.expectedRevertDays,
+          estNetPct: s.estNetPct,
+          nearStop: s.nearStop,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      setInterp((m) => ({ ...m, [key]: { loading: false, error: null, data: json as ArbInterpretation } }));
+    } catch (e) {
+      setInterp((m) => ({ ...m, [key]: { loading: false, error: e instanceof Error ? e.message : String(e), data: null } }));
     }
   }
 
@@ -226,13 +274,23 @@ export default function ArbRadarPage() {
                     <th className="px-3 py-2 text-right">相关性</th>
                     <th className="px-3 py-2 text-right">ADF-t</th>
                     <th className="px-3 py-2">价差走势</th>
+                    <th className="px-3 py-2">AI 解读</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {result.signals.map((s) => (
-                    <tr key={`${s.pair.a}-${s.pair.b}`} className="border-b border-[var(--border)] last:border-0">
+                  {result.signals.map((s) => {
+                    const key = `${s.pair.a}-${s.pair.b}`;
+                    const ist = interp[key];
+                    const open = expanded[key];
+                    return (
+                    <Fragment key={key}>
+                    <tr className="border-b border-[var(--border)] last:border-0">
                       <td className="px-3 py-2 font-mono">
-                        {s.pair.a} / {s.pair.b}
+                        <span className="inline-flex items-center gap-1">
+                          <StockLink code={s.pair.a} newTab />
+                          <span className="text-[var(--muted)]">/</span>
+                          <StockLink code={s.pair.b} newTab />
+                        </span>
                         {s.nearStop && <span className="ml-1 rounded bg-red-500/15 px-1 text-[10px] text-red-500">近止损</span>}
                       </td>
                       <td className="px-3 py-2">
@@ -248,8 +306,47 @@ export default function ArbRadarPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{s.pair.correlation.toFixed(2)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{s.pair.adfT.toFixed(2)}</td>
                       <td className="px-3 py-2"><Spark data={s.spreadSeries} /></td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleInterpret(s)}
+                          className="rounded border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--accent)] hover:border-[var(--accent-line)]"
+                        >
+                          {ist?.loading ? "解读中…" : open ? "收起" : "AI 解读"}
+                        </button>
+                      </td>
                     </tr>
-                  ))}
+                    {open && (
+                      <tr className="border-b border-[var(--border)] last:border-0">
+                        <td colSpan={11} className="bg-[var(--bg)] px-3 py-3">
+                          {ist?.loading && <div className="text-xs text-[var(--muted)]">AI 正在解读这条套利机会…</div>}
+                          {ist?.error && <div className="text-xs text-red-500">{ist.error}</div>}
+                          {ist?.data && (
+                            <div className="space-y-2 text-xs leading-relaxed">
+                              <div><span className="font-semibold text-[var(--accent)]">核心逻辑：</span>{ist.data.thesis}</div>
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <div><span className="font-semibold text-[var(--text)]">入场依据：</span>{ist.data.entryLogic}</div>
+                                <div><span className="font-semibold text-[var(--text)]">回归依据：</span>{ist.data.revertCatalyst}</div>
+                              </div>
+                              {ist.data.risks.length > 0 && (
+                                <div>
+                                  <span className="font-semibold text-[var(--text)]">风险：</span>
+                                  <ul className="ml-4 list-disc text-[var(--muted)]">
+                                    {ist.data.risks.map((r, i) => <li key={i}>{r}</li>)}
+                                  </ul>
+                                </div>
+                              )}
+                              <div><span className="font-semibold text-rose-500">可证伪/止损条件：</span>{ist.data.invalidation}</div>
+                              <div><span className="font-semibold text-amber-500">可对冲性/落地：</span>{ist.data.hedgeability}</div>
+                              <div className="text-[10px] text-[var(--muted)]">AI 解读基于统计量推演，非投资建议。</div>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

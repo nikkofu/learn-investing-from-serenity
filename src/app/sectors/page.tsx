@@ -712,6 +712,15 @@ export default function SectorsPage() {
                                     <span>{s.name}</span>
                                     <span className="text-[9px] text-[var(--faint)] font-normal">({s.code})</span>
                                   </a>
+                                  <a
+                                    href={`/chart?code=${s.code}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title="看 K 线图"
+                                    className="ml-1 rounded border border-[var(--border)] px-1 text-[9px] text-[var(--muted)] hover:border-[var(--accent-line)] hover:text-[var(--accent)]"
+                                  >
+                                    图
+                                  </a>
                                 </td>
                                 <td className="px-2.5 py-2 text-right">{s.price.toFixed(2)}</td>
                                 <td className={`px-2.5 py-2 text-right font-bold ${up ? "text-red-500" : "text-emerald-500"}`}>
@@ -863,7 +872,19 @@ export default function SectorsPage() {
                                   >
                                     {lead.name}
                                   </a>
-                                  <span className="font-mono text-[9px] text-[var(--faint)]">{lead.code}</span>
+                                  {/^\d{6}$/.test(lead.code) ? (
+                                    <a
+                                      href={`/chart?code=${lead.code}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title="看 K 线图"
+                                      className="font-mono text-[9px] text-[var(--faint)] hover:text-[var(--accent)] hover:underline"
+                                    >
+                                      {lead.code}
+                                    </a>
+                                  ) : (
+                                    <span className="font-mono text-[9px] text-[var(--faint)]">{lead.code}</span>
+                                  )}
                                 </div>
                                 <p className="text-[10px] text-[var(--muted)] leading-relaxed">{lead.role}</p>
                               </div>

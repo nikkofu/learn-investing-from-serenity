@@ -584,7 +584,15 @@ function ScannerContent() {
                         </td>
                         {/* 代码 */}
                         <td className="px-4 py-3 font-mono text-[var(--muted)]">
-                          {item.code}.{item.market}
+                          <a
+                            href={`/chart?code=${item.code}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="看 K 线图"
+                            className="hover:text-[var(--accent)] hover:underline"
+                          >
+                            {item.code}.{item.market}
+                          </a>
                         </td>
                         {/* 最新价 */}
                         <td className="px-4 py-3 font-mono text-right font-semibold">

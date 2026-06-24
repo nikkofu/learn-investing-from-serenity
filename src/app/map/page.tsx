@@ -261,31 +261,27 @@ export default function MapPage() {
                         <div className="flex flex-wrap gap-2 max-w-[380px]">
                           {n.tickers.map((t, j) => {
                             const isA = /^\d{6}$/.test(t.code);
-                            const linkContent = (
-                              <div className="flex flex-col text-left">
-                                <span className="font-semibold text-[var(--text)] text-[11px] leading-tight">{t.name}</span>
-                                {t.code && <span className="font-mono text-[9px] text-[var(--faint)]">{t.code}</span>}
-                              </div>
-                            );
-
                             return isA ? (
-                              <Link 
-                                key={j} 
-                                href={`/analyze?code=${t.code}`} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-2.5 py-1.5 text-xs transition-all hover:border-[var(--accent-line)] hover:bg-[var(--hover)] hover:shadow-sm flex items-center gap-1.5 cursor-pointer shrink-0"
+                              <div
+                                key={j}
+                                className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-2.5 py-1.5 text-xs transition-all hover:border-[var(--accent-line)] hover:bg-[var(--hover)] hover:shadow-sm flex items-center gap-1.5 shrink-0"
                               >
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                                {linkContent}
-                              </Link>
+                                <div className="flex flex-col text-left">
+                                  <Link href={`/analyze?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="个股分析" className="font-semibold text-[var(--text)] text-[11px] leading-tight hover:text-[var(--accent)] hover:underline">{t.name}</Link>
+                                  <Link href={`/chart?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="看 K 线图" className="font-mono text-[9px] text-[var(--faint)] hover:text-[var(--accent)] hover:underline">{t.code} · 图</Link>
+                                </div>
+                              </div>
                             ) : (
                               <div 
                                 key={j} 
                                 className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-2.5 py-1.5 text-xs flex items-center gap-1.5 shrink-0 opacity-60"
                               >
                                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--border)] shrink-0" />
-                                {linkContent}
+                                <div className="flex flex-col text-left">
+                                  <span className="font-semibold text-[var(--text)] text-[11px] leading-tight">{t.name}</span>
+                                  {t.code && <span className="font-mono text-[9px] text-[var(--faint)]">{t.code}</span>}
+                                </div>
                               </div>
                             );
                           })}
@@ -334,20 +330,21 @@ export default function MapPage() {
                   {n.tickers.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {n.tickers.map((t, j) => {
-                        const inner = (
-                          <>
-                            <span className="font-medium text-[var(--text)]">{t.name}</span>
-                            {t.code && <span className="ml-1 font-mono text-xs text-[var(--faint)]">{t.code}</span>}
+                        const isA = /^\d{6}$/.test(t.code);
+                        return (
+                          <div key={j} className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs transition hover:border-[var(--accent-line)]">
+                            {isA ? (
+                              <Link href={`/analyze?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="个股分析" className="font-medium text-[var(--text)] hover:text-[var(--accent)] hover:underline">{t.name}</Link>
+                            ) : (
+                              <span className="font-medium text-[var(--text)]">{t.name}</span>
+                            )}
+                            {t.code && (isA ? (
+                              <Link href={`/chart?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="看 K 线图" className="ml-1 font-mono text-xs text-[var(--faint)] hover:text-[var(--accent)] hover:underline">{t.code} · 图</Link>
+                            ) : (
+                              <span className="ml-1 font-mono text-xs text-[var(--faint)]">{t.code}</span>
+                            ))}
                             {t.note && <p className="mt-0.5 max-w-[15rem] text-[11px] leading-4 text-[var(--muted)]">{t.note}</p>}
-                          </>
-                        );
-
-                        return /^\d{6}$/.test(t.code) ? (
-                          <Link key={j} href={`/analyze?code=${t.code}`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs transition hover:border-[var(--accent-line)]">
-                            {inner}
-                          </Link>
-                        ) : (
-                          <div key={j} className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs">{inner}</div>
+                          </div>
                         );
                       })}
                     </div>
