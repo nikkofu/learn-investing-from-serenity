@@ -20,6 +20,31 @@ const PRESETS: Record<string, { baseURL: string; model: string }> = {
   },
 };
 
+// 股票池纯净化口径（与 src/lib/universe.ts 的 UniverseConfig 同构）
+interface UniverseConfig {
+  excludeStar: boolean;
+  excludeBeijing: boolean;
+  excludeChiNext: boolean;
+  excludeST: boolean;
+  excludeB: boolean;
+}
+
+const DEFAULT_UNIVERSE: UniverseConfig = {
+  excludeStar: true,
+  excludeBeijing: true,
+  excludeChiNext: false,
+  excludeST: true,
+  excludeB: true,
+};
+
+const UNIVERSE_TOGGLES: { key: keyof UniverseConfig; label: string; hint: string }[] = [
+  { key: "excludeStar", label: "剔除科创板", hint: "688/689（含科创板 CDR）" },
+  { key: "excludeBeijing", label: "剔除北交所", hint: "8/4 开头老代码段 + 920 新代码段" },
+  { key: "excludeChiNext", label: "剔除创业板", hint: "300/301（默认保留）" },
+  { key: "excludeST", label: "剔除 ST/*ST/退/PT", hint: "按证券名称判定的风险或非正常交易股" },
+  { key: "excludeB", label: "剔除 B 股", hint: "沪 900xxx / 深 200xxx" },
+];
+
 export default function SettingsPage() {
   const [activeProvider, setActiveProvider] = useState("");
   const [providerConfigs, setProviderConfigs] = useState<Record<string, any>>({});
@@ -70,6 +95,11 @@ export default function SettingsPage() {
   const [marketBusy, setMarketBusy] = useState(false);
   const [marketStatus, setMarketStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
 
+  const [universe, setUniverse] = useState<UniverseConfig>(DEFAULT_UNIVERSE);
+  const [universeDefaults, setUniverseDefaults] = useState<UniverseConfig>(DEFAULT_UNIVERSE);
+  const [universeBusy, setUniverseBusy] = useState(false);
+  const [universeStatus, setUniverseStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
+
   const fetchMarket = async () => {
     try {
       const res = await fetch("/api/settings/market");
@@ -97,6 +127,39 @@ export default function SettingsPage() {
       setMarketStatus({ kind: "err", msg: err instanceof Error ? err.message : "保存失败" });
     } finally {
       setMarketBusy(false);
+    }
+  };
+
+  const fetchUniverse = async () => {
+    try {
+      const res = await fetch("/api/settings/universe");
+      const d = await res.json();
+      if (d.config) setUniverse(d.config as UniverseConfig);
+      if (d.defaults) setUniverseDefaults(d.defaults as UniverseConfig);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const saveUniverse = async (next: UniverseConfig) => {
+    setUniverseBusy(true);
+    setUniverseStatus(null);
+    setUniverse(next);
+    try {
+      const res = await fetch("/api/settings/universe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "保存失败");
+      const d = await res.json();
+      if (d.config) setUniverse(d.config as UniverseConfig);
+      setUniverseStatus({ kind: "ok", msg: "已保存。新口径对智能挖掘与套利雷达的股票池构造立即生效。" });
+    } catch (err) {
+      setUniverseStatus({ kind: "err", msg: err instanceof Error ? err.message : "保存失败" });
+      await fetchUniverse();
+    } finally {
+      setUniverseBusy(false);
     }
   };
 
@@ -288,6 +351,7 @@ export default function SettingsPage() {
     fetchDbStatus();
     fetchCache();
     fetchMarket();
+    fetchUniverse();
   }, []);
 
   const selectProviderCard = (name: string) => {
@@ -740,6 +804,52 @@ export default function SettingsPage() {
             {marketStatus && (
               <p className={`text-xs ${marketStatus.kind === "ok" ? "text-emerald-400" : marketStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
                 {marketStatus.msg}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-[var(--border)]" />
+
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--text)] select-none">股票池纯净化（全站统一口径）</h2>
+          <p className="text-xs text-[var(--muted)] mt-0.5">
+            智能挖掘（/mining）与套利雷达（/arb）构造候选股票池时统一走这里的过滤口径（不再硬编码）。默认聚焦 A 股主板个股，剔除科创板/北交所/ST/B 股，创业板默认保留。配置存于 <code className="font-mono text-xs">.data/universe-config.json</code>。
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {UNIVERSE_TOGGLES.map((t) => (
+              <label key={t.key} className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={universe[t.key]}
+                  disabled={universeBusy}
+                  onChange={(e) => saveUniverse({ ...universe, [t.key]: e.target.checked })}
+                />
+                <span className="flex flex-col">
+                  <span className="text-sm font-medium text-[var(--text)]">{t.label}</span>
+                  <span className="text-[11px] text-[var(--muted)]">{t.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => saveUniverse(universeDefaults)}
+              disabled={universeBusy}
+              className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50 cursor-pointer select-none"
+            >
+              恢复默认
+            </button>
+            {universeStatus && (
+              <p className={`text-xs ${universeStatus.kind === "ok" ? "text-emerald-400" : universeStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
+                {universeStatus.msg}
               </p>
             )}
           </div>

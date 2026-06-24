@@ -353,6 +353,13 @@ export interface ArbSignal {
   rank: number;
   /** 价差口径预估单次净收益%（z 回到 exitZ，扣 4 腿费）。 */
   estNetPct: number;
+  /**
+   * 单边可执行化：相对其协整伙伴被「低估」的那一只 —— 对应「逢低分批布局」买入择时。
+   * （A 股主板无融券，配对不再作对冲两腿，只取可单边执行的那条。）
+   */
+  buyCode: string;
+  /** 相对被「高估」的那一只 —— 对应「减仓/规避」信号（持有者用，非建仓）。 */
+  deRiskCode: string;
 }
 
 /**
@@ -389,7 +396,10 @@ export function currentArbSignal(
   const az = Math.abs(z);
   if (az < entryZ) return null;
 
+  // z<=0 ⇒ 价差偏低 ⇒ A 相对 B 被低估 ⇒ 买 A、规避 B；z>0 反之。
   const side: "long-spread" | "short-spread" = z <= 0 ? "long-spread" : "short-spread";
+  const buyCode = side === "long-spread" ? pair.a : pair.b;
+  const deRiskCode = side === "long-spread" ? pair.b : pair.a;
   const expectedRevertDays = Math.max(
     1,
     Math.min(maxHold, Math.round(pair.halfLifeDays * Math.log2(Math.max(az, exitZ + 1e-9) / exitZ))),
@@ -415,6 +425,8 @@ export function currentArbSignal(
     asOf: dates[i],
     rank: Number((az * Math.abs(pair.adfT)).toFixed(2)),
     estNetPct,
+    buyCode,
+    deRiskCode,
   };
 }
 

@@ -130,9 +130,10 @@ export async function generateDailyPool(
   const filters = opts.filters ?? DAILY_DEFAULTS.filters;
   const prefilter = opts.prefilter !== undefined ? opts.prefilter : DAILY_DEFAULTS.prefilter;
 
+  // 北交所/科创/ST 等剔除已统一由「股票池纯净化」配置（/settings）治理，
+  // includeBJ 仅保留于本地 DailyPoolFile 元信息以兼容历史快照格式。
   const req: MiningRequest = {
     universe: "full",
-    includeBJ,
     concurrency,
     retries,
     filters,

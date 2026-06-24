@@ -18,6 +18,7 @@ import {
   type MiningResult,
 } from "./mining";
 import { rankNormalize } from "./portfolioBacktest";
+import { getUniverseConfig, filterUniverse, type UniverseConfig } from "./universe";
 
 /** 给一个 Promise 套上超时上限（对标 SCS analyst-fallback：单只卡死不拖垮整批）。 */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -52,8 +53,6 @@ export interface MiningRequest {
   retries?: number; // K 线拉取失败重试次数（默认 3，最多 10）
   filters?: MiningFilters;
   stream?: boolean; // 默认 true → NDJSON 流；false → 一次性 JSON（便于 cron）
-  /** universe=full：是否包含北交所（默认 false=剔除）。科创板与 ST/*ST/退 始终剔除。 */
-  includeBJ?: boolean;
   /**
    * 「两段漏斗」第 1 段：用候选池已带的批量字段（成交额/换手/量比）先粗筛，
    * 再对幸存者做昂贵的 K 线取数+信号评估，避免对全市场逐只拉 K 线。
@@ -109,21 +108,17 @@ function num(v: number | string | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** 科创板（含科创板 CDR）代码：始终从全量池剔除。 */
-export function isStarCode(code: string): boolean {
-  return code.startsWith("688") || code.startsWith("689");
-}
-
-/** ST/*ST/退市/PT 等风险或非交易股：按名称剔除（clist 返回的 f14 名称含相应标记）。 */
-export function isRiskyName(name: string | undefined): boolean {
-  if (!name) return false;
-  const upper = name.toUpperCase();
-  return (
-    upper.includes("ST") || // ST / *ST
-    name.includes("退") || // 退市整理
-    name.includes("*") ||
-    upper.startsWith("PT") // PT（暂停上市，非交易）
-  );
+/**
+ * 东财 clist 板块段：依据股票池纯净化配置动态拼装。
+ * SH 主板 m:1 t:2、SZ 主板 m:0 t:6、创业板 m:0 t:80、科创板 m:1 t:23、北交所 m:0 t:81 s:2048。
+ * 配置剔除的板块直接不从源头拉取（省请求），ST/B 股等再由 filterUniverse 统一过滤。
+ */
+function boardSegments(cfg: UniverseConfig): string[] {
+  const seg = ["m:1 t:2", "m:0 t:6"]; // 沪深主板始终包含
+  if (!cfg.excludeChiNext) seg.push("m:0 t:80"); // 创业板
+  if (!cfg.excludeStar) seg.push("m:1 t:23"); // 科创板
+  if (!cfg.excludeBeijing) seg.push("m:0 t:81 s:2048"); // 北交所
+  return seg;
 }
 
 /** 全市场排序字段 → 东财 clist 的 fid。 */
@@ -134,11 +129,11 @@ const SORT_FID: Record<string, string> = {
   volumeRatio: "f10", // 量比
 };
 
-/** 全市场 / 主板候选池：按指定字段倒序取前 pz 只（沪深主板+创业板+科创板）。 */
+/** 全市场 / 主板候选池：按指定字段倒序取前 pz 只（板块范围依股票池纯净化配置）。 */
 async function fetchBroadUniverse(pz: number, fid = "f6"): Promise<MiningCandidate[]> {
   const diff = (await emClist({
     pn: 1, pz, po: 1, np: 1, fltt: 2, invt: 2, fid,
-    fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23",
+    fs: boardSegments(getUniverseConfig()).join(","),
     fields: "f12,f14,f2,f3,f6,f8,f10",
   })) as unknown as ClistRow[];
   return diff
@@ -184,15 +179,12 @@ export function applyPrefilter(
 }
 
 /**
- * 全量全市场候选池：沪深主板 + 创业板（北交所默认剔除，可选包含），
- * **剔除科创板（688/689）与 ST/*ST/退市/PT**。逐页拉取（统一 clist 兜底+限流）。
+ * 全量全市场候选池：板块范围由「股票池纯净化」配置决定（设置页可调），
+ * 默认沪深主板 + 创业板、剔除科创板/北交所，ST/*ST/退/B 股再由 filterUniverse 统一剔除。
+ * 逐页拉取（统一 clist 兜底+限流）。
  */
-async function fetchFullUniverse(includeBJ: boolean): Promise<MiningCandidate[]> {
-  // 板块：SH 主板 m:1 t:2、SZ 主板 m:0 t:6、创业板 m:0 t:80；北交所 m:0 t:81 s:2048。
-  // 不含科创板 m:1 t:23 → 从源头剔除。
-  const boards = ["m:1 t:2", "m:0 t:6", "m:0 t:80"];
-  if (includeBJ) boards.push("m:0 t:81 s:2048");
-  const fs = boards.join(",");
+async function fetchFullUniverse(): Promise<MiningCandidate[]> {
+  const fs = boardSegments(getUniverseConfig()).join(",");
 
   // 东财 clist 每页上限 100（push2delay 会把更大的 pz 截到 100），故必须翻页。
   const PAGE = 100;
@@ -211,8 +203,6 @@ async function fetchFullUniverse(includeBJ: boolean): Promise<MiningCandidate[]>
   const seen = new Set<string>();
   return rows
     .filter((r) => r.f12 && /^\d{6}$/.test(r.f12))
-    .filter((r) => !isStarCode(r.f12 as string)) // 剔除科创板
-    .filter((r) => !isRiskyName(r.f14)) // 剔除 ST/*ST/退
     .filter((r) => !seen.has(r.f12 as string) && seen.add(r.f12 as string)) // 跨页去重
     .map((r) => rowToCandidate(r));
 }
@@ -267,7 +257,7 @@ function fillUnique(primary: MiningCandidate[], secondary: MiningCandidate[], ta
   return primary;
 }
 
-export async function resolveUniverse(body: MiningRequest): Promise<MiningCandidate[]> {
+async function resolveUniverseRaw(body: MiningRequest): Promise<MiningCandidate[]> {
   const universe = body.universe || "hot";
   if (universe === "custom") {
     const codes = (body.codes ?? []).map((c) => c.trim()).filter((c) => /^\d{6}$/.test(c));
@@ -280,7 +270,7 @@ export async function resolveUniverse(body: MiningRequest): Promise<MiningCandid
     return enrichNames(codes);
   }
   if (universe === "full") {
-    return fetchFullUniverse(body.includeBJ === true);
+    return fetchFullUniverse();
   }
   if (universe === "broad") {
     const size = Math.max(20, Math.min(MAX_SIZE, body.size ?? 300));
@@ -293,6 +283,16 @@ export async function resolveUniverse(body: MiningRequest): Promise<MiningCandid
   if (target <= hot.length) return hot.slice(0, target);
   const fill = await fetchBroadUniverse(target, "f6").catch(() => [] as MiningCandidate[]);
   return fillUnique(hot, fill, target);
+}
+
+/**
+ * 解析候选股票池并统一应用「股票池纯净化」配置（剔除科创/北交所/ST/B 股等，
+ * 口径由 /settings 持久化配置决定）。所有 universe 类型（含 custom/sector）都过滤，
+ * 确保全站口径一致。
+ */
+export async function resolveUniverse(body: MiningRequest): Promise<MiningCandidate[]> {
+  const raw = await resolveUniverseRaw(body);
+  return filterUniverse(raw);
 }
 
 /**

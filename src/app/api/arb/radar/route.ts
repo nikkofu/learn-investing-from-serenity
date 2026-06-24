@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getKlinesBatch, HISTORY_LIMIT } from "@/lib/sources";
 import { scanArbRadar } from "@/lib/pairTrading";
+import { getUniverseConfig, isExcluded } from "@/lib/universe";
 import type { Candle } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -32,11 +33,22 @@ export async function POST(req: Request) {
   } catch {
     /* 允许空 body */
   }
-  const codes = Array.from(
+  const rawCodes = Array.from(
     new Set((body.codes ?? []).map((c) => c.trim()).filter((c) => /^\d{6}$/.test(c))),
   );
+  // 统一走「股票池纯净化」配置：剔除科创/北交所/B 股（创业板/ST 按设置页口径）。
+  const cfg = getUniverseConfig();
+  const codes = rawCodes.filter((c) => !isExcluded(c, undefined, cfg));
   if (codes.length < 3) {
-    return NextResponse.json({ error: "套利雷达至少需要 3 只股票，建议同板块 ≥8 只" }, { status: 400 });
+    return NextResponse.json(
+      {
+        error:
+          rawCodes.length >= 3
+            ? "按当前股票池纯净化口径过滤后，可用主板个股不足 3 只（科创/北交所等已剔除，可在设置页调整）"
+            : "套利雷达至少需要 3 只股票，建议同板块 ≥8 只",
+      },
+      { status: 400 },
+    );
   }
 
   try {
@@ -70,6 +82,6 @@ export async function POST(req: Request) {
 export async function GET() {
   return NextResponse.json({
     defaults: { limit: 500, minCorrelation: 0.7, entryZ: 2.0, exitZ: 0.5, stopZ: 3.5, feeBps: 30, maxSignals: 50 },
-    note: "POST {codes:[...]} 在候选池内全两两做 Engle-Granger 协整检验，仅返回当前价差已开口（|z|≥entryZ）的配对机会，按 |z|×协整强度排序。每个机会附方向（做多/做空价差）、进出止损 z 阈、半衰期推算的预计回归天数、双边成本后估算净收益。A 股融券受限，纯多空难落地，请优先两融/ETF 可对冲品种，结果为价差口径研究信号。",
+    note: "POST {codes:[...]} 在候选池（已按股票池纯净化配置剔除科创/北交所/B 股等）内全两两做 Engle-Granger 协整检验，仅返回当前价差已开口（|z|≥entryZ）的配对机会，按 |z|×协整强度排序。每个机会落到单边可执行动作：被低估的那一只 → 「逢低分批布局」买入择时，被高估的那一只 → 「减仓/规避」。附进出止损 z 阈、半衰期推算的预计回归天数。这是相对强弱择时（不是无风险对冲套利），单边持有承担市场 β 风险，非投资建议。",
   });
 }

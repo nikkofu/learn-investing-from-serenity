@@ -30,6 +30,8 @@ interface ArbSignal {
   asOf: string;
   rank: number;
   estNetPct: number;
+  buyCode: string;
+  deRiskCode: string;
 }
 interface RadarResult {
   universeSize: number;
@@ -45,6 +47,7 @@ interface ArbInterpretation {
   revertCatalyst: string;
   risks: string[];
   invalidation: string;
+  /** 单边持有的下行风险与落地说明（原对冲性字段，单边化后改述）。 */
   hedgeability: string;
 }
 interface InterpState {
@@ -156,6 +159,8 @@ export default function ArbRadarPage() {
           b: s.pair.b,
           z: s.z,
           side: s.side,
+          buyCode: s.buyCode,
+          deRiskCode: s.deRiskCode,
           beta: s.pair.beta,
           correlation: s.pair.correlation,
           adfT: s.pair.adfT,
@@ -186,11 +191,11 @@ export default function ArbRadarPage() {
             配对回测（样本内外）
           </Link>
         </div>
-        <h1 className="text-xl font-semibold text-[var(--text)]">统计套利雷达 · 实时机会捕捉</h1>
+        <h1 className="text-xl font-semibold text-[var(--text)]">统计套利雷达 · 单边可执行择时</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          在候选股票池里全两两做 Engle-Granger 协整检验，只捕捉<strong>当前价差已开口</strong>（|z|≥入场阈）的机会，
-          按 <strong>|z|×协整强度</strong>排序。每条机会给出方向（做多/做空价差）、进出止损 z 阈、半衰期推算的<strong>预计回归天数</strong>、双边成本后估算净收益。
-          <strong>诚实边界</strong>：A 股融券受限，纯多空难落地——优先选两融/ETF 可对冲品种，结果为价差口径研究信号，非投资建议。
+          候选池（已按设置页<strong>股票池纯净化</strong>口径剔除科创/北交所/B 股等）内全两两做 Engle-Granger 协整检验，只捕捉<strong>当前价差已开口</strong>（|z|≥入场阈）的机会，
+          按 <strong>|z|×协整强度</strong>排序。每条直接落到<strong>单边动作</strong>：相对被低估的那一只 → <span className="text-emerald-500 font-semibold">逢低分批布局</span>（买入择时）；相对被高估的那一只 → <span className="text-rose-500 font-semibold">减仓/规避</span>。
+          <strong>诚实边界</strong>：这是<strong>「相对强弱择时」，不是无风险对冲套利</strong>——A 股主板无融券，单边持有需自担市场 β 与方向风险，结果为统计信号，非投资建议。
         </p>
       </div>
 
@@ -265,7 +270,7 @@ export default function ArbRadarPage() {
                 <thead>
                   <tr className="border-b border-[var(--border)] text-left text-xs text-[var(--muted)]">
                     <th className="px-3 py-2">配对（A / B）</th>
-                    <th className="px-3 py-2">方向</th>
+                    <th className="px-3 py-2">单边可执行动作</th>
                     <th className="px-3 py-2 text-right">z 偏离</th>
                     <th className="px-3 py-2 text-right">预计回归</th>
                     <th className="px-3 py-2 text-right">估算净收益</th>
@@ -294,9 +299,16 @@ export default function ArbRadarPage() {
                         {s.nearStop && <span className="ml-1 rounded bg-red-500/15 px-1 text-[10px] text-red-500">近止损</span>}
                       </td>
                       <td className="px-3 py-2">
-                        <span className={s.side === "long-spread" ? "text-emerald-500" : "text-rose-500"}>
-                          {s.side === "long-spread" ? `多 ${s.pair.a} / 空 ${s.pair.b}` : `空 ${s.pair.a} / 多 ${s.pair.b}`}
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="rounded bg-emerald-500/15 px-1 text-[10px] font-semibold text-emerald-500">逢低买入</span>
+                            <StockLink code={s.buyCode} newTab />
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span className="rounded bg-rose-500/15 px-1 text-[10px] font-semibold text-rose-500">减仓/规避</span>
+                            <StockLink code={s.deRiskCode} newTab />
+                          </span>
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums font-semibold">{s.z}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{s.expectedRevertDays} 日</td>
@@ -337,8 +349,8 @@ export default function ArbRadarPage() {
                                 </div>
                               )}
                               <div><span className="font-semibold text-rose-500">可证伪/止损条件：</span>{ist.data.invalidation}</div>
-                              <div><span className="font-semibold text-amber-500">可对冲性/落地：</span>{ist.data.hedgeability}</div>
-                              <div className="text-[10px] text-[var(--muted)]">AI 解读基于统计量推演，非投资建议。</div>
+                              <div><span className="font-semibold text-amber-500">单边持有风险/落地：</span>{ist.data.hedgeability}</div>
+                              <div className="text-[10px] text-[var(--muted)]">AI 解读基于统计量推演的单边均值回归择时，非投资建议。</div>
                             </div>
                           )}
                         </td>
