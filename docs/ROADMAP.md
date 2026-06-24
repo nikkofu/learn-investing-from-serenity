@@ -32,19 +32,16 @@
 
 ## 2. 开发与发版工作流（交接必读）
 
+> 注：本项目的本地运行环境、隧道地址、端口、桥接脚本等私密信息**不入库**，由用户在新 session 启动时单独提供。以下只描述工作模式，不含任何主机/网络/磁盘细节。
+
 ### 2.1 运行环境与「桥接」机制
-- 真实代码跑在用户的 **Mac** 上：`/Users/REDACTED/Documents/WORK/ai/learn-investing-from-serenity`。
-- Devin 这侧通过 **ngrok 隧道 + 桥接脚本**远程读写/执行：
-  - 固定隧道域名：`https://REDACTED.ngrok.invalid`，默认指向本机 **REDACTED_PORT** 端口的 bridge（提供 `/api/ping`、`/api/exec`）。
-  - 桥接客户端：`/home/REDACTED/br.py`。常用：
-    - `python3 br.py exec "<shell>"` —— 在 Mac 仓库目录执行命令。
-    - `python3 br.py push <本地文件> <仓库相对路径>` —— 把 Devin 侧文件推到 Mac。
-    - `python3 br.py pull <仓库相对路径> <本地文件>` —— 反向拉取。
-  - **ngrok 是免费版**：只允许 1 个隧道域名。要可视化验证 UI 时，需用户临时把域名指向 3000（`ngrok http --url=REDACTED.ngrok.invalid 3000`），录完再切回 REDACTED_PORT。默认 Devin **无法直接在自己浏览器打开本地 UI**，验收主要靠 tsc/build + 数据级直跑 + 用户肉眼确认。
+- 真实代码跑在**用户本机**的项目仓库目录中（路径由用户私下提供，不写入仓库）。
+- 助手侧通过用户提供的**隧道 + 桥接脚本**远程读写/执行（隧道地址、端口、脚本路径均为私密信息，启动新 session 时由用户给出）。桥接客户端提供三类操作：在仓库目录执行命令、把助手侧文件推到本机、反向拉取。
+- 隧道为单域名复用，要可视化验证 UI 时需用户临时把域名切到 dev server 端口，录完再切回桥接端口。默认助手**无法直接在自己浏览器打开本地 UI**，验收主要靠 tsc/build + 数据级直跑 + 用户肉眼确认。
 
 ### 2.2 改代码的方式
-- 在 Devin 侧 `/home/REDACTED/work/` 维护一份镜像，编辑后用 `br.py push` 同步到 Mac，再在 Mac 上跑 tsc/eslint/build。
-- 数据级校验：写一次性 `_xxxcheck.mts` 脚本（如 `_calcheck.mts`），用 `npx tsx` 在 Mac 直跑真实数据源验证，**验证完删除、不提交**。
+- 在助手侧维护一份仓库镜像，编辑后用桥接 push 同步到本机，再在本机跑 tsc/eslint/build。
+- 数据级校验：写一次性 `_xxxcheck.mts` 脚本（如 `_calcheck.mts`），用 `npx tsx` 直跑真实数据源验证，**验证完删除、不提交**。
 
 ### 2.3 质量门禁（每版必须全绿）
 1. `npx tsc --noEmit` —— 0 error。
@@ -164,7 +161,7 @@
 ---
 
 ## 7. 新 session 接手 checklist
-1. 读本文档 §1（约束）+ §2（工作流）。确认 ngrok 隧道指向 REDACTED_PORT、`python3 /home/REDACTED/br.py exec "pwd"` 能连通 Mac 仓库。
+1. 读本文档 §1（约束）+ §2（工作流）。向用户索取本机仓库路径与桥接隧道信息（私密、不入库），确认桥接能连通本机仓库。
 2. `git rev-parse --is-shallow-repository`，必要时 `--unshallow`；确认 `git status` 干净、HEAD=origin/main、最新 tag 与 `package.json` version 一致（当前 v0.30.0）。
 3. 接新需求前先确认是否触碰 §1/§5.3 的约束；触碰则先与用户对齐再动手。
 4. 按 §2.4 自动发版（已获授权），中文消息走消息文件，门禁全绿后推 main + tag。
