@@ -14,7 +14,15 @@
 
 ---
 
-## 🆕 v0.31.0 亮点
+## 🆕 v0.33.0 亮点
+
+*   **盘中盯盘告警（Intraday Watch & Alert）**：把套利雷达 + 实时行情升级为盯盘工具。导航新增「**盘中盯盘**」页面，可为两类目标建规则——**套利配对**（监控股票池，价差**开口** `|z|≥entryZ` 或**逼近回归止损** `|z|≥stopZ` 时告警）与**个股价格**（现价上穿/下破阈值）。评估引擎 `src/lib/alertEngine.ts` 拉日 K + 实时行情，把当前价拼成「最后一根」算**盘中 live z**，命中后按 `cooldownMin` 冷却去重，投递**站内告警箱** + 可选 **`webhook`**（邮件可经 webhook 桥接）。规则与告警全部落 `.data/alerts.json` 持久化（`fs/promises` + 原子写）。无服务端常驻定时器——由 `/alerts` 页客户端「自动轮询（每 60s）」或「立即检查」驱动，附 A 股交易时段指示。新增 `POST/GET /api/alerts/{rules,events,check}`。**诚实边界**：相对强弱择时非无风险套利，仅供研究、非投资建议。
+
+## v0.32.0 亮点
+
+*   **自定义股票池 + 收藏 + 持久化**：新增用户自建数据沉淀机制——收藏个股、自建命名股票池（即「配对池」，scanner / momentum / arb 通用）、保存筛选参数集（命名快照一键复用），全部落 `.data/watchlist.json`。新增 `/watchlist`「自选 / 收藏」管理页与 `POST/GET/DELETE /api/watchlist/{favorites,pools,screens}`，与 scanner / momentum / arb 各页双向打通（`?codes=` 深链预填 + 一键存取）。零新依赖。
+
+## v0.31.0 亮点
 
 *   **横截面动量 / 行业轮动 · 纯多头组合回测（不做空）**：新增「**动量轮动**」页面与 `src/lib/momentum.ts`，对 A 股**主板个股**做横截面多因子动量打分——`computeMomentumFactors()` 抽取近 1/3/6 月收益、12-1 跳月动量、波动率、风险调整收益、趋势 7 个因子，`scoreCrossSection()` 逐因子横截面**排名归一**后按权重合成 0~1 综合分。在此之上做**行业轮动**：`rankSectors()` 把成分股因子聚合到板块（综合分、上涨宽度、近 3 月均收益、龙头股），`sectorRotationScorer()` 每次再平衡先选动量最强的 top-K 板块、再在板块内按个股动量择优。两套打分都包成 `PortfolioScorer` 注入既有组合回测引擎，每 N 日等权再平衡持有 top-K，**全程只买不卖空（纯多头）**，扣 30bps 双边成本。新增 `POST /api/momentum/{rank,sectors,backtest}`；UI 三个 Tab：个股动量榜 / 行业轮动信号 / 纯多头回测（含净值曲线 + 汇总卡 + 交易流水）。**诚实边界**：动量为样本内统计特征会失效，历史不代表未来、非投资建议。
 

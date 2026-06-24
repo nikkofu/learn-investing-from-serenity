@@ -16,6 +16,7 @@ const LINKS = [
   { href: "/backtest", label: "回测" },
   { href: "/momentum", label: "动量轮动" },
   { href: "/arb", label: "套利雷达" },
+  { href: "/alerts", label: "盘中盯盘" },
   { href: "/strategies", label: "策略市场" },
   { href: "/sectors", label: "板块热力" },
   { href: "/sync", label: "数据同步" },

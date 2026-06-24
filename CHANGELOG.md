@@ -4,6 +4,34 @@
 
 ---
 
+## [0.33.0] - 2026-06-24
+
+> **盘中盯盘告警**。把既有「套利雷达 + 实时行情」升级为盯盘工具：为**套利配对**（价差开口 / 逼近回归止损）与**个股价格**设盯盘规则，盘中轮询实时行情触发告警，投递站内告警箱 + 可选 `webhook`（邮件可经 webhook 桥接）。全部复用既有 `.data/` JSON 落盘（`fs/promises` + 原子写），无服务端常驻定时器——由 `/alerts` 页客户端定时轮询驱动评估。零新依赖。
+
+### 新增：持久化后端
+- `src/lib/alerts.ts`：单文件落盘 `.data/alerts.json`（`{ rules[], events[] }`），`loadStore()` / `saveStore()` 走 `mkdir -p` + 原子 `writeFile`，与 `watchlist.ts` 等既有落盘惯例一致；告警箱按 `MAX_EVENTS=500` 截断防无限增长。
+  - 规则：`upsertRule`（建/改共用，`buildRuleFields` 校验业务字段）/ `setRuleEnabled` / `deleteRule` / `listRules`。两类——**套利型**（引用股票池 `poolId` 或内联 `codes`，`entryZ` / `stopZ` 阈 + `arbTriggers: ["open","nearStop"]`）、**价格型**（单只 6 位 `code` + `op: ">=" | "<="` + `price`）。
+  - 投递配置：`channels`（站内恒兜底）、`webhookUrl`、`cooldownMin` 冷却去重窗口。
+  - 告警箱：`listEvents` / `markEventRead` / `markAllRead` / `clearEvents` / `appendEvents`（落盘并回填规则 `lastTriggeredAt`）。
+
+### 新增：评估引擎
+- `src/lib/alertEngine.ts`：`checkAlerts()` 评估全部启用规则——拉日 K（`getKlinesBatch`）+ 实时行情（`getQuotesFailover`），`spliceLivePrice` 把当前价拼成「最后一根」算盘中 live z；套利型用 `scanArbRadar` 找当前开口 / 逼近止损的协整配对，价格型比现价与阈值。命中后按 `dedupeKey` + `cooldownMin` 冷却去重，投递站内 + `webhook`（`fetch` POST，5s 超时，失败不阻断站内），落盘进告警箱。
+- `inAShareTradingSession()`：A 股交易时段判断（周一~周五 09:30–11:30 / 13:00–15:00，上海钟，不含节假日），仅用于前端提示。
+
+### 新增：API 路由
+- `src/app/api/alerts/rules/route.ts`：`GET`（列规则）/ `POST`（无 `id` 建、带 `id` 改、`{toggleEnabled,enabled}` 切换启用）/ `DELETE`（`?id=` 删）。
+- `src/app/api/alerts/events/route.ts`：`GET`（`?unread=1` 可选仅未读，附 `unreadCount`）/ `POST`（`{action:"read"|"readAll"|"clear",id?}`）。
+- `src/app/api/alerts/check/route.ts`：`POST` 触发一次评估；`GET` 返回交易时段状态（供前端轮询节流）。
+
+### 新增：盘中盯盘页
+- `src/app/alerts/page.tsx`：左栏**规则管理**（套利 / 价格两类表单、池选择或手填代码、阈值 / 触发条件、webhook + 冷却、启停 / 删除 / 深链），右栏**告警箱**（按等级着色、未读标记、全部已读 / 清空、深链到 `/arb`·`/analyze`）；顶部交易时段指示 + 「立即检查」+ 「自动轮询（每 60s，仅本页打开时生效）」。
+- `src/components/Nav.tsx`：导航新增「盘中盯盘」入口。
+
+### 质量门禁
+- `tsc --noEmit` 0 error；改动文件 `eslint` 0 error / 0 warning；`next build` 通过且新路由（`/alerts`、`/api/alerts/{rules,events,check}`）全部注册。真实行情功能级校验：建价格规则→触发评估命中实时价（600519 现价 1208.9）→冷却复检 0 重复→告警箱可见，建删 / 清空全程正常。
+
+---
+
 ## [0.32.1] - 2026-06-24
 
 > **修复既存 lint error**：清掉全仓 `npm run lint` 唯一的 1 个 error，使 lint 全绿。
