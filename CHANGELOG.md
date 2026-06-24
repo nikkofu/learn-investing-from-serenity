@@ -4,6 +4,25 @@
 
 ---
 
+## [0.38.0] - 2026-06-24
+
+> **基本面面板增强**。§5.2-D：把此前只在调试接口（`/api/market/data`）暴露的**真实财报**搬到 `/analyze` 个股研判结果区，新增 **「基本面 · 财务质量」** 面板。面板**独立 fetch** `/api/fundamentals`，与主流式 AI 推理链路完全解耦（不延迟推理、零回归风险）。透明加权出 **0~100 基本面质量分** + **A/B/C/D 评级**，并把营收/净利近 N 期做成 SVG 趋势。全部复用既有数据源（东财 RPT_F10_FINANCE_MAINFINADATA / 分红 / 实时行情），各源 best-effort 容错，零新依赖；产物为单只个股自评、不做同业对标、不预测未来，仅供研究、非投资建议。
+
+### 新增：基本面打分层
+- `src/lib/fundamentals.ts`（纯函数、零依赖）：
+  - `scoreFundamentals(fin, valuation)`：把最新一期主要财务指标 + 估值映射成 0~1 子分因子，**透明加权**合成 0~100 质量分 + 评级。权重与显式阈值——**ROE 25%**（`rampUp 0→20%`）/ **净利率 15%**（`rampUp 0→25%`）/ **营收增速 15%**（`rampUp −10→30%`）/ **净利增速 20%**（`rampUp −20→40%`）/ **资产负债率 15%**（`rampDown 30→80%`，逆向：越低越好）/ **估值 10%**（PE 分段：≤0 亏损降权 0.2、≤15→1、15~30→1→0.6、30~60→0.6→0.2、>60→0.15）。仅对**非缺失**因子按权重重归一（`coverage` 记录纳入数），缺失因子不拖累、不补默认。评级 A（≥80）/ B（≥65）/ C（≥50）/ D，星级 `round(score/20)` 夹紧 1~5。
+  - `pegRatio(pe, netProfitYoy)`：`PE / 净利同比增速%`，仅在 PE>0 且增速>0 时有意义，否则 `null`。
+- `src/lib/market.ts`：抽出 `mapMainFinRow()`（东财财报单行 → `StockFinancials` 映射，去重原 `getFinancials` 内联逻辑）；新增 `getFinancialsHistory(code, periods=8)`——按报告期降序拉近 N 期主要财务指标（best-effort，失败返空数组，复用 `financials` 自适应 TTL 缓存）；`getFinancials()` 改为取 history 首项，行为不变。经 `src/lib/sources` 出口转出。
+
+### 新增：API 路由
+- `src/app/api/fundamentals/route.ts`（`dynamic = "force-dynamic"`，`maxDuration = 120`）：`GET ?code=&periods=` 用 `Promise.allSettled([getQuotesFailover, getFinancialsHistory, getDividendHistory])` 聚合，**单源失败不影响其余字段**。返回 `{code,name,asOf, valuation:{price,pe,pb,totalMarketCap,floatMarketCap,turnoverPct,peg,dividendYield}, financials(最新一期), history(升序趋势), dividends(近 6 条), quality, sources, note}`。**TTM 股息率**：近 365 天除权的税前每 10 股派现求和 → 每股 → 占现价比例。
+
+### 新增：UI 接入
+- `src/app/analyze/page.tsx`：结果区估值卡之后插入 `<FundamentalsPanel code={quote.code} />`——独立 `useEffect` 取数 + 加载/错误/空态自处理，不阻断 `Result` 渲染。布局：**质量分徽标（分/评级/星级）+ 6 因子拆解条**（按子分着色，悬浮显示阈值解读）、**估值行**（PE/PB/PEG/TTM 股息率/总市值/流通市值）、**财务摘要网格**（营收/归母净利 + 同比着色按 A 股口径红涨绿跌、毛利率/净利率/ROE/资产负债率/EPS/换手率）、**营收 + 净利近 N 期 SVG 柱状趋势**（`TrendBars`，含零轴、负值向下、期标 `24A/24Q3` 简写）、**近期分红送转**标签、诚实边界提示。纯 SVG 自绘、零新图表依赖。
+
+### 质量门禁
+- `tsc --noEmit` 0 error；改动/新增文件 `eslint` 0 error / 0 warning；`next build` 通过，新路由 `/api/fundamentals` 已注册。真实行情功能级校验：600519 贵州茅台（质量分 65.6/B、PE 18.25、PEG 12.4、近 8 期趋势）、000858 五粮液（79.8/B、营收增速 33.7% 拉满、PEG 0.27）、601318 中国平安（27.9/D、营收 −6.2%、PE 6.7、净利增速为负故 PEG=null）——质量分如实拉开差距、各因子子分与原始指标一致，缺失字段优雅降级。
+
 ## [0.37.0] - 2026-06-24
 
 > **多标的横向对比 / 布局持久化**。§5.2-C：把任意一组标的拉到同一张表里横向对比——实时行情 + 横截面动量因子（与 `/momentum` 同口径 `scoreCrossSection`），逐列按**截面百分位**着色（绿优红劣，一眼看出谁强谁弱），可点表头排序，并叠加**归一化价格走势**（取所有标的公共交易日窗口、基点统一归 100，剔除价格量纲差异后直观比强弱）。再把「对比哪些标的 + 显示哪些列 + 列序 + 排序方向」沉淀为命名**对比视图**一键复原 / 切换。全部复用既有 `.data/` JSON 落盘（`mkdir -p` + 原子 `writeFile`），零新依赖；产物为研究信号、非投资建议。

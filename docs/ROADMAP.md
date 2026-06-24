@@ -156,7 +156,7 @@
 - [x] 过拟合可视化（walk-forward 衰减曲线、参数高原热图）—— 把「过拟合防护 + 校准」做成显性卖点。**（v0.35.0：`/arb` 校准表「体检」按钮 → 参数高原热图 + walk-forward 衰减曲线 + 0~100 稳健分/结论）**
 - [x] 配对交易纸面交易 / 持仓跟踪（开平记录、实时盈亏、回归达成率）—— 可与 v0.34 沉淀策略打通（从策略一键建纸面仓）。**（v0.36.0：`/paper` 纸面交易页 + `/strategies` 沉淀策略「建纸面仓」一键开仓；持仓盯市复用 `latestPairZ`/实时价拼接算实时 z 与净盈亏，命中 exitZ 回归 / stopZ 止损 / maxHoldDays 超时自动平仓；汇总「回归达成率 / 胜率 / 已实现盈亏」。落盘 `.data/paper-trades.json`，成本走 `costs.ts` A 股模型，零新依赖）**
 - [x] 多标的横向对比 / 布局持久化。**（v0.37.0：`/compare` 横向对比页——任意一组标的拉到同表，实时行情 + 横截面动量因子按**截面百分位**着色（绿优红劣）、可点表头排序、归一化价格走势叠加（公共交易日基点=100）；把「对比哪些标的 + 显示哪些列 + 列序 + 排序」沉淀为命名**对比视图**一键复原。落盘 `.data/compare-views.json`，与 `/momentum` 同口径 `scoreCrossSection`，零新依赖）**
-- [ ] 基本面面板增强。
+- [x] 基本面面板增强。**（v0.38.0：`/analyze` 结果区新增 `FundamentalsPanel`（独立 fetch、不阻断流式推理链路）——把此前只在调试接口暴露的真实财报（营收/净利+同比、毛利率/净利率/ROE/资产负债率/EPS）显性化：财务摘要网格 + 估值行（PE/PB/PEG/TTM 股息率/市值）+ 0~100 **基本面质量分**与 A/B/C/D 评级（ROE/净利率/营收增速/净利增速/负债率逆向/估值，透明加权、显式阈值）+ 营收/净利近 N 期 SVG 趋势 + 近期分红。新增 `src/lib/fundamentals.ts`、`getFinancialsHistory()`、`GET /api/fundamentals`，各源 best-effort 容错，零新依赖。诚实边界：单只自评不做同业对标、不预测未来，仅供研究）**
 
 ### 5.3 明确不做（除非约束放开）
 - 任何依赖**融券**的多空对冲套利。
@@ -173,6 +173,6 @@
 
 ## 7. 新 session 接手 checklist
 1. 读本文档 §1（约束）+ §2（工作流）。向用户索取本机仓库路径与桥接隧道信息（私密、不入库），确认桥接能连通本机仓库。
-2. `git rev-parse --is-shallow-repository`，必要时 `--unshallow`；确认 `git status` 干净、HEAD=origin/main、最新 tag 与 `package.json` version 一致（当前 v0.37.0）。
+2. `git rev-parse --is-shallow-repository`，必要时 `--unshallow`；确认 `git status` 干净、HEAD=origin/main、最新 tag 与 `package.json` version 一致（当前 v0.38.0）。
 3. 接新需求前先确认是否触碰 §1/§5.3 的约束；触碰则先与用户对齐再动手。
 4. 按 §2.4 自动发版（已获授权），中文消息走消息文件，门禁全绿后推 main + tag。

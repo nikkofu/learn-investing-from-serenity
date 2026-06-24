@@ -198,12 +198,46 @@ export async function getKline(code: string, limit = 120, klt = 101, fqt = 1): P
   );
 }
 
+/** 东财 RPT_F10_FINANCE_MAINFINADATA 单行 → StockFinancials。 */
+function mapMainFinRow(row: Record<string, unknown>): StockFinancials {
+  const toNum = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const reportName =
+    typeof row.REPORT_DATE_NAME === "string"
+      ? row.REPORT_DATE_NAME
+      : typeof row.REPORT_DATE === "string"
+        ? row.REPORT_DATE.slice(0, 10)
+        : "";
+  return {
+    reportName,
+    revenue: toNum(row.TOTALOPERATEREVE) ?? 0,
+    revenueYoy: toNum(row.TOTALOPERATEREVETZ),
+    netProfit: toNum(row.PARENTNETPROFIT) ?? 0,
+    netProfitYoy: toNum(row.PARENTNETPROFITTZ),
+    grossMargin: toNum(row.XSMLL),
+    netMargin: toNum(row.XSJLL),
+    roe: toNum(row.ROEJQ),
+    debtRatio: toNum(row.ZCFZL),
+    eps: toNum(row.EPSJB),
+  } satisfies StockFinancials;
+}
+
 /**
  * 拉取最新一期主要财务指标（营收/净利/毛利率/净利率/ROE/负债率等），best-effort。
  * 用于给 AI 的基本面打分提供真实数据锚点，降低凭空臆测的幻觉。失败返回 null。
  */
 export async function getFinancials(code: string): Promise<StockFinancials | null> {
-  const cacheKey = `financials:${code}`;
+  const list = await getFinancialsHistory(code, 1);
+  return list[0] ?? null;
+}
+
+/**
+ * 拉取近 N 期主要财务指标（按报告期降序），best-effort。失败返回空数组。
+ * 供基本面面板做营收/净利/ROE 趋势可视化与质量打分。
+ */
+export async function getFinancialsHistory(code: string, periods = 8): Promise<StockFinancials[]> {
+  const n = Math.max(1, Math.min(40, Math.floor(periods)));
+  const cacheKey = `financials-hist:${code}:${n}`;
   try {
     return await globalCache.getOrCreate(
       cacheKey,
@@ -212,7 +246,7 @@ export async function getFinancials(code: string): Promise<StockFinancials | nul
         const secucode = `${code}.${market}`;
         const url =
           `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA` +
-          `&columns=ALL&filter=(SECUCODE%3D%22${secucode}%22)&pageNumber=1&pageSize=1` +
+          `&columns=ALL&filter=(SECUCODE%3D%22${secucode}%22)&pageNumber=1&pageSize=${n}` +
           `&sortColumns=REPORT_DATE&sortTypes=-1&source=HSF10&client=PC`;
         const res = await fetchRetry(url, {
           headers: { "User-Agent": UA, Referer: "https://emweb.securities.eastmoney.com/" },
@@ -220,33 +254,14 @@ export async function getFinancials(code: string): Promise<StockFinancials | nul
           retries: 1,
         });
         const data = (await res.json()) as { result?: { data?: Array<Record<string, unknown>> } };
-        const row = data.result?.data?.[0];
-        if (!row) throw new Error(`no financials for ${code}`);
-        const toNum = (v: unknown): number | null =>
-          typeof v === "number" && Number.isFinite(v) ? v : null;
-        const reportName =
-          typeof row.REPORT_DATE_NAME === "string"
-            ? row.REPORT_DATE_NAME
-            : typeof row.REPORT_DATE === "string"
-              ? row.REPORT_DATE.slice(0, 10)
-              : "";
-        return {
-          reportName,
-          revenue: toNum(row.TOTALOPERATEREVE) ?? 0,
-          revenueYoy: toNum(row.TOTALOPERATEREVETZ),
-          netProfit: toNum(row.PARENTNETPROFIT) ?? 0,
-          netProfitYoy: toNum(row.PARENTNETPROFITTZ),
-          grossMargin: toNum(row.XSMLL),
-          netMargin: toNum(row.XSJLL),
-          roe: toNum(row.ROEJQ),
-          debtRatio: toNum(row.ZCFZL),
-          eps: toNum(row.EPSJB),
-        } satisfies StockFinancials;
+        const rows = data.result?.data ?? [];
+        if (rows.length === 0) throw new Error(`no financials for ${code}`);
+        return rows.map(mapMainFinRow);
       },
       getAdaptiveTTL("financials")
     );
   } catch {
-    return null;
+    return [];
   }
 }
 

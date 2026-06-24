@@ -76,4 +76,4 @@ export type { AnalystConsensus, KlineBatchItem } from "./unified";
 export { getDailyHistory, HISTORY_LIMIT } from "./klineStore";
 export type { FqMode } from "./klineStore";
 // 低层工具/搜索（保留在 market.ts，统一从本出口转出，外围只 import "@/lib/sources"）
-export { searchStocks, deriveStats, classifyCode, getKlineName } from "../market";
+export { searchStocks, deriveStats, classifyCode, getKlineName, getFinancialsHistory } from "../market";

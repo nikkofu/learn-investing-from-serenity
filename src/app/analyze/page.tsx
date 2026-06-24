@@ -490,6 +490,8 @@ function Result({ data }: { data: AnalyzeResponse }) {
         </div>
       </div>
 
+      <FundamentalsPanel code={quote.code} />
+
       <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
         <h3 className="mb-3 font-bold tracking-wider">瓶颈点五因子打分</h3>
         <div className="grid items-center gap-6 lg:grid-cols-[320px_1fr]">
@@ -686,6 +688,267 @@ function ScoreBadge({ score, verdict }: { score: number; verdict: string }) {
     <div className="text-right">
       <div className={`text-3xl font-mono font-black ${color} leading-none`}>{score}</div>
       <p className="text-[9px] text-[var(--faint)] font-mono uppercase tracking-wider mt-1 border-t border-[var(--border)] pt-0.5">{verdict}</p>
+    </div>
+  );
+}
+
+// ── 基本面面板（独立 fetch /api/fundamentals，不参与主流式推理链路）──────────
+interface FundFactor {
+  key: string;
+  label: string;
+  value: number | null;
+  score: number | null;
+  weight: number;
+  hint: string;
+}
+interface FundamentalsData {
+  code: string;
+  name: string;
+  asOf: string;
+  valuation: {
+    price: number;
+    pe: number | null;
+    pb: number | null;
+    totalMarketCap: number;
+    floatMarketCap: number;
+    turnoverPct: number;
+    peg: number | null;
+    dividendYield: number | null;
+  };
+  financials: {
+    reportName: string;
+    revenue: number;
+    revenueYoy: number | null;
+    netProfit: number;
+    netProfitYoy: number | null;
+    grossMargin: number | null;
+    netMargin: number | null;
+    roe: number | null;
+    debtRatio: number | null;
+    eps: number | null;
+  } | null;
+  history: Array<{ reportName: string; revenue: number; netProfit: number; roe: number | null }>;
+  dividends: Array<{ date: string; plan: string; bonusRmb: number }>;
+  quality: { score: number; grade: "A" | "B" | "C" | "D"; stars: number; factors: FundFactor[]; coverage: number };
+  sources: { quote: boolean; financials: boolean; dividends: boolean };
+  note: string;
+}
+
+const FUND_GRADE_COLOR: Record<string, string> = {
+  A: "text-[var(--accent)]",
+  B: "text-sky-400",
+  C: "text-amber-400",
+  D: "text-[var(--muted)]",
+};
+
+function fmtPct(v: number | null, digits = 2): string {
+  return v == null || !Number.isFinite(v) ? "-" : `${v.toFixed(digits)}%`;
+}
+function fmtNum(v: number | null, digits = 2): string {
+  return v == null || !Number.isFinite(v) ? "-" : v.toFixed(digits);
+}
+/** A 股口径：涨/正用红、跌/负用绿。 */
+function yoyClass(v: number | null): string {
+  if (v == null || !Number.isFinite(v)) return "text-[var(--text)]";
+  return v >= 0 ? "text-red-500" : "text-emerald-500";
+}
+
+function FundamentalsPanel({ code }: { code: string }) {
+  const [data, setData] = useState<FundamentalsData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError("");
+    setData(null);
+    fetch(`/api/fundamentals?code=${code}`)
+      .then(async (r) => {
+        const j = await r.json();
+        if (!r.ok) throw new Error(j?.error || "基本面数据获取失败");
+        return j as FundamentalsData;
+      })
+      .then((j) => {
+        if (alive) setData(j);
+      })
+      .catch((e) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [code]);
+
+  return (
+    <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-bold tracking-wider">基本面 · 财务质量</h3>
+        {data?.financials?.reportName && (
+          <span className="text-[10px] font-mono text-[var(--faint)]">报告期 {data.financials.reportName}</span>
+        )}
+      </div>
+
+      {loading && <p className="mt-3 text-sm text-[var(--muted)]">加载基本面数据…</p>}
+      {error && !loading && <p className="mt-3 text-sm text-[var(--muted)]">基本面暂不可用：{error}</p>}
+
+      {data && !loading && (
+        <div className="mt-4 space-y-5">
+          {/* 质量分 + 因子拆解 */}
+          <div className="grid gap-4 lg:grid-cols-[180px_1fr] items-center">
+            <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] px-4 py-3 text-center">
+              <div className={`text-4xl font-mono font-black leading-none ${FUND_GRADE_COLOR[data.quality.grade]}`}>
+                {data.quality.score}
+              </div>
+              <div className="mt-1 text-xs font-mono text-[var(--faint)]">
+                基本面质量分 · {data.quality.grade} 级 · {"★".repeat(data.quality.stars)}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {data.quality.factors.map((f) => (
+                <FactorBar key={f.key} factor={f} />
+              ))}
+            </div>
+          </div>
+
+          {/* 估值 */}
+          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
+            <Stat label="市盈率 TTM" value={data.valuation.pe != null ? data.valuation.pe.toFixed(1) : "-"} />
+            <Stat label="市净率" value={data.valuation.pb != null ? data.valuation.pb.toFixed(2) : "-"} />
+            <Stat label="PEG" value={data.valuation.peg != null ? data.valuation.peg.toFixed(2) : "-"} />
+            <Stat label="TTM 股息率" value={fmtPct(data.valuation.dividendYield, 2)} />
+            <Stat label="总市值" value={yi(data.valuation.totalMarketCap)} />
+            <Stat label="流通市值" value={yi(data.valuation.floatMarketCap)} />
+          </div>
+
+          {/* 财务摘要 */}
+          {data.financials ? (
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
+              <FinStat label="营业总收入" value={yi(data.financials.revenue)} yoy={data.financials.revenueYoy} />
+              <FinStat label="归母净利润" value={yi(data.financials.netProfit)} yoy={data.financials.netProfitYoy} />
+              <Stat label="毛利率" value={fmtPct(data.financials.grossMargin, 1)} />
+              <Stat label="净利率" value={fmtPct(data.financials.netMargin, 1)} />
+              <Stat label="ROE" value={fmtPct(data.financials.roe, 2)} />
+              <Stat label="资产负债率" value={fmtPct(data.financials.debtRatio, 1)} />
+              <Stat label="每股收益" value={fmtNum(data.financials.eps, 2)} />
+              <Stat label="换手率" value={fmtPct(data.valuation.turnoverPct, 2)} />
+            </div>
+          ) : (
+            <p className="text-xs text-[var(--muted)]">财务指标暂不可用（数据源限流或停牌），以上估值与质量分仅基于行情口径。</p>
+          )}
+
+          {/* 营收 / 净利 趋势 */}
+          {data.history.length >= 2 && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <TrendBars title="营业总收入（亿）" series={data.history.map((h) => ({ label: shortPeriod(h.reportName), value: h.revenue / 1e8 }))} />
+              <TrendBars title="归母净利润（亿）" series={data.history.map((h) => ({ label: shortPeriod(h.reportName), value: h.netProfit / 1e8 }))} />
+            </div>
+          )}
+
+          {/* 近期分红 */}
+          {data.dividends.length > 0 && (
+            <div className="text-xs">
+              <p className="mb-1.5 font-semibold tracking-wider text-[var(--muted)]">近期分红送转</p>
+              <div className="flex flex-wrap gap-2">
+                {data.dividends.map((d, i) => (
+                  <span key={i} className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] px-2 py-1 font-mono text-[var(--text)]">
+                    {d.date} · {d.plan || (d.bonusRmb > 0 ? `每10股派${d.bonusRmb.toFixed(2)}元` : "—")}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="text-[10px] leading-relaxed text-[var(--faint)]">{data.note}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FactorBar({ factor }: { factor: FundFactor }) {
+  const pct = factor.score == null ? 0 : Math.round(factor.score * 100);
+  const color = factor.score == null ? "var(--border)" : factor.score >= 0.66 ? "var(--accent)" : factor.score >= 0.4 ? "#38bdf8" : "#f59e0b";
+  const valTxt =
+    factor.value == null
+      ? "缺数据"
+      : factor.key === "valuation"
+        ? `PE ${factor.value.toFixed(1)}`
+        : factor.key === "debtRatio" || factor.key === "roe" || factor.key === "netMargin" || factor.key === "revenueYoy" || factor.key === "netProfitYoy"
+          ? `${factor.value.toFixed(1)}%`
+          : factor.value.toFixed(2);
+  return (
+    <div className="flex items-center gap-2 text-xs" title={factor.hint}>
+      <span className="w-16 shrink-0 text-[var(--muted)]">{factor.label}</span>
+      <div className="relative h-2 flex-1 overflow-hidden rounded-[2px] bg-[var(--inset)]">
+        <div className="absolute inset-y-0 left-0 rounded-[2px]" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+      <span className="w-20 shrink-0 text-right font-mono text-[var(--faint)]">{valTxt}</span>
+    </div>
+  );
+}
+
+function FinStat({ label, value, yoy }: { label: string; value: string; yoy: number | null }) {
+  return (
+    <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] px-3 py-2">
+      <p className="text-[10px] text-[var(--faint)] font-mono uppercase tracking-wider">{label}</p>
+      <p className="mt-0.5 font-mono font-bold text-[var(--text)]">{value}</p>
+      {yoy != null && Number.isFinite(yoy) && (
+        <p className={`text-[10px] font-mono ${yoyClass(yoy)}`}>同比 {yoy >= 0 ? "+" : ""}{yoy.toFixed(1)}%</p>
+      )}
+    </div>
+  );
+}
+
+function shortPeriod(reportName: string): string {
+  // "2024年报"/"2024-12-31" → "24A"；"2024三季报" → "24Q3" 等，尽量短。
+  const ym = reportName.match(/(\d{4})[-年]?(\d{2})?/);
+  const yy = ym ? ym[1].slice(2) : reportName.slice(0, 2);
+  if (reportName.includes("一季") || reportName.includes("-03")) return `${yy}Q1`;
+  if (reportName.includes("中") || reportName.includes("半") || reportName.includes("-06")) return `${yy}Q2`;
+  if (reportName.includes("三季") || reportName.includes("-09")) return `${yy}Q3`;
+  if (reportName.includes("年") || reportName.includes("-12")) return `${yy}A`;
+  return yy;
+}
+
+function TrendBars({ title, series }: { title: string; series: Array<{ label: string; value: number }> }) {
+  const W = 280;
+  const H = 96;
+  const padB = 16;
+  const padT = 8;
+  const vals = series.map((s) => s.value);
+  const max = Math.max(0, ...vals);
+  const min = Math.min(0, ...vals);
+  const range = max - min || 1;
+  const n = series.length;
+  const bw = (W / n) * 0.62;
+  const zeroY = padT + (max / range) * (H - padT - padB);
+  return (
+    <div className="rounded-[2px] border border-[var(--border)] bg-[var(--inset)] p-3">
+      <p className="mb-1 text-[11px] font-semibold tracking-wider text-[var(--muted)]">{title}</p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+        <line x1={0} y1={zeroY} x2={W} y2={zeroY} stroke="var(--border)" strokeWidth={1} />
+        {series.map((s, i) => {
+          const cx = (i + 0.5) * (W / n);
+          const h = (Math.abs(s.value) / range) * (H - padT - padB);
+          const y = s.value >= 0 ? zeroY - h : zeroY;
+          const fill = s.value >= 0 ? "var(--accent)" : "#f43f5e";
+          return (
+            <g key={i}>
+              <rect x={cx - bw / 2} y={y} width={bw} height={Math.max(1, h)} fill={fill} opacity={0.85} />
+              <text x={cx} y={H - 4} textAnchor="middle" fontSize={8} fill="var(--faint)" fontFamily="monospace">
+                {s.label}
+              </text>
+            </g>
+          );
+        })}
+        <text x={2} y={padT + 6} fontSize={8} fill="var(--faint)" fontFamily="monospace">
+          {max.toFixed(1)}
+        </text>
+      </svg>
     </div>
   );
 }
