@@ -4,6 +4,20 @@
 
 ---
 
+## [0.44.0] - 2026-06-24
+
+> **GBB 策略图层视觉补齐，对标 TradingView [GBB] 显示层**：在已修复可见的 Supertrend 跟踪线基础上，新增趋势云带 + 右上角统计表（Trend / ATR / ADX / Strength / HTF Bias / Since Signal）。**零新依赖**。
+
+### 新增：GBB 显示层（`LightweightChart`）
+- **趋势云带**：在 Supertrend 线附近叠加半透明渐隐填充（多头绿 / 空头红），用两条 `AreaSeries`（顶色半透明、底色全透明）实现「贴线云带」，自身线透明、可见线仍由两条 3px 粗线绘制。
+- **右上角统计表**（对标 TV [GBB] 面板）：实时显示当前显露末根的 **Trend**（多/空，红绿）、**ATR**（Wilder ATR(10)，与 Supertrend 同口径）、**ADX**（Wilder ADX(14)，趋势强度）、**Strength**（regime 效率%，即那个「44%」读数）、**HTF Bias**（收盘 vs MA50 的高周期偏置）、**Since Signal**（距上次翻多/翻空的根数）；随逐根回放游标实时更新。
+- 新增组件内 `atrOf` / `adxOf` 工具函数（Wilder 平滑，与 K 线等长）。
+
+### 诚实口径
+- 统计表数值基于**我们自己的行情源 + 我们逆向复刻的 GBB**，**不会与 TradingView 逐位相同**（不同数据源 + 复刻的翻转节奏与原版 Pine 不同，尤其 *Since Signal* 根数）。601869 校验：ATR(10)=36.10（TV 显示 34.58，吻合），ADX(14)=34%（TV 的 68% 系另一套行情源/窗口）。
+- 用户 TV 截图右侧的**红/绿目标盒 + 箭头价标**多半来自另一个脚本 **Cardwell RSI Trade Navigator [MarkitTick]**，不属于 GBB；如需可后续单独登记为 `tv-cardwell-rsi-navigator` 复刻。
+- 三关全绿（type-check / lint 0 error、build 通过）。
+
 ## [0.43.1] - 2026-06-24
 
 > **修复 GBB 策略图层「读数正常但线画不出来」**。用户开启 Modern Adaptive Supertrend [GBB] 图层后，顶部读数条（多头/效率%/线值）正常，但主图上看不到任何 Supertrend 线。**零新依赖**。

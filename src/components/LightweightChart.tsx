@@ -6,6 +6,7 @@ import {
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
+  AreaSeries,
   createSeriesMarkers,
   CrosshairMode,
   PriceScaleMode,
@@ -90,6 +91,49 @@ function maOf(candles: Candle[], period: number): (number | null)[] {
   return out;
 }
 
+// Wilder ATR（与 GBB Supertrend 同口径 ATR(10)）：返回与 K 线等长数组。
+function atrOf(candles: Candle[], period = 10): number[] {
+  const n = candles.length;
+  const out = new Array<number>(n).fill(NaN);
+  if (n === 0) return out;
+  let atr = NaN;
+  for (let i = 0; i < n; i++) {
+    const h = candles[i].high, l = candles[i].low;
+    const pc = i > 0 ? candles[i - 1].close : candles[i].close;
+    const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+    if (i === 0) atr = tr;
+    else if (i < period) atr = (atr * i + tr) / (i + 1);
+    else atr = (atr * (period - 1) + tr) / period;
+    out[i] = atr;
+  }
+  return out;
+}
+
+// Wilder ADX（趋势强度 0~100）：返回与 K 线等长数组。
+function adxOf(candles: Candle[], period = 14): number[] {
+  const n = candles.length;
+  const out = new Array<number>(n).fill(NaN);
+  if (n < 2) return out;
+  let trS = 0, pdmS = 0, ndmS = 0, adx = NaN;
+  for (let i = 1; i < n; i++) {
+    const up = candles[i].high - candles[i - 1].high;
+    const dn = candles[i - 1].low - candles[i].low;
+    const pdm = up > dn && up > 0 ? up : 0;
+    const ndm = dn > up && dn > 0 ? dn : 0;
+    const h = candles[i].high, l = candles[i].low, pc = candles[i - 1].close;
+    const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+    if (i <= period) { trS += tr; pdmS += pdm; ndmS += ndm; if (i < period) continue; }
+    else { trS = trS - trS / period + tr; pdmS = pdmS - pdmS / period + pdm; ndmS = ndmS - ndmS / period + ndm; }
+    const pdi = trS ? (100 * pdmS) / trS : 0;
+    const ndi = trS ? (100 * ndmS) / trS : 0;
+    const dx = pdi + ndi ? (100 * Math.abs(pdi - ndi)) / (pdi + ndi) : 0;
+    if (i < 2 * period) { adx = Number.isNaN(adx) ? dx : (adx * (i - period) + dx) / (i - period + 1); }
+    else adx = (adx * (period - 1) + dx) / period;
+    out[i] = adx;
+  }
+  return out;
+}
+
 export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], initialTvStrategyId = "" }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -169,6 +213,30 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     () => (replayN === null ? candles : candles.slice(0, Math.max(1, Math.min(replayN, candles.length)))),
     [candles, replayN]
   );
+
+  // GBB 统计表（对标 TV [GBB] 右上角面板）：当前显露末根的 Trend / ATR / ADX / Strength / HTF Bias / Since Signal。
+  const gbbStats = useMemo(() => {
+    if (!tvLayers || viewCandles.length === 0) return null;
+    const idx = viewCandles.length - 1;
+    const atr = atrOf(candles, 10);
+    const adx = adxOf(candles, 14);
+    const ma50 = maOf(candles, 50);
+    const d = tvLayers.dir[idx];
+    const rv = tvLayers.regimeValue[idx];
+    const past = tvLayers.flips.filter((f) => f.index <= idx);
+    const sinceSignal = past.length ? idx - past[past.length - 1].index : null;
+    const m = ma50[idx];
+    const htf = m == null ? "--" : candles[idx].close >= m ? "多" : "空";
+    return {
+      trendUp: d === 1,
+      trend: d === 1 ? "多头 Bull" : d === -1 ? "空头 Bear" : "--",
+      atr: Number.isFinite(atr[idx]) ? atr[idx] : NaN,
+      adx: Number.isFinite(adx[idx]) ? adx[idx] : NaN,
+      strength: Number.isFinite(rv) ? rv * 100 : NaN,
+      htf,
+      sinceSignal,
+    };
+  }, [tvLayers, viewCandles, candles]);
 
   // 切换标的/周期后回放参数复位
   useEffect(() => {
@@ -322,19 +390,27 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     if (tvLayers) {
       // 双线着色（多头红 / 空头绿）：各自只在对应方向上有值、其余置空白。
       // 不依赖 lightweight-charts v5 线序列的「逐点色」（实测 v5 不渲染逐点 color，导致图层不可见），改用两条底色线保证清晰可见。
+      // 趋势云带（对标 TV [GBB] 线附近的半透明填充）：两条 Area（多头绿 / 空头红），
+      // 顶色半透明、底色全透明形成「贴线渐隐」的云带；自身线设透明，可见线由下方两条粗线绘制。
+      const cloudUp = chart.addSeries(AreaSeries, { lineColor: "rgba(0,0,0,0)", topColor: "rgba(239,68,68,0.22)", bottomColor: "rgba(239,68,68,0.0)", priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+      const cloudDn = chart.addSeries(AreaSeries, { lineColor: "rgba(0,0,0,0)", topColor: "rgba(16,185,129,0.20)", bottomColor: "rgba(16,185,129,0.0)", priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
       const stUp = chart.addSeries(LineSeries, { color: UP, lineWidth: 3, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
       const stDn = chart.addSeries(LineSeries, { color: DOWN, lineWidth: 3, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
       paintersRef.current.push((vc) => {
         const upData: (LineData<Time> | WhitespaceData<Time>)[] = [];
         const dnData: (LineData<Time> | WhitespaceData<Time>)[] = [];
+        const upCloud: (LineData<Time> | WhitespaceData<Time>)[] = [];
+        const dnCloud: (LineData<Time> | WhitespaceData<Time>)[] = [];
         for (let i = 0; i < vc.length; i++) {
           const t = toTime(vc[i].date);
           const v = tvLayers.line[i];
           const d = tvLayers.dir[i];
-          if (v == null || !Number.isFinite(v) || d === 0) { upData.push({ time: t }); dnData.push({ time: t }); continue; }
-          if (d === 1) { upData.push({ time: t, value: v }); dnData.push({ time: t }); }
-          else { dnData.push({ time: t, value: v }); upData.push({ time: t }); }
+          if (v == null || !Number.isFinite(v) || d === 0) { upData.push({ time: t }); dnData.push({ time: t }); upCloud.push({ time: t }); dnCloud.push({ time: t }); continue; }
+          if (d === 1) { upData.push({ time: t, value: v }); dnData.push({ time: t }); upCloud.push({ time: t, value: v }); dnCloud.push({ time: t }); }
+          else { dnData.push({ time: t, value: v }); upData.push({ time: t }); dnCloud.push({ time: t, value: v }); upCloud.push({ time: t }); }
         }
+        cloudUp.setData(upCloud);
+        cloudDn.setData(dnCloud);
         stUp.setData(upData);
         stDn.setData(dnData);
       });
@@ -590,6 +666,24 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             {replayOn && <span className="text-[var(--accent)]">● 回放中</span>}
             {legend.reso && <span style={{ color: RESONANCE }}>● {legend.reso}</span>}
             {legend.st && <span className="text-[var(--accent)]">▣ 策略 {legend.st}</span>}
+          </div>
+        )}
+        {gbbStats && (
+          <div className="absolute right-2 top-1 z-10 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/85 border border-[var(--border)] rounded-[2px] overflow-hidden min-w-[150px]">
+            <div className="px-2 py-0.5 bg-[var(--inset)] text-[var(--faint)] tracking-wide border-b border-[var(--border)]">GBB · {code ?? ""}</div>
+            {[
+              ["Trend", gbbStats.trend, gbbStats.trendUp ? UP : DOWN],
+              ["ATR", Number.isFinite(gbbStats.atr) ? gbbStats.atr.toFixed(2) : "--", "var(--text)"],
+              ["ADX", Number.isFinite(gbbStats.adx) ? `${gbbStats.adx.toFixed(0)}%` : "--", gbbStats.adx >= 25 ? UP : "var(--muted)"],
+              ["Strength", Number.isFinite(gbbStats.strength) ? `${gbbStats.strength.toFixed(0)}%` : "--", "#f59e0b"],
+              ["HTF Bias", gbbStats.htf, gbbStats.htf === "多" ? UP : gbbStats.htf === "空" ? DOWN : "var(--muted)"],
+              ["Since Signal", gbbStats.sinceSignal == null ? "--" : `${gbbStats.sinceSignal} 根`, "var(--muted)"],
+            ].map(([k, v, color]) => (
+              <div key={k as string} className="flex justify-between gap-4 px-2 py-0.5">
+                <span className="text-[var(--faint)]">{k}</span>
+                <span style={{ color: color as string }} className="font-semibold tabular-nums">{v}</span>
+              </div>
+            ))}
           </div>
         )}
         <div ref={containerRef} className="w-full h-full" />
