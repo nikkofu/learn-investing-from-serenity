@@ -73,7 +73,7 @@ function ChartInner() {
   // 复权口径：qfq=前复权（贴现价看操作）/ hfq=后复权（长周期真实回测）。图表/筹码/交易标记/回测同口径切换。
   const [fq, setFq] = useState<"qfq" | "hfq">("qfq");
   // 图表引擎：classic = 自研 SVG（筹码/投影/VRVP 叠加）；pro = lightweight-charts 画布（十字光标/多窗格/性能）。
-  const [chartView, setChartView] = useState<"classic" | "pro">("classic");
+  const [chartView, setChartView] = useState<"classic" | "pro">("pro");
   // 策略参数化：表单调参后 POST /api/market/backtest 实时重跑「传统均线突破策略」。
   const [maParams, setMaParams] = useState<MaStrategyParams>(DEFAULT_MA_PARAMS);
   const [tuned, setTuned] = useState<{ backtest: BacktestResult; report: PerformanceReport; params: MaStrategyParams } | null>(null);

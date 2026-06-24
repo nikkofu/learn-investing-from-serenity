@@ -4,6 +4,29 @@
 
 ---
 
+## [0.25.0] - 2026-06-23
+
+> **默认 Pro 画布 + 副图全开 + 多指标共振标注（对标 TradingView，并去除其角标）**。图表引擎默认进 Pro 画布；副图默认同时显示 MACD/RSI/KDJ（各占独立窗格，分开显示，量纲互不干扰）+ 主图 BOLL 叠加；新增「共振」叠加层，逐根扫描四指标同向信号，≥2 个共振时在主图打标（▲看多/▼看空），连续共振自然连成区域，悬停看命中指标。同时隐藏 lightweight-charts 的 "Chart by TradingView" 角标。
+
+### 变更：默认 Pro 画布
+- `src/app/chart/page.tsx`：`chartView` 默认 `pro`（经典 SVG 仍可一键切回看筹码/投影/VRVP）。
+
+### 新增：副图默认全开（分开显示）
+- `src/components/LightweightChart.tsx`：副图由单选改为 MACD/RSI/KDJ 三个独立开关，默认全开，各占独立窗格（量纲不同不宜叠加）；RSI 加 30/70、KDJ 加 20/80 参考线；BOLL 默认叠加主图；图表高度随副图窗格数自适应；主图/副图拉伸比 4 : 1.4。
+
+### 新增：多指标共振标注
+- `src/lib/indicators.ts`：新增 `computeResonance(candles, macd, rsi, kdj, boll, minScore=2)`——逐根检查 MACD 金叉/死叉、RSI 超卖修复(上穿30)/超买回落(下穿70)、KDJ 低位金叉(D<40)/高位死叉(D>60)、BOLL 触下轨反抽/触上轨回落；用 2 根窗口聚合（信号少恰好同根），仅在 episode 上升沿输出一次，返回 `{ index, dir, score, reasons }`。
+- `src/components/LightweightChart.tsx`：新增「共振」开关（默认开），共振点在主图打圆点标记（▲看多/▼看空 ×命中数），紫粉色与涨跌/买卖标记区分；十字光标悬停共振 K 线时读数条显示「看多/看空共振：命中指标」。
+- 实测 000858 近 360 根：16 个共振点，含 2026-01-29 四指标全共振（MACD金叉+RSI超卖修复+KDJ低位金叉+触下轨反抽）。
+
+### 移除：TradingView 角标
+- `src/components/LightweightChart.tsx`：`layout.attributionLogo = false`，去掉画布右下「Chart by TradingView」角标。
+
+### ✅ 质量
+- `tsc --noEmit` 0 error；`eslint`（改动文件）0 error；`next build` 通过。仅改 3 个文件，分析管线/经典 SVG/回测零影响；共振口径与 A 股券商软件常见用法对齐，便于肉眼校验。
+
+---
+
 ## [0.24.0] - 2026-06-23
 
 > **LLM 交互式画图 / AI 自动画线标注（对标 TradingView 画图工具 + AI 助手）**。Pro 画布新增「AI 画图」面板：按钮一键（支撑阻力/趋势线/形态识别/买卖区间）或自然语言对话，由 LLM 把技术分析意图输出为结构化绘图基元（水平线/趋势线/区间/标注），自动叠加到图上并附判断依据。

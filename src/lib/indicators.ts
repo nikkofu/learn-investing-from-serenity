@@ -134,3 +134,85 @@ export function computeBOLL(candles: Candle[], period = 20, mult = 2): BollResul
   }
   return { mid, upper, lower };
 }
+
+export interface ResonancePoint {
+  /** 共振首次成立的 K 线下标（episode 的起点；连续共振只取上升沿一次）。 */
+  index: number;
+  dir: "bull" | "bear";
+  /** 命中同向指标数（2-4）。 */
+  score: number;
+  /** 命中的指标信号说明（用于悬停/依据）。 */
+  reasons: string[];
+}
+
+/**
+ * 多指标共振扫描：逐根检查 MACD/RSI/KDJ/BOLL 的同向信号，
+ * 当同一窗口内 ≥minScore 个指标给出同向信号时，认定为「共振点」。
+ * 信号口径（与 A 股券商软件常见用法一致）：
+ *   MACD 金叉/死叉（DIF 上/下穿 DEA）
+ *   RSI 超卖修复（上穿 30）/ 超买回落（下穿 70）
+ *   KDJ 低位金叉（D<40 处 K 上穿 D）/ 高位死叉（D>60 处 K 下穿 D）
+ *   BOLL 触下轨反抽 / 触上轨回落
+ * 用 2 根窗口聚合（信号很少恰好同根触发），并仅在 episode 上升沿输出一次，避免连续打标。
+ */
+export function computeResonance(
+  candles: Candle[],
+  macd: MacdResult,
+  rsi: number[],
+  kdj: KdjResult,
+  boll: BollResult,
+  minScore = 2
+): ResonancePoint[] {
+  const n = candles.length;
+  if (n < 2) return [];
+  const closes = candles.map((c) => c.close);
+  const mk = () => new Array<boolean>(n).fill(false);
+  const macdBull = mk(), macdBear = mk();
+  const rsiBull = mk(), rsiBear = mk();
+  const kdjBull = mk(), kdjBear = mk();
+  const bollBull = mk(), bollBear = mk();
+  const fin = Number.isFinite;
+
+  for (let i = 1; i < n; i++) {
+    if (fin(macd.dif[i]) && fin(macd.dea[i]) && fin(macd.dif[i - 1]) && fin(macd.dea[i - 1])) {
+      if (macd.dif[i - 1] <= macd.dea[i - 1] && macd.dif[i] > macd.dea[i]) macdBull[i] = true;
+      if (macd.dif[i - 1] >= macd.dea[i - 1] && macd.dif[i] < macd.dea[i]) macdBear[i] = true;
+    }
+    if (fin(rsi[i]) && fin(rsi[i - 1])) {
+      if (rsi[i - 1] < 30 && rsi[i] >= 30) rsiBull[i] = true;
+      if (rsi[i - 1] > 70 && rsi[i] <= 70) rsiBear[i] = true;
+    }
+    if (fin(kdj.k[i]) && fin(kdj.d[i]) && fin(kdj.k[i - 1]) && fin(kdj.d[i - 1])) {
+      if (kdj.k[i - 1] <= kdj.d[i - 1] && kdj.k[i] > kdj.d[i] && kdj.d[i] < 40) kdjBull[i] = true;
+      if (kdj.k[i - 1] >= kdj.d[i - 1] && kdj.k[i] < kdj.d[i] && kdj.d[i] > 60) kdjBear[i] = true;
+    }
+    if (fin(boll.lower[i]) && fin(boll.lower[i - 1]) && closes[i - 1] <= boll.lower[i - 1] && closes[i] > boll.lower[i]) bollBull[i] = true;
+    if (fin(boll.upper[i]) && fin(boll.upper[i - 1]) && closes[i - 1] >= boll.upper[i - 1] && closes[i] < boll.upper[i]) bollBear[i] = true;
+  }
+
+  const fired = (ev: boolean[], i: number) => ev[i] || (i > 0 && ev[i - 1]);
+  const out: ResonancePoint[] = [];
+  let prevDir: "bull" | "bear" | null = null;
+  for (let i = 1; i < n; i++) {
+    const bull: string[] = [];
+    if (fired(macdBull, i)) bull.push("MACD金叉");
+    if (fired(rsiBull, i)) bull.push("RSI超卖修复");
+    if (fired(kdjBull, i)) bull.push("KDJ低位金叉");
+    if (fired(bollBull, i)) bull.push("触下轨反抽");
+    const bear: string[] = [];
+    if (fired(macdBear, i)) bear.push("MACD死叉");
+    if (fired(rsiBear, i)) bear.push("RSI超买回落");
+    if (fired(kdjBear, i)) bear.push("KDJ高位死叉");
+    if (fired(bollBear, i)) bear.push("触上轨回落");
+
+    let dir: "bull" | "bear" | null = null;
+    if (bull.length >= minScore && bull.length > bear.length) dir = "bull";
+    else if (bear.length >= minScore && bear.length > bull.length) dir = "bear";
+
+    if (dir && dir !== prevDir) {
+      out.push({ index: i, dir, score: dir === "bull" ? bull.length : bear.length, reasons: dir === "bull" ? bull : bear });
+    }
+    prevDir = dir;
+  }
+  return out;
+}
