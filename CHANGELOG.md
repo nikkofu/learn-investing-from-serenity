@@ -4,12 +4,21 @@
 
 ---
 
+## [0.31.2] - 2026-06-24
+
+> **图标微调**：个股链接的 K 线图标换成更清爽的折线图（line-chart）样式。
+
+### 优化
+- `src/components/StockLink.tsx`：上一版的蜡烛图标在 12px 下偏杂乱，改为坐标轴 + 上升折线的折线图标（line-chart），小尺寸下更易识别、更接近常见「图表」图标。
+
+---
+
 ## [0.31.1] - 2026-06-24
 
 > **`/momentum` 体验修复**：个股链接的「图」文字改为 K 线图标；个股动量榜名称从基础库补全。
 
 ### 修复
-- `src/components/StockLink.tsx`：尾随的「图」文字链接改为内联 K 线蜡烛 SVG 图标（保留 `/chart` 跳转与无障碍标签），全站个股链接统一生效，列表更清爽。
+- `src/components/StockLink.tsx`：尾随的「图」文字链接改为内联 SVG 图标（保留 `/chart` 跳转与无障碍标签），全站个股链接统一生效，列表更清爽。
 - `src/app/api/momentum/rank/route.ts`：个股动量榜名称兜底。`/momentum` 页只向 `POST /api/momentum/rank` 传代码、未传名称，服务端原先回退成代码导致「名称」列只显示代码。现服务端对缺名称的代码用 `getQuotesFailover()` 从基础库（实时行情，带缓存）批量补全权威名称后再打分返回。
 
 ---

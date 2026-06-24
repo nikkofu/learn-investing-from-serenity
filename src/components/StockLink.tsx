@@ -38,19 +38,19 @@ export default function StockLink({
         className="inline-flex items-center justify-center rounded border border-[var(--border)] p-0.5 text-[var(--muted)] hover:border-[var(--accent-line)] hover:text-[var(--accent)]"
       >
         <svg
-          viewBox="0 0 16 16"
+          viewBox="0 0 24 24"
           width="12"
           height="12"
-          fill="currentColor"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
           aria-hidden="true"
           focusable="false"
         >
-          <rect x="3" y="6" width="2.4" height="6" rx="0.4" />
-          <rect x="3.9" y="2.5" width="0.6" height="3.5" />
-          <rect x="3.9" y="12" width="0.6" height="1.5" />
-          <rect x="10.6" y="4" width="2.4" height="5" rx="0.4" />
-          <rect x="11.5" y="2" width="0.6" height="2" />
-          <rect x="11.5" y="9" width="0.6" height="4" />
+          <path d="M3 3v18h18" />
+          <path d="m19 8-5 5-4-4-4 4" />
         </svg>
       </Link>
     </span>
