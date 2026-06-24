@@ -14,7 +14,11 @@
 
 ---
 
-## 🆕 v0.33.0 亮点
+## 🆕 v0.34.0 亮点
+
+*   **信号 → 策略沉淀（Signal → Strategy）**：把套利雷达里**验证过的协整配对 + 参数 + 校准战绩**一键沉淀成可复检、可分享的策略，接入「策略市场」。`/arb` 信号回测校准表每行新增「**沉淀为策略**」按钮——把该配对（`a/b/β/adfT/半衰期/相关性`）、当前参数（`entryZ/exitZ/stopZ/lookback/fee`）与校准战绩**快照**存进 `.data/saved-strategies.json`（`fs/promises` + 原子写）。`src/lib/savedStrategies.ts` 的 `scorePairStrategy()` 按**回归率 30% + 单边胜率 25% + 单边净收益 20% + 逆向浅 15% + 信号密度 10%** 加权打分（样本 <3 笔降权 30%），给出 **A/B/C/D 评级 + 星级**。沉淀的不是死快照：`revalidateSavedStrategy()` 用存的 β **重拉最新 K 线**重算 `calibratePair` + `currentArbSignal`，刷新「**活战绩**」与**当前 live 信号**（是否开口/逼近止损）。`/strategies` 页新增「**🧑‍💼 我的沉淀策略（配对均值回归）**」区——卡片含战绩 + 评级 + 当前开口徽标 + **复检 / 在套利雷达打开 / 导出（复制 JSON）/ 导入（粘贴 JSON 即可分享）/ 删除**。新增 `GET/POST/DELETE /api/strategies/saved`（POST 支持 `create|revalidate|import`）。零新依赖。**诚实边界**：协整为样本内性质会破裂，复检评级仅供研究、非投资建议。
+
+## v0.33.0 亮点
 
 *   **盘中盯盘告警（Intraday Watch & Alert）**：把套利雷达 + 实时行情升级为盯盘工具。导航新增「**盘中盯盘**」页面，可为两类目标建规则——**套利配对**（监控股票池，价差**开口** `|z|≥entryZ` 或**逼近回归止损** `|z|≥stopZ` 时告警）与**个股价格**（现价上穿/下破阈值）。评估引擎 `src/lib/alertEngine.ts` 拉日 K + 实时行情，把当前价拼成「最后一根」算**盘中 live z**，命中后按 `cooldownMin` 冷却去重，投递**站内告警箱** + 可选 **`webhook`**（邮件可经 webhook 桥接）。规则与告警全部落 `.data/alerts.json` 持久化（`fs/promises` + 原子写）。无服务端常驻定时器——由 `/alerts` 页客户端「自动轮询（每 60s）」或「立即检查」驱动，附 A 股交易时段指示。新增 `POST/GET /api/alerts/{rules,events,check}`。**诚实边界**：相对强弱择时非无风险套利，仅供研究、非投资建议。
 

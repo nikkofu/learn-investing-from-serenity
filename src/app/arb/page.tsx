@@ -164,6 +164,7 @@ function ArbRadarInner() {
   const [calError, setCalError] = useState<string | null>(null);
   const [cal, setCal] = useState<CalibrationResult | null>(null);
   const [calOpen, setCalOpen] = useState<Record<string, boolean>>({});
+  const [sediment, setSediment] = useState<Record<string, { state: "saving" | "done" | "error"; msg: string }>>({});
 
   const codes = useMemo(
     () =>
@@ -257,6 +258,51 @@ function ArbRadarInner() {
       setCalError(e instanceof Error ? e.message : String(e));
     } finally {
       setCalLoading(false);
+    }
+  }
+
+  // 把一行校准结果 + 当前参数沉淀成「策略市场」里的配对策略
+  async function sedimentStrategy(c: PairCalibration) {
+    const key = `${c.pair.a}-${c.pair.b}`;
+    setSediment((m) => ({ ...m, [key]: { state: "saving", msg: "沉淀中…" } }));
+    try {
+      const res = await fetch("/api/strategies/saved", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          strategy: {
+            pair: {
+              a: c.pair.a,
+              b: c.pair.b,
+              beta: c.pair.beta,
+              adfT: c.pair.adfT,
+              halfLifeDays: c.pair.halfLifeDays,
+              correlation: c.pair.correlation,
+              n: c.pair.n,
+            },
+            params: { entryZ, stopZ, exitZ: 0.5 },
+            snapshot: {
+              signals: c.signals,
+              reversionRatePct: c.reversionRatePct,
+              avgRevertDays: c.avgRevertDays,
+              avgLegReturnPct: c.avgLegReturnPct,
+              legWinRatePct: c.legWinRatePct,
+              avgMaxAdverseZ: c.avgMaxAdverseZ,
+              stopouts: c.stopouts,
+              timeouts: c.timeouts,
+              asOf: cal?.asOf ?? null,
+            },
+            source: "arb-calibrate",
+          },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      const grade = json?.strategy?.score?.grade ?? "?";
+      setSediment((m) => ({ ...m, [key]: { state: "done", msg: `已沉淀（评级 ${grade}）` } }));
+    } catch (e) {
+      setSediment((m) => ({ ...m, [key]: { state: "error", msg: e instanceof Error ? e.message : String(e) } }));
     }
   }
 
@@ -500,6 +546,7 @@ function ArbRadarInner() {
                     <th className="px-3 py-2 text-right">单边胜率</th>
                     <th className="px-3 py-2 text-right">最大逆向z(均)</th>
                     <th className="px-3 py-2">逐笔</th>
+                    <th className="px-3 py-2">沉淀</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -532,10 +579,21 @@ function ArbRadarInner() {
                               {open ? "收起" : `${c.signals} 笔`}
                             </button>
                           </td>
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
+                              disabled={sediment[key]?.state === "saving" || sediment[key]?.state === "done"}
+                              onClick={() => sedimentStrategy(c)}
+                              title="把该配对 + 当前参数 + 校准战绩沉淀为策略市场里的配对策略"
+                              className={`rounded border px-2 py-0.5 text-xs disabled:opacity-60 ${sediment[key]?.state === "done" ? "border-emerald-500/40 text-emerald-500" : sediment[key]?.state === "error" ? "border-rose-500/40 text-rose-500" : "border-[var(--border)] text-[var(--accent)] hover:border-[var(--accent-line)]"}`}
+                            >
+                              {sediment[key]?.msg ?? "沉淀为策略"}
+                            </button>
+                          </td>
                         </tr>
                         {open && (
                           <tr className="border-b border-[var(--border)] last:border-0">
-                            <td colSpan={9} className="bg-[var(--bg)] px-3 py-3">
+                            <td colSpan={10} className="bg-[var(--bg)] px-3 py-3">
                               <div className="overflow-x-auto">
                                 <table className="w-full min-w-[680px] text-xs">
                                   <thead>

@@ -4,6 +4,32 @@
 
 ---
 
+## [0.34.0] - 2026-06-24
+
+> **信号 → 策略沉淀**。把套利雷达里验证过的**协整配对 + 参数 + 校准战绩**一键沉淀成可复检、可分享的策略，接入「策略市场」。沉淀的不是死快照——可用存的 β 重拉最新 K 线复检「活战绩」与当前 live 信号，并按加权公式打分给 A/B/C/D 评级；支持导出/导入（复制粘贴 JSON 即可分享）。全部复用既有 `.data/` JSON 落盘（`fs/promises` + 原子写）。零新依赖。
+
+### 新增：持久化 + 评分后端
+- `src/lib/savedStrategies.ts`：文件落盘 `.data/saved-strategies.json`（`{ strategies[] }`），`loadStore()` / `saveStore()` 走 `mkdir -p` + 原子 `writeFile`，与 `watchlist.ts` / `alerts.ts` 等既有落盘范式一致。
+  - `SavedStrategy`：协整配对（`a/b/aName/bName/beta/adfT/halfLifeDays/correlation/n`）+ 参数（`lookback/entryZ/exitZ/stopZ/feeBps/maxHoldDays`）+ 沉淀时校准战绩**快照** `snapshot` + 最近复检战绩 `latest`（含当前 live 信号 + `checkedAt`）+ 评级 `score`（`score/grade/stars`）+ `source` + `createdAt/updatedAt`。
+  - `createSavedStrategy()` / `listSavedStrategies()`（按评分降序）/ `deleteSavedStrategy()` / `getSavedStrategy()` / `importSavedStrategy()`（解析 JSON 后落为新策略）。
+  - `revalidateSavedStrategy(id, aCandles, bCandles)`：用存的 β 重建 `PairCandidate`，重算 `calibratePair` + `currentArbSignal`，刷新 `latest` 活战绩与当前开口/逼近止损信号。
+- `scorePairStrategy(m)`：综合打分 = 回归率 30% + 单边胜率 25% + 单边净收益 20% + 逆向浅（`avgMaxAdverseZ` 取逆）15% + 信号密度 10%，夹紧 [0,100]；样本 <3 笔降权 30%。评级 A（≥75）/ B（≥60）/ C（≥45）/ D + 星级。
+
+### 新增：API 路由
+- `src/app/api/strategies/saved/route.ts`（`dynamic = "force-dynamic"`）：
+  - `GET`：列出全部沉淀策略（评分降序）。
+  - `POST`：`action="create"`（从 `/arb` 校准行沉淀）/ `"revalidate"`（拉最新 K 重算活战绩）/ `"import"`（粘贴 JSON 导入）。
+  - `DELETE`：`?id=` 按 id 删除。
+
+### 新增：UI 接入
+- `src/app/arb/page.tsx`：信号回测校准表每行新增「**沉淀为策略**」按钮（保存中 / 已沉淀 / 失败着色 + 禁用），调 `POST /api/strategies/saved` 把该配对 + 当前参数 + 校准战绩沉淀。
+- `src/app/strategies/page.tsx`：新增「**🧑‍💼 我的沉淀策略（配对均值回归）**」区（置于内置策略榜上方）。`SavedStrategyCard` 卡片含战绩（信号数 / 回归率 / 单边胜率 / 净收益 / 回归天数 / 逆向 z）+ 评级星级 + 当前 live 信号徽标（`⚠️ 当前开口` / `🔴 逼近止损`）+ **复检 / 在套利雷达打开（深链 `/arb?codes=`）/ 导出（复制 JSON）/ 删除**；`SavedStrategiesSection` 管理列表拉取与导入（粘贴 JSON）。
+
+### 质量门禁
+- `tsc --noEmit` 0 error；改动文件 `eslint` 0 error / 0 warning；`next build` 通过（新路由 `/api/strategies/saved` 已注册）。真实行情功能级校验：从校准行沉淀（score 74.3 / A）→ 复检用真实 K 重算（信号 8 / 回归率 75%）→ 列表/删除全程正常（测试数据已清理，`.data/` 已 gitignore）。
+
+---
+
 ## [0.33.0] - 2026-06-24
 
 > **盘中盯盘告警**。把既有「套利雷达 + 实时行情」升级为盯盘工具：为**套利配对**（价差开口 / 逼近回归止损）与**个股价格**设盯盘规则，盘中轮询实时行情触发告警，投递站内告警箱 + 可选 `webhook`（邮件可经 webhook 桥接）。全部复用既有 `.data/` JSON 落盘（`fs/promises` + 原子写），无服务端常驻定时器——由 `/alerts` 页客户端定时轮询驱动评估。零新依赖。

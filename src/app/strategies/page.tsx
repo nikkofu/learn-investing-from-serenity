@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import StockLink from "@/components/StockLink";
 
 interface StrategyMeta {
   id: string;
@@ -163,6 +164,284 @@ function StrategyCard({ r }: { r: TrackRecord }) {
   );
 }
 
+// ── v0.34 沉淀策略（配对均值回归） ──────────────────────────────────────────────
+
+interface PairTrackRecord {
+  signals: number;
+  reversionRatePct: number;
+  avgRevertDays: number;
+  avgLegReturnPct: number;
+  legWinRatePct: number;
+  avgMaxAdverseZ: number;
+  stopouts: number;
+  timeouts: number;
+  asOf: string | null;
+}
+interface PairLiveSignal {
+  z: number;
+  side: "long-spread" | "short-spread";
+  deviation: number;
+  nearStop: boolean;
+  expectedRevertDays: number;
+  estNetPct: number;
+  buyCode: string;
+  deRiskCode: string;
+  asOf: string;
+}
+interface SavedStrategy {
+  id: string;
+  name: string;
+  kind: "arb-pair";
+  source: string;
+  note?: string;
+  pair: { a: string; b: string; aName: string; bName: string; beta: number; adfT: number; halfLifeDays: number; correlation: number; n: number };
+  params: { lookback: number; entryZ: number; exitZ: number; stopZ: number; feeBps: number; maxHoldDays: number };
+  snapshot: PairTrackRecord;
+  score: { score: number; grade: "A" | "B" | "C" | "D"; stars: number };
+  latest: (PairTrackRecord & { live: PairLiveSignal | null; checkedAt: string }) | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function SavedStrategyCard({
+  s,
+  busy,
+  onRevalidate,
+  onDelete,
+  onExport,
+}: {
+  s: SavedStrategy;
+  busy: boolean;
+  onRevalidate: () => void;
+  onDelete: () => void;
+  onExport: () => void;
+}) {
+  const m = s.latest ?? s.snapshot;
+  const live = s.latest?.live ?? null;
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--muted)]">👤 沉淀策略</span>
+            <h3 className="text-base font-semibold text-[var(--text)]">{s.name}</h3>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+            <span className="inline-flex items-center gap-1 font-mono">
+              <StockLink code={s.pair.a} newTab />
+              <span className="text-[var(--muted)]">↔</span>
+              <StockLink code={s.pair.b} newTab />
+            </span>
+            <Stars n={s.score.stars} />
+            <span className="text-[var(--muted)]">综合分 {s.score.score}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {live ? (
+            <span className={`rounded-md border px-2 py-0.5 text-xs font-medium ${live.nearStop ? "border-rose-500/40 bg-rose-500/10 text-rose-500" : "border-amber-400/40 bg-amber-400/10 text-amber-500"}`} title="复检时当前存在开口信号">
+              {live.nearStop ? "逼近止损" : "当前开口"} |z|={live.deviation} · 买 <span className="font-mono">{live.buyCode}</span>
+            </span>
+          ) : s.latest ? (
+            <span className="rounded-md border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]">复检：未开口</span>
+          ) : (
+            <span className="rounded-md border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]">未复检</span>
+          )}
+          <div className={`grid h-10 w-10 place-items-center rounded-xl border text-xl font-black ${GRADE_STYLE[s.score.grade]}`} title="评级">
+            {s.score.grade}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <Metric label="信号数" value={`${m.signals}`} />
+        <Metric label="回归率" value={`${m.reversionRatePct}%`} cls={m.reversionRatePct >= 60 ? "text-emerald-500" : m.reversionRatePct >= 40 ? "text-amber-500" : "text-rose-500"} />
+        <Metric label="单边胜率" value={`${m.legWinRatePct}%`} cls={m.legWinRatePct >= 50 ? "text-emerald-500" : "text-rose-500"} />
+        <Metric label="单边净收益(均)" value={fmtPct(m.avgLegReturnPct)} cls={m.avgLegReturnPct > 0 ? "text-emerald-500" : "text-rose-500"} />
+        <Metric label="平均回归天数" value={`${m.avgRevertDays} 日`} />
+        <Metric label="最大逆向z(均)" value={`${m.avgMaxAdverseZ}`} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
+        <span>β={s.pair.beta.toFixed(3)}</span>
+        <span>ADF t={s.pair.adfT.toFixed(2)}</span>
+        <span>半衰期 {s.pair.halfLifeDays} 日</span>
+        <span>参数 entryZ {s.params.entryZ} / exitZ {s.params.exitZ} / stopZ {s.params.stopZ}</span>
+        <span>数据截至 {m.asOf ?? "—"}</span>
+        {s.latest && <span>上次复检 {new Date(s.latest.checkedAt).toLocaleString("zh-CN")}</span>}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button onClick={onRevalidate} disabled={busy} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50">
+          {busy ? "复检中…" : "复检（拉最新 K 重算）"}
+        </button>
+        <Link href={`/arb?codes=${s.pair.a},${s.pair.b}&entryZ=${s.params.entryZ}&stopZ=${s.params.stopZ}`} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
+          在套利雷达打开
+        </Link>
+        <button onClick={onExport} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
+          导出（复制 JSON）
+        </button>
+        <button onClick={onDelete} disabled={busy} className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-500 transition hover:bg-rose-500/10 disabled:opacity-50">
+          删除
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SavedStrategiesSection() {
+  const [list, setList] = useState<SavedStrategy[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/strategies/saved");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setList(data.strategies as SavedStrategy[]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function revalidate(id: string) {
+    setBusyId(id);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/strategies/saved", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "revalidate", id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setList((cur) => cur.map((s) => (s.id === id ? (data.strategy as SavedStrategy) : s)));
+    } catch (e) {
+      setNotice(`复检失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function remove(id: string) {
+    setBusyId(id);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/strategies/saved?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setList((cur) => cur.filter((s) => s.id !== id));
+    } catch (e) {
+      setNotice(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function exportOne(s: SavedStrategy) {
+    const json = JSON.stringify(s, null, 2);
+    try {
+      await navigator.clipboard.writeText(json);
+      setNotice(`已复制「${s.name}」的 JSON 到剪贴板，可发给他人导入。`);
+    } catch {
+      setNotice(json);
+    }
+  }
+
+  async function doImport() {
+    setNotice(null);
+    try {
+      const parsed = JSON.parse(importText);
+      const res = await fetch("/api/strategies/saved", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "import", json: parsed }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setImportText("");
+      setImportOpen(false);
+      await load();
+      setNotice("导入成功。");
+    } catch (e) {
+      setNotice(`导入失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  return (
+    <section className="mt-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--text)]">👤 我的沉淀策略（配对均值回归）</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            从套利雷达「信号回测校准」沉淀的验证过配对，可随时复检是否仍成立·可导出/导入分享
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setImportOpen((v) => !v)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
+            {importOpen ? "取消导入" : "导入策略"}
+          </button>
+          <button onClick={load} disabled={loading} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)] disabled:opacity-50">
+            {loading ? "加载中…" : "刷新"}
+          </button>
+        </div>
+      </div>
+
+      {importOpen && (
+        <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+          <textarea
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            placeholder="粘贴导出的策略 JSON…"
+            className="h-32 w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2 font-mono text-xs"
+          />
+          <button onClick={doImport} disabled={!importText.trim()} className="mt-2 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+            导入
+          </button>
+        </div>
+      )}
+
+      {notice && <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3 text-sm text-[var(--text)]">{notice}</div>}
+      {err && <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-[var(--text)]">加载失败：{err}</div>}
+
+      {!loading && list.length === 0 ? (
+        <div className="mt-3 rounded-xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
+          还没有沉淀策略。去
+          <Link href="/arb" className="mx-1 text-[var(--accent)] underline">套利雷达</Link>
+          跑「信号回测校准」，在表里点「沉淀为策略」即可。
+        </div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          {list.map((s) => (
+            <SavedStrategyCard
+              key={s.id}
+              s={s}
+              busy={busyId === s.id}
+              onRevalidate={() => revalidate(s.id)}
+              onDelete={() => remove(s.id)}
+              onExport={() => exportOne(s)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function StrategyMarketPage() {
   const [board, setBoard] = useState<Leaderboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -229,9 +508,12 @@ export default function StrategyMarketPage() {
         </div>
       )}
 
+      <SavedStrategiesSection />
+
       {board && (
         <>
-          <div className="mt-6 space-y-4">
+          <h2 className="mt-8 text-lg font-semibold text-[var(--text)]">内置策略排行榜（单票买卖）</h2>
+          <div className="mt-4 space-y-4">
             {board.records.map((r) => (
               <StrategyCard key={r.meta.id} r={r} />
             ))}
