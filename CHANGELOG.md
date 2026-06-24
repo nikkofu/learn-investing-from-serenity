@@ -4,6 +4,36 @@
 
 ---
 
+## [0.36.0] - 2026-06-24
+
+> **配对纸面交易 / 持仓跟踪**。§5.2-B：把 v0.34「沉淀策略」与 v0.33「实时行情」打通——对已验证的协整配对一键建「纸面仓」前向跟踪，记录开平流水、盯市实时盈亏、统计「回归达成率」。与 v0.34 沉淀策略（事后校准统计「历史能不能信」）互补：这是「现在跟一笔、看价差回归到底兑不兑现」。P&L 走 `costs.ts` 既有 A 股成本模型（佣金 / 印花税 / 过户费 / 滑点），全程纯多头、非投资建议，零新依赖。
+
+### 新增：纸面交易持久化层
+- `src/lib/paperTrades.ts` → `.data/paper-trades.json`（仿 `watchlist.ts` / `alerts.ts` / `savedStrategies.ts` 的 `mkdir -p` + 原子 `writeFile` 范式）：
+  - `PaperPosition`：开仓快照（配对 a/b/β、买入腿、`entryPrice`、`entryZ`、名义本金、`buyShares` 折算的纸面股数）+ 参数（`lookback`/`entryZ`/`exitZ`/`stopZ`/`feeBps`/`maxHoldDays`）+ 最近盯市 `mark` + 平仓信息 `close`。
+  - `computeMark(pos, price, z, asOf, holdDays)`：用 `sellProceeds(shares, price)`（已扣卖出佣金 / 印花税 / 过户费 / 滑点，与开仓 `buyShares` 对称）算 `pnl = 卖出净得 − 名义本金`、毛 / 净收益%，并判 `reverted`(|z|≤exitZ) / `stopped`(|z|≥stopZ) / `timedOut`(holdDays≥maxHoldDays)。
+  - `autoCloseReason(mark)`：自动平仓优先级 **止损 > 回归 > 超时**。
+  - `summarize(positions)`：汇总开 / 平仓数、**回归达成率**（已平仓中由「价差回归」兑现的占比）、胜率、平均持有交易日、已实现 / 未实现净盈亏。
+  - CRUD：`openPaperPosition`（同配对 + 同方向去重）/ `applyMark`（写盯市，可同时平仓，累计 `maxAdverseZ`）/ `listPaperPositions`（持仓中在前）/ `deletePaperPosition` / `clearClosedPositions`。
+- `src/lib/pairTrading.ts` 新增 `latestPairZ(pair, a, b, lookback)`：与 `currentArbSignal` / `calibratePair` 同口径算最新一根滚动 z，但**不设入场阈门槛**（开仓后无论是否还开口都要持续跟到回归），并返回对齐后的交易日序列供按「交易日」计持仓天数。
+
+### 新增：API 路由
+- `src/app/api/paper/positions/route.ts`（`dynamic = "force-dynamic"`）：
+  - `GET`（`?refresh=1` 可选）：列持仓；刷新时对每个持仓中纸面仓重拉 K + 拼接实时价（`spliceLivePrice`，同 `alertEngine.ts` 口径，今日 > 末根则补一根合成「盘中」K），用 `latestPairZ` 算当前 z、`computeMark` 算实时盈亏、命中条件自动平仓。
+  - `POST action="open"`：从 `strategyId`（载入沉淀策略）或手填 a/b + 参数建仓，校验配对 / K 线 / 协整、取当前信号、无开口则拒绝。
+  - `POST action="refresh"`（批量盯市）/ `action="close"`（按现价手动平仓）/ `action="clear"`（清空已平仓）。
+  - `DELETE ?id=`：删除一条持仓。
+
+### 新增：UI 接入
+- `src/app/paper/page.tsx` 新页「纸面交易」：顶部汇总（持仓 / 平仓数、回归达成率、胜率、平均持有、已实现 / 未实现盈亏）+ 「立即盯市」；持仓卡片（配对 / 方向 / 盈亏着色「盈红亏绿」/ z 进度条 `ZTrack` 标开仓→当前→exitZ/stopZ 边界 / 手动平仓 / 删除）；手动开仓表单（a/b 代码 + 自定义参数）。纯 React/CSS/SVG，零新图表依赖。
+- `src/components/Nav.tsx`：新增「纸面交易」入口。
+- `src/app/strategies/page.tsx`：沉淀策略卡片新增「**建纸面仓**」按钮，一键 POST `action="open"` + `strategyId` 建仓并提示。
+
+### 质量门禁
+- `tsc --noEmit` 0 error；改动 6 文件 `eslint` 0 error / 0 warning；`next build` 通过，新路由 `/paper`、`/api/paper/positions` 已注册。真实行情功能级校验（工行 601398 / 建行 601939）：协整 β=1.063 → 取当前信号建仓（纸面股数 1353.6）→ 盯市 +2%/z=0.3 判 `reverted` 自动平仓（净盈亏 +174.41 元）、z=4.0 判 `stopped`；汇总回归达成率 / 胜率正确，测试数据已清理（`.data/` 已 gitignore）。
+
+---
+
 ## [0.35.0] - 2026-06-24
 
 > **过拟合体检（稳健性可视化）**。§5.2-A：把「过拟合防护 + 校准」做成显性卖点。对任一协整配对，一键给出两张证据图——**参数高原热图**（入场阈 × z 窗口两维全样本扫描，按净值着色）与 **walk-forward 衰减曲线**（锚定式滚动前推：样本内选最优参 → 紧邻样本外用同参验证），并合成 0~100 稳健分与「稳健 / 脆弱 / 疑似过拟合」结论。全部基于既有 `backtestPair` / `evaluatePair`，零新依赖；产物均为统计信号、非投资建议。

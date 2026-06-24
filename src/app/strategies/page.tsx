@@ -209,12 +209,14 @@ function SavedStrategyCard({
   onRevalidate,
   onDelete,
   onExport,
+  onPaper,
 }: {
   s: SavedStrategy;
   busy: boolean;
   onRevalidate: () => void;
   onDelete: () => void;
   onExport: () => void;
+  onPaper: () => void;
 }) {
   const m = s.latest ?? s.snapshot;
   const live = s.latest?.live ?? null;
@@ -273,6 +275,9 @@ function SavedStrategyCard({
       <div className="mt-4 flex flex-wrap gap-2">
         <button onClick={onRevalidate} disabled={busy} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50">
           {busy ? "复检中…" : "复检（拉最新 K 重算）"}
+        </button>
+        <button onClick={onPaper} disabled={busy} className="rounded-lg border border-[var(--accent)]/50 bg-[var(--accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--accent)] transition hover:opacity-90 disabled:opacity-50" title="按当前开口信号建纸面仓，前向跟踪是否回归">
+          {busy ? "建仓中…" : "建纸面仓"}
         </button>
         <Link href={`/arb?codes=${s.pair.a},${s.pair.b}&entryZ=${s.params.entryZ}&stopZ=${s.params.stopZ}`} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
           在套利雷达打开
@@ -347,6 +352,25 @@ function SavedStrategiesSection() {
       setList((cur) => cur.filter((s) => s.id !== id));
     } catch (e) {
       setNotice(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function openPaper(s: SavedStrategy) {
+    setBusyId(s.id);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/paper/positions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "open", strategyId: s.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setNotice(`已为「${s.name}」建纸面仓（买入 ${data.position.buyCode}，开仓 z=${data.position.entryZ}）。到「纸面交易」页盯市跟踪回归。`);
+    } catch (e) {
+      setNotice(`建纸面仓失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusyId(null);
     }
@@ -434,6 +458,7 @@ function SavedStrategiesSection() {
               onRevalidate={() => revalidate(s.id)}
               onDelete={() => remove(s.id)}
               onExport={() => exportOne(s)}
+              onPaper={() => openPaper(s)}
             />
           ))}
         </div>

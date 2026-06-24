@@ -18,6 +18,7 @@ const LINKS = [
   { href: "/arb", label: "套利雷达" },
   { href: "/alerts", label: "盘中盯盘" },
   { href: "/strategies", label: "策略市场" },
+  { href: "/paper", label: "纸面交易" },
   { href: "/sectors", label: "板块热力" },
   { href: "/sync", label: "数据同步" },
   { href: "/settings", label: "设置" },

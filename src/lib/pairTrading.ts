@@ -431,6 +431,30 @@ export function currentArbSignal(
   };
 }
 
+/**
+ * 计算配对在最新一根的滚动 z（与 currentArbSignal / calibratePair 同口径），
+ * 但**不设入场阈门槛**：无论是否开口都返回，供纸面持仓盯市复用（开仓后还要持续跟到回归）。
+ * 同时返回对齐后的交易日序列，便于按「交易日」计持仓天数。
+ */
+export function latestPairZ(
+  pair: PairCandidate,
+  aCandles: Candle[],
+  bCandles: Candle[],
+  lookback = 60,
+): { z: number; asOf: string; dates: string[] } | null {
+  const al = alignCloses(aCandles, bCandles);
+  const { dates, pa, pb } = al;
+  const n = dates.length;
+  if (n <= lookback) return null;
+  const spread: number[] = [];
+  for (let i = 0; i < n; i++) spread.push(Math.log(pa[i]) - pair.beta * Math.log(pb[i]));
+  const i = n - 1;
+  const win = spread.slice(i - lookback, i);
+  const d = describe(win);
+  if (d.std <= 1e-9) return null;
+  return { z: Number(((spread[i] - d.mean) / d.std).toFixed(2)), asOf: dates[i], dates };
+}
+
 export interface ArbRadarResult {
   universeSize: number;
   pairsTested: number;
