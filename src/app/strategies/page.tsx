@@ -148,7 +148,7 @@ function StrategyCard({ r }: { r: TrackRecord }) {
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Link
-          href="/backtest/strategy"
+          href={`/backtest/strategy?strategy=${encodeURIComponent(r.meta.id)}`}
           className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
         >
           多股票池实测 →

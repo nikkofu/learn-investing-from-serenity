@@ -14,7 +14,13 @@
 
 ---
 
-## 🆕 v0.41.0 亮点
+## 🆕 v0.42.0 亮点
+
+*   **修复「多股票池实测」不带策略 + 回测页接入东财人气榜热门池**：
+    *   **Bug 修复**：`/strategies` 策略榜里每张卡片的「多股票池实测 →」此前是写死的 `<Link href="/backtest/strategy">`，**没带所选策略 id**；而回测页只从 `/api/strategies` 读默认策略，导致无论点哪个策略过去都落到默认 v7.0。现链接改为 `?strategy=<id>`，回测页用 `useSearchParams` 读取并在命中已登记策略时**覆盖默认选中**（外层加 `<Suspense>` 边界）。
+    *   **热门榜单**：原「热门 15 只 / 大盘蓝筹 50」是静态清单、覆盖偏少。复用项目既有**东财人气榜**数据源（`getStockRankList`，emappdata 实时人气排行）新增 `GET /api/market/hot-list?n=`，回测页加「🔥 东财人气榜 50 / 100」按钮一键拉取当前热门股填入股票池。三关全绿（type-check / lint / build），数据源实测返回 50 只真实人气榜代码。**零新依赖**。
+
+## v0.41.0 亮点
 
 *   **复刻 TradingView 社区脚本框架 · 首发 Modern Adaptive Supertrend [GBB]**：新方向——把 TradingView 社区里值得复刻的 Pine 脚本**逆向出核心算法**、本地实现，并为每个策略配套实现可叠加到 K 线主图的**分析图层**，从而脱离 TradingView 把这些策略直接套用到 A 股个股行情上。新增 `src/lib/tvStrategies.ts`（**带版本号的 TV 策略复刻注册表**，与经典指标组 `indicatorStrategies.ts` 平行）：每个策略 = 元信息（`id`/版本/**原作者**/**原作链接**/差异说明）+ `compute(candles)→图层`（方向线 / 方向 / 翻转点 / regime）+ 可选**纯多头可回测包装**。新增脚本只需在 `TV_STRATEGIES` 追加一项，UI 与接口自动跟随。
     *   **逆向出的核心算法**（[Modern Adaptive Supertrend [GBB]](https://cn.tradingview.com/script/Wagz8RF1-Modern-Adaptive-Supertrend-GBB/)，作者 goodBadBitcoin）：经典 Supertrend（ATR(10)×3 波动率跟踪线，收盘越线翻向）+ 两层现代化改造——① **Commit filter（迟滞过滤）**：不再「碰线即翻」，收盘要越过线 **≥0.5×ATR** 并保持 1 根才确认翻转（实测假翻转减少约 60%）；② **regime 自适应带宽**：用效率比（Kaufman ER）近 500 根**分位**判趋势/震荡（而非固定阈值），干净趋势（×0.8）与震荡（×0.5）均加宽抗洗、仅「转折」处收紧让线灵敏；③ 作者承认无效的**自适应周期**默认关、本复刻未实现。**诚实口径沿用原作**：这是趋势过滤器而非择时系统，裸方向胜率≈48%，价值在更干净的趋势读数与更低回撤而非抄顶摸底。

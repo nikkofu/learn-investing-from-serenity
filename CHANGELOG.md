@@ -4,6 +4,24 @@
 
 ---
 
+## [0.42.0] - 2026-06-24
+
+> **修复「多股票池实测」按钮丢策略 + 回测页接入东财人气榜热门池**。从 `/strategies` 策略榜点「多股票池实测」过去回测页会丢掉所选策略、永远落到默认 v7.0——本轮修复；并新增实时「东财人气榜」热门股票池来源，弥补原静态清单覆盖偏少的问题。**零新依赖**。
+
+### 修复：`/strategies`「多股票池实测 →」不携带所选策略
+- 此前策略卡片里的「多股票池实测 →」是写死的 `<Link href="/backtest/strategy">`，**不带任何策略参数**；而 `/backtest/strategy` 又只从 `/api/strategies` 读 `defaultStrategyId`（当前默认 v7.0）作初始选中。结果：无论在策略榜点击哪个策略，跳到回测页都显示并回测默认策略，与用户预期不符。
+- 修法：① `src/app/strategies/page.tsx` 该链接改为 `?strategy=${encodeURIComponent(r.meta.id)}`，把卡片对应的策略 id 带过去；② `src/app/backtest/strategy/page.tsx` 用 `useSearchParams()` 读取 URL 上的 `strategy`，在拉到策略列表后**若命中已登记策略则覆盖默认选中**，否则回退默认；因 `useSearchParams` 在客户端组件需 Suspense 边界，外层补 `<Suspense>` 包裹（与 `/chart` 页一致）。
+
+### 新增：`GET /api/market/hot-list` + 回测页「东财人气榜」热门池按钮
+- 回测页原有「热门 15 只」「① 大盘蓝筹 50」均为**静态清单**、覆盖偏少且不随行情更新。本轮复用项目既有的**东财人气榜**数据源（`getStockRankList` → emappdata `stockrank/getAllCurrentList`，实时人气排行；已在 `src/lib/sources` 导出），新增 `src/app/api/market/hot-list/route.ts`：`GET /api/market/hot-list?n=50`（`n∈[1,200]`）返回 `{ asOf, count, codes, items }`，`codes` 即按人气名次排序的 6 位代码清单。
+- `src/app/backtest/strategy/page.tsx` 在预设按钮旁新增「🔥 东财人气榜 50」「🔥 东财人气榜 100」两个按钮，点击即拉取当前人气榜代码填入股票池（带拉取中态与错误提示）。这是当前可得的最接近「最近热门榜单」的实时口径。
+
+### 质量门禁（本机执行）
+- `npm run type-check` 0 error；`npm run lint` 0 error（27 条均历史警告，本轮新增文件零新告警）；`npm run build` 通过，`/api/market/hot-list` 路由已登记。
+- 数据源实测：`getStockRankList(50)` 返回 50 只真实人气榜代码（沪深两市）。**零新依赖**。
+
+---
+
 ## [0.41.0] - 2026-06-24
 
 > **复刻 TradingView 社区脚本框架 · 首发 Modern Adaptive Supertrend [GBB]**。新方向：把 TradingView 社区里值得复刻的 Pine 脚本**逆向出核心算法**、本地实现，并为每个策略配套实现可叠加到 K 线主图的**分析图层**（方向线 / 翻多翻空标记 / regime 读数），从而脱离 TradingView 把这些策略直接套用到 A 股个股行情上。本轮交付**复刻框架** + **第一个策略端到端打通**作为模板，后续脚本照此范式逐个复刻。**零新依赖**。

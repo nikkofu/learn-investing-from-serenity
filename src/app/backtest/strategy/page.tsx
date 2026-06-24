@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
 import { NFA } from "@/lib/disclaimers";
 
@@ -165,7 +166,7 @@ function VerdictBanner({ s }: { s: Stats }) {
   );
 }
 
-export default function StrategyBacktestPage() {
+function StrategyBacktestInner() {
   const [codesText, setCodesText] = useState(PRESET);
   const [feeBps, setFeeBps] = useState(30);
   const [takeProfitPct, setTakeProfitPct] = useState(35);
@@ -176,22 +177,29 @@ export default function StrategyBacktestPage() {
   const [result, setResult] = useState<Result | null>(null);
   const [strategies, setStrategies] = useState<StrategyMeta[]>([]);
   const [strategyId, setStrategyId] = useState<string>("");
+  const [hotLoading, setHotLoading] = useState(false);
 
-  // 拉取已登记策略列表，默认选中默认策略（当前为 v6）。
+  // 从 /strategies 「多股票池实测」跳转携带的策略 id（?strategy=<id>）。
+  const search = useSearchParams();
+  const urlStrategy = search.get("strategy");
+
+  // 拉取已登记策略列表：URL 带且命中已登记策略则优先选中，否则回退默认策略。
   useEffect(() => {
     let alive = true;
     fetch("/api/strategies")
       .then((r) => r.json())
       .then((j: { defaultStrategyId?: string; strategies?: StrategyMeta[] }) => {
         if (!alive) return;
-        setStrategies(j.strategies ?? []);
-        if (j.defaultStrategyId) setStrategyId(j.defaultStrategyId);
+        const list = j.strategies ?? [];
+        setStrategies(list);
+        const fromUrl = urlStrategy && list.some((s) => s.id === urlStrategy) ? urlStrategy : null;
+        setStrategyId(fromUrl ?? j.defaultStrategyId ?? "");
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, []);
+  }, [urlStrategy]);
 
   const selectedStrategy = useMemo(
     () => strategies.find((s) => s.id === strategyId),
@@ -242,6 +250,24 @@ export default function StrategyBacktestPage() {
     }
   }
 
+  // 一键拉取东财人气榜（实时热门排行）填入股票池。
+  async function loadHot(n: number) {
+    setHotLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/market/hot-list?n=${n}`);
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error ?? `HTTP ${res.status}`);
+      const list: string[] = Array.isArray(j.codes) ? j.codes : [];
+      if (list.length === 0) throw new Error("人气榜返回为空（可稍后重试）");
+      setCodesText(list.join(","));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHotLoading(false);
+    }
+  }
+
   const inputCls = "rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm tabular-nums";
 
   return (
@@ -280,6 +306,12 @@ export default function StrategyBacktestPage() {
             </button>
             <button type="button" onClick={() => setCodesText(BLUECHIP50)} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">
               ① 大盘蓝筹 50（总市值先验选样）
+            </button>
+            <button type="button" disabled={hotLoading} onClick={() => loadHot(50)} className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-medium text-amber-500 hover:bg-amber-500/20 disabled:opacity-50">
+              {hotLoading ? "拉取中…" : "🔥 东财人气榜 50（实时热门）"}
+            </button>
+            <button type="button" disabled={hotLoading} onClick={() => loadHot(100)} className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-medium text-amber-500 hover:bg-amber-500/20 disabled:opacity-50">
+              {hotLoading ? "拉取中…" : "🔥 东财人气榜 100"}
             </button>
           </div>
         </label>
@@ -530,5 +562,13 @@ export default function StrategyBacktestPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function StrategyBacktestPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[var(--muted)]">加载中…</div>}>
+      <StrategyBacktestInner />
+    </Suspense>
   );
 }
