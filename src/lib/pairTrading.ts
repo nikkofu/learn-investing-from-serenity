@@ -16,6 +16,7 @@
  */
 import type { Candle } from "./types";
 import { adfTest, ols, halfLife, pearson, describe } from "./stats";
+import { roundTripCostPct } from "./costs";
 
 export interface PairCandidate {
   a: string;
@@ -469,5 +470,242 @@ export function scanArbRadar(
     signals: limited,
     asOf,
     note: "仅列出当前价差已开口（|z|≥入场阈）的协整配对机会，按 |z|×协整强度排序。预计回归天数=半衰期·log2(|z|/出场阈)。A股融券受限，纯多空难落地，请优先选两融/ETF 可对冲品种；收益为价差口径、已扣双边成本估算，仅供研究。",
+  };
+}
+
+// ───────────────────── 信号回测校准（事后验证，单边口径） ─────────────────────
+
+/**
+ * 单条历史信号的事后结果（单边可执行口径）：
+ * 在某根 |z|≥entryZ 开口时买入「被低估」的那一只（buyCode），持有到价差回归/止损/超时，
+ * 记录这一笔单边买入的真实净收益（扣单边往返成本）、回归与否、最大逆向 z 等。
+ */
+export interface SignalEvent {
+  entryDate: string;
+  exitDate: string;
+  /** 该笔实际买入（被低估）的那一只。 */
+  buyCode: string;
+  /** 进场时的 z（带符号）。 */
+  entryZ: number;
+  /** 出场时的 z（带符号）。 */
+  exitZ: number;
+  /** 持有期内出现过的最大 |z|（逆向最深，衡量回归前还能扛多少偏离）。 */
+  maxAdverseZ: number;
+  holdDays: number;
+  /** 是否由「价差回归」平仓（=信号兑现）。 */
+  reverted: boolean;
+  exitReason: string;
+  /** 单边买入腿的真实净收益%（扣一次单边买卖往返成本）。 */
+  legReturnPct: number;
+  /** 同上但未扣成本（毛收益%）。 */
+  legReturnGrossPct: number;
+}
+
+/** 单个配对在全历史上的信号校准统计（单边口径）。 */
+export interface PairCalibration {
+  pair: PairCandidate;
+  events: SignalEvent[];
+  /** 历史触发的开口信号次数。 */
+  signals: number;
+  /** 其中由价差回归兑现的次数。 */
+  reversions: number;
+  reversionRatePct: number;
+  /** 协整破裂止损次数。 */
+  stopouts: number;
+  /** 超时未回归次数。 */
+  timeouts: number;
+  /** 已回归信号的平均持有天数。 */
+  avgRevertDays: number;
+  /** 单边买入腿平均净收益%（覆盖全部信号）。 */
+  avgLegReturnPct: number;
+  /** 单边买入腿胜率%（净收益>0 占比）。 */
+  legWinRatePct: number;
+  /** 持有期平均最大逆向 |z|。 */
+  avgMaxAdverseZ: number;
+}
+
+/**
+ * 对单个配对做全历史信号校准：滚动 z 同 backtestPair 口径，逐笔记录开口→出场的单边结果。
+ * 单边收益 = 买入「被低估」腿（z≤0 买 A、z>0 买 B）从进场到出场的真实价格涨跌，扣单边往返成本。
+ */
+export function calibratePair(
+  pair: PairCandidate,
+  aCandles: Candle[],
+  bCandles: Candle[],
+  opts: PairTradeOptions = {},
+): PairCalibration {
+  const lookback = opts.lookback ?? 60;
+  const entryZ = opts.entryZ ?? 2.0;
+  const exitZ = opts.exitZ ?? 0.5;
+  const stopZ = opts.stopZ ?? 3.5;
+  const maxHold = opts.maxHoldDays ?? 120;
+  const costPct = roundTripCostPct();
+
+  const al = alignCloses(aCandles, bCandles);
+  const { dates, pa, pb } = al;
+  const n = dates.length;
+  const events: SignalEvent[] = [];
+
+  const spread: number[] = [];
+  for (let i = 0; i < n; i++) spread.push(Math.log(pa[i]) - pair.beta * Math.log(pb[i]));
+
+  const zAt = (i: number): number => {
+    const win = spread.slice(i - lookback, i);
+    const d = describe(win);
+    if (d.std <= 1e-9) return NaN;
+    return (spread[i] - d.mean) / d.std;
+  };
+
+  let pos:
+    | null
+    | { side: "long-spread" | "short-spread"; entryIdx: number; entryZ: number; buyCode: string; maxAdverseZ: number } = null;
+
+  for (let i = lookback; i < n; i++) {
+    const zi = zAt(i);
+    if (Number.isNaN(zi)) continue;
+
+    if (!pos) {
+      if (zi <= -entryZ) {
+        // 价差偏低 ⇒ A 相对 B 被低估 ⇒ 买 A。
+        pos = { side: "long-spread", entryIdx: i, entryZ: zi, buyCode: pair.a, maxAdverseZ: Math.abs(zi) };
+      } else if (zi >= entryZ) {
+        // 价差偏高 ⇒ B 相对 A 被低估 ⇒ 买 B。
+        pos = { side: "short-spread", entryIdx: i, entryZ: zi, buyCode: pair.b, maxAdverseZ: Math.abs(zi) };
+      }
+      continue;
+    }
+
+    pos.maxAdverseZ = Math.max(pos.maxAdverseZ, Math.abs(zi));
+    const hold = i - pos.entryIdx;
+    const reverted = Math.abs(zi) <= exitZ;
+    const stopped = Math.abs(zi) >= stopZ;
+    const timedOut = hold >= maxHold;
+    const lastBar = i === n - 1;
+    if (reverted || stopped || timedOut || lastBar) {
+      const isA = pos.buyCode === pair.a;
+      const entryPx = isA ? pa[pos.entryIdx] : pb[pos.entryIdx];
+      const exitPx = isA ? pa[i] : pb[i];
+      const grossPct = (exitPx / entryPx - 1) * 100;
+      events.push({
+        entryDate: dates[pos.entryIdx],
+        exitDate: dates[i],
+        buyCode: pos.buyCode,
+        entryZ: Number(pos.entryZ.toFixed(2)),
+        exitZ: Number(zi.toFixed(2)),
+        maxAdverseZ: Number(pos.maxAdverseZ.toFixed(2)),
+        holdDays: hold,
+        reverted,
+        exitReason: reverted ? "价差回归" : stopped ? "协整破裂止损" : timedOut ? "持有超时" : "样本末强制平仓",
+        legReturnGrossPct: Number(grossPct.toFixed(2)),
+        legReturnPct: Number((grossPct - costPct).toFixed(2)),
+      });
+      pos = null;
+    }
+  }
+
+  const signals = events.length;
+  const reverted = events.filter((e) => e.reverted);
+  const stopouts = events.filter((e) => e.exitReason === "协整破裂止损").length;
+  const timeouts = events.filter((e) => e.exitReason === "持有超时").length;
+  const wins = events.filter((e) => e.legReturnPct > 0).length;
+  const avgRevertDays = reverted.length
+    ? reverted.reduce((s, e) => s + e.holdDays, 0) / reverted.length
+    : 0;
+  const avgLeg = signals ? events.reduce((s, e) => s + e.legReturnPct, 0) / signals : 0;
+  const avgAdverse = signals ? events.reduce((s, e) => s + e.maxAdverseZ, 0) / signals : 0;
+
+  return {
+    pair,
+    events,
+    signals,
+    reversions: reverted.length,
+    reversionRatePct: signals ? Number(((reverted.length / signals) * 100).toFixed(1)) : 0,
+    stopouts,
+    timeouts,
+    avgRevertDays: Number(avgRevertDays.toFixed(1)),
+    avgLegReturnPct: Number(avgLeg.toFixed(2)),
+    legWinRatePct: signals ? Number(((wins / signals) * 100).toFixed(1)) : 0,
+    avgMaxAdverseZ: Number(avgAdverse.toFixed(2)),
+  };
+}
+
+export interface RadarCalibrationAgg {
+  pairsWithSignals: number;
+  totalSignals: number;
+  reversionRatePct: number;
+  avgRevertDays: number;
+  avgLegReturnPct: number;
+  legWinRatePct: number;
+  avgMaxAdverseZ: number;
+}
+
+export interface RadarCalibrationResult {
+  universeSize: number;
+  pairsTested: number;
+  cointegratedCount: number;
+  /** 每个协整配对的历史信号校准，按信号净收益降序。 */
+  calibrations: PairCalibration[];
+  agg: RadarCalibrationAgg;
+  asOf: string | null;
+  note: string;
+}
+
+/**
+ * 套利雷达信号回测校准：对池内全部协整配对做全历史信号事后回测，
+ * 统计「买入被低估腿」这套单边择时规则历史上的回归率、平均回归天数、单边净收益、胜率与最大逆向。
+ * 用来校准 z 阈是否可信——回归率高/单边胜率高/逆向浅 ⇒ 信号更可托付。
+ */
+export function calibrateRadar(
+  candles: Record<string, Candle[]>,
+  opts: { find?: PairFindOptions; trade?: PairTradeOptions } = {},
+): RadarCalibrationResult {
+  const codes = Object.keys(candles);
+  const pairs = findCointegratedPairs(candles, opts.find);
+  const calibrations = pairs
+    .map((p) => calibratePair(p, candles[p.a], candles[p.b], opts.trade))
+    .filter((c) => c.signals > 0)
+    .sort((x, y) => y.avgLegReturnPct - x.avgLegReturnPct);
+
+  let totalSignals = 0,
+    totalReversions = 0,
+    sumRevertDays = 0,
+    revertCount = 0,
+    sumLeg = 0,
+    wins = 0,
+    sumAdverse = 0;
+  for (const c of calibrations) {
+    totalSignals += c.signals;
+    totalReversions += c.reversions;
+    sumRevertDays += c.avgRevertDays * c.reversions;
+    revertCount += c.reversions;
+    for (const e of c.events) {
+      sumLeg += e.legReturnPct;
+      if (e.legReturnPct > 0) wins++;
+      sumAdverse += e.maxAdverseZ;
+    }
+  }
+
+  let asOf: string | null = null;
+  for (const cs of Object.values(candles)) {
+    const last = cs.length ? cs[cs.length - 1].date : null;
+    if (last && (!asOf || last > asOf)) asOf = last;
+  }
+
+  return {
+    universeSize: codes.length,
+    pairsTested: (codes.length * (codes.length - 1)) / 2,
+    cointegratedCount: pairs.length,
+    calibrations,
+    agg: {
+      pairsWithSignals: calibrations.length,
+      totalSignals,
+      reversionRatePct: totalSignals ? Number(((totalReversions / totalSignals) * 100).toFixed(1)) : 0,
+      avgRevertDays: revertCount ? Number((sumRevertDays / revertCount).toFixed(1)) : 0,
+      avgLegReturnPct: totalSignals ? Number((sumLeg / totalSignals).toFixed(2)) : 0,
+      legWinRatePct: totalSignals ? Number(((wins / totalSignals) * 100).toFixed(1)) : 0,
+      avgMaxAdverseZ: totalSignals ? Number((sumAdverse / totalSignals).toFixed(2)) : 0,
+    },
+    asOf,
+    note: "事后回测：对每个协整配对全历史回放，每次 |z|≥入场阈开口就买入被低估的那一只，持有至价差回归/止损/超时。单边收益为该腿真实价格涨跌已扣单边往返成本（含市场 β，非中性）。回归率=由价差回归兑现占比；最大逆向=回归前出现过的最深 |z|。协整为样本内性质会破裂，历史回归率不代表未来，非投资建议。",
   };
 }

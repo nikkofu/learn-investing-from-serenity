@@ -55,6 +55,49 @@ interface InterpState {
   error: string | null;
   data: ArbInterpretation | null;
 }
+interface SignalEvent {
+  entryDate: string;
+  exitDate: string;
+  buyCode: string;
+  entryZ: number;
+  exitZ: number;
+  maxAdverseZ: number;
+  holdDays: number;
+  reverted: boolean;
+  exitReason: string;
+  legReturnPct: number;
+  legReturnGrossPct: number;
+}
+interface PairCalibration {
+  pair: PairCandidate;
+  events: SignalEvent[];
+  signals: number;
+  reversions: number;
+  reversionRatePct: number;
+  stopouts: number;
+  timeouts: number;
+  avgRevertDays: number;
+  avgLegReturnPct: number;
+  legWinRatePct: number;
+  avgMaxAdverseZ: number;
+}
+interface CalibrationResult {
+  universeSize: number;
+  pairsTested: number;
+  cointegratedCount: number;
+  calibrations: PairCalibration[];
+  agg: {
+    pairsWithSignals: number;
+    totalSignals: number;
+    reversionRatePct: number;
+    avgRevertDays: number;
+    avgLegReturnPct: number;
+    legWinRatePct: number;
+    avgMaxAdverseZ: number;
+  };
+  asOf: string | null;
+  note: string;
+}
 
 // 板块预设股票池（同板块更易出协整对）
 const PRESETS: { label: string; codes: string }[] = [
@@ -106,6 +149,10 @@ export default function ArbRadarPage() {
   const [result, setResult] = useState<RadarResult | null>(null);
   const [interp, setInterp] = useState<Record<string, InterpState>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [calLoading, setCalLoading] = useState(false);
+  const [calError, setCalError] = useState<string | null>(null);
+  const [cal, setCal] = useState<CalibrationResult | null>(null);
+  const [calOpen, setCalOpen] = useState<Record<string, boolean>>({});
 
   const codes = useMemo(
     () =>
@@ -178,6 +225,30 @@ export default function ArbRadarPage() {
     }
   }
 
+  async function runCalibrate() {
+    if (codes.length < 3) {
+      setCalError("信号回测校准至少需要 3 只股票，建议同板块 ≥8 只");
+      return;
+    }
+    setCalLoading(true);
+    setCalError(null);
+    setCal(null);
+    try {
+      const res = await fetch("/api/arb/calibrate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ codes, limit, minCorrelation, entryZ, stopZ }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      setCal(json as CalibrationResult);
+    } catch (e) {
+      setCalError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCalLoading(false);
+    }
+  }
+
   const inputCls = "rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm tabular-nums";
 
   return (
@@ -246,7 +317,15 @@ export default function ArbRadarPage() {
           <button onClick={run} disabled={loading} className="rounded-md bg-[var(--accent)] px-5 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
             {loading ? "扫描中（全两两协整较慢）…" : "扫描当前套利机会"}
           </button>
+          <button
+            onClick={runCalibrate}
+            disabled={calLoading}
+            className="rounded-md border border-[var(--accent-line)] bg-[var(--accent-soft)] px-5 py-1.5 text-sm font-semibold text-[var(--accent)] hover:opacity-90 disabled:opacity-50"
+          >
+            {calLoading ? "事后回测中…" : "信号回测校准（事后验证）"}
+          </button>
           {error && <span className="text-sm text-red-500">{error}</span>}
+          {calError && <span className="text-sm text-red-500">{calError}</span>}
         </div>
       </div>
 
@@ -365,6 +444,128 @@ export default function ArbRadarPage() {
           )}
 
           <p className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-xs text-[var(--muted)]">{result.note}</p>
+        </div>
+      )}
+
+      {cal && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text)]">信号回测校准 · 事后验证</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              对池内全部协整配对<strong>全历史回放</strong>：每次 |z|≥入场阈开口就<strong>买入被低估的那一只</strong>，持有到价差回归/止损/超时，统计这套<strong>单边择时规则</strong>历史上的真实表现。
+              单边收益<strong>含市场 β（非中性）</strong>、已扣单边往返成本。回归率高·单边胜率高·最大逆向浅 ⇒ z 阈更可托付。历史不代表未来，非投资建议。
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <StatCard label="协整配对" value={`${cal.agg.pairsWithSignals} 对`} />
+            <StatCard label="历史信号数" value={`${cal.agg.totalSignals}`} />
+            <StatCard label="价差回归率" value={`${cal.agg.reversionRatePct}%`} cls={cal.agg.reversionRatePct >= 60 ? "text-emerald-500" : cal.agg.reversionRatePct >= 40 ? "text-amber-500" : "text-rose-500"} />
+            <StatCard label="平均回归天数" value={`${cal.agg.avgRevertDays} 日`} />
+            <StatCard label="单边净收益(均)" value={fmtPct(cal.agg.avgLegReturnPct)} cls={cal.agg.avgLegReturnPct > 0 ? "text-emerald-500" : "text-rose-500"} />
+            <StatCard label="单边胜率" value={`${cal.agg.legWinRatePct}%`} cls={cal.agg.legWinRatePct >= 50 ? "text-emerald-500" : "text-rose-500"} />
+          </div>
+          {cal.asOf && <div className="text-xs text-[var(--muted)]">回放数据截至 {cal.asOf} · 平均最大逆向 |z|={cal.agg.avgMaxAdverseZ}</div>}
+
+          {cal.calibrations.length === 0 ? (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--muted)]">
+              池内协整配对在全历史上没有触发过 |z|≥入场阈的开口信号。可降低入场 z 阈或换板块再试。
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--border)] text-left text-xs text-[var(--muted)]">
+                    <th className="px-3 py-2">配对（A / B）</th>
+                    <th className="px-3 py-2 text-right">信号数</th>
+                    <th className="px-3 py-2 text-right">回归率</th>
+                    <th className="px-3 py-2 text-right">止损/超时</th>
+                    <th className="px-3 py-2 text-right">平均回归天数</th>
+                    <th className="px-3 py-2 text-right">单边净收益(均)</th>
+                    <th className="px-3 py-2 text-right">单边胜率</th>
+                    <th className="px-3 py-2 text-right">最大逆向z(均)</th>
+                    <th className="px-3 py-2">逐笔</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cal.calibrations.map((c) => {
+                    const key = `${c.pair.a}-${c.pair.b}`;
+                    const open = calOpen[key];
+                    return (
+                      <Fragment key={key}>
+                        <tr className="border-b border-[var(--border)] last:border-0">
+                          <td className="px-3 py-2 font-mono">
+                            <span className="inline-flex items-center gap-1">
+                              <StockLink code={c.pair.a} newTab />
+                              <span className="text-[var(--muted)]">/</span>
+                              <StockLink code={c.pair.b} newTab />
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{c.signals}</td>
+                          <td className={`px-3 py-2 text-right tabular-nums font-semibold ${c.reversionRatePct >= 60 ? "text-emerald-500" : c.reversionRatePct >= 40 ? "text-amber-500" : "text-rose-500"}`}>{c.reversionRatePct}%</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-[var(--muted)]">{c.stopouts}/{c.timeouts}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{c.avgRevertDays} 日</td>
+                          <td className={`px-3 py-2 text-right tabular-nums ${c.avgLegReturnPct > 0 ? "text-emerald-500" : "text-rose-500"}`}>{fmtPct(c.avgLegReturnPct)}</td>
+                          <td className={`px-3 py-2 text-right tabular-nums ${c.legWinRatePct >= 50 ? "text-emerald-500" : "text-rose-500"}`}>{c.legWinRatePct}%</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{c.avgMaxAdverseZ}</td>
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={() => setCalOpen((m) => ({ ...m, [key]: !open }))}
+                              className="rounded border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--accent)] hover:border-[var(--accent-line)]"
+                            >
+                              {open ? "收起" : `${c.signals} 笔`}
+                            </button>
+                          </td>
+                        </tr>
+                        {open && (
+                          <tr className="border-b border-[var(--border)] last:border-0">
+                            <td colSpan={9} className="bg-[var(--bg)] px-3 py-3">
+                              <div className="overflow-x-auto">
+                                <table className="w-full min-w-[680px] text-xs">
+                                  <thead>
+                                    <tr className="text-left text-[var(--muted)]">
+                                      <th className="px-2 py-1">买入</th>
+                                      <th className="px-2 py-1">进场日</th>
+                                      <th className="px-2 py-1">出场日</th>
+                                      <th className="px-2 py-1 text-right">进场z</th>
+                                      <th className="px-2 py-1 text-right">出场z</th>
+                                      <th className="px-2 py-1 text-right">最大逆向z</th>
+                                      <th className="px-2 py-1 text-right">持有天数</th>
+                                      <th className="px-2 py-1">结果</th>
+                                      <th className="px-2 py-1 text-right">单边净收益</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {c.events.map((e, i) => (
+                                      <tr key={i} className="border-t border-[var(--border)]">
+                                        <td className="px-2 py-1 font-mono"><StockLink code={e.buyCode} newTab /></td>
+                                        <td className="px-2 py-1 tabular-nums text-[var(--muted)]">{e.entryDate}</td>
+                                        <td className="px-2 py-1 tabular-nums text-[var(--muted)]">{e.exitDate}</td>
+                                        <td className="px-2 py-1 text-right tabular-nums">{e.entryZ}</td>
+                                        <td className="px-2 py-1 text-right tabular-nums">{e.exitZ}</td>
+                                        <td className="px-2 py-1 text-right tabular-nums">{e.maxAdverseZ}</td>
+                                        <td className="px-2 py-1 text-right tabular-nums">{e.holdDays}</td>
+                                        <td className="px-2 py-1">
+                                          <span className={`rounded px-1 text-[10px] ${e.reverted ? "bg-emerald-500/15 text-emerald-500" : e.exitReason === "协整破裂止损" ? "bg-rose-500/15 text-rose-500" : "bg-[var(--border)] text-[var(--muted)]"}`}>{e.exitReason}</span>
+                                        </td>
+                                        <td className={`px-2 py-1 text-right tabular-nums ${e.legReturnPct > 0 ? "text-emerald-500" : "text-rose-500"}`}>{fmtPct(e.legReturnPct)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <p className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-xs text-[var(--muted)]">{cal.note}</p>
         </div>
       )}
     </div>
