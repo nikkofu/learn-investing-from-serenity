@@ -15,6 +15,7 @@ const LINKS = [
   { href: "/mining", label: "智能挖掘" },
   { href: "/backtest", label: "回测" },
   { href: "/momentum", label: "动量轮动" },
+  { href: "/compare", label: "横向对比" },
   { href: "/arb", label: "套利雷达" },
   { href: "/alerts", label: "盘中盯盘" },
   { href: "/strategies", label: "策略市场" },

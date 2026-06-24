@@ -4,6 +4,28 @@
 
 ---
 
+## [0.37.0] - 2026-06-24
+
+> **多标的横向对比 / 布局持久化**。§5.2-C：把任意一组标的拉到同一张表里横向对比——实时行情 + 横截面动量因子（与 `/momentum` 同口径 `scoreCrossSection`），逐列按**截面百分位**着色（绿优红劣，一眼看出谁强谁弱），可点表头排序，并叠加**归一化价格走势**（取所有标的公共交易日窗口、基点统一归 100，剔除价格量纲差异后直观比强弱）。再把「对比哪些标的 + 显示哪些列 + 列序 + 排序方向」沉淀为命名**对比视图**一键复原 / 切换。全部复用既有 `.data/` JSON 落盘（`mkdir -p` + 原子 `writeFile`），零新依赖；产物为研究信号、非投资建议。
+
+### 新增：对比计算 + 视图持久化层
+- `src/lib/compare.ts`：
+  - `COMPARE_COLUMNS`：11 列指标目录（现价 / 今日涨跌 / 换手率 + 近1/3/6月、12-1动量、年化波动、风险调整、趋势、合成动量分），每列带 `unit`（格式化）与 `better`（着色方向：1=越大越优、-1=越小越优、0=中性不着色）。服务端按此算值、前端按此渲染/选列，单一事实源避免两端漂移。
+  - `percentile(values, better)`：横截面百分位映射到 `[0,1]`（并列取平均名次，`null` 不参与不着色，`better=-1` 反向，`better=0` 全 `null`）—— 着色与排序的统一口径。
+  - `normalizeCodes` / `normalizeColumns`：去重、保序、合法性校验（6 位代码 / 合法列键），空输入回退默认列。
+  - 视图持久化 → `.data/compare-views.json`（仿 `watchlist.ts` / `paperTrades.ts` 原子写）：`CompareView{codes,columns,sortKey,sortDir}` 即「对比集 + 布局」；`createView` / `updateView` / `deleteView` / `listViews`，`sanitizeLayout` 统一清洗。
+
+### 新增：API 路由
+- `src/app/api/compare/route.ts`（`dynamic = "force-dynamic"`，`maxDuration=300`）：`POST {codes,names?,limit?,chartDays?}` 批量取日 K（`getKlinesBatch`）+ 实时行情（`getQuotesFailover`）→ `scoreCrossSection` 合成动量因子 → 逐列算截面百分位（着色）→ `buildNormalizedSeries` 取公共交易日最后 N 根、基点归 100 输出叠加序列。单次最多 30 只，超限/无合法代码返 4xx。`GET` 返回列目录与默认参数。
+- `src/app/api/compare/views/route.ts`（`force-dynamic`）：`GET` 列出视图；`POST` 新建（无 id）/ 更新（带 id）；`DELETE ?id=` 删除。
+
+### 新增：UI 接入
+- `src/app/compare/page.tsx`「多标的横向对比」：代码输入框（复用 `PoolControls` 载入/存为股票池）+ 可勾选显示列 + 「开始对比」；对比表按截面百分位热力着色、点表头切换排序列/方向、每行 `StockLink` + `FavoriteButton`；纯 SVG **归一化走势叠加图**（图例可点选隐藏单只、显示各标的区间涨跌幅）；顶部「已存对比视图」一键切换 + 「存为 / 更新对比视图」。
+- `src/components/Nav.tsx`：新增「横向对比」入口（置于「动量轮动」之后）。
+
+### 质量门禁
+- `tsc --noEmit` 0 error；改动/新增 5 文件 `eslint` 0 error / 0 warning；`next build` 通过，新路由 `/compare`、`/api/compare`、`/api/compare/views` 均已注册。真实行情功能级校验（600519/000858/601318）：`scoreCrossSection` 合成分 ∈ [0,1]；近3月收益 `[-13.14%, -13.28%, -26.23%]` → 截面百分位 `[1, 0.5, 0]`（越大越优）正确；视图 CRUD（建/列/删）落盘正常，测试数据已清理。
+
 ## [0.36.0] - 2026-06-24
 
 > **配对纸面交易 / 持仓跟踪**。§5.2-B：把 v0.34「沉淀策略」与 v0.33「实时行情」打通——对已验证的协整配对一键建「纸面仓」前向跟踪，记录开平流水、盯市实时盈亏、统计「回归达成率」。与 v0.34 沉淀策略（事后校准统计「历史能不能信」）互补：这是「现在跟一笔、看价差回归到底兑不兑现」。P&L 走 `costs.ts` 既有 A 股成本模型（佣金 / 印花税 / 过户费 / 滑点），全程纯多头、非投资建议，零新依赖。
