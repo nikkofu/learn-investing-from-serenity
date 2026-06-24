@@ -18,6 +18,13 @@ import {
   runGridMeanReversionBacktest,
   type BacktestResult,
 } from "./quant";
+import {
+  runRsiReversionV1,
+  runMacdZeroTrendV1,
+  runBollSqueezeV1,
+  runFibKdjPullbackV1,
+  runConfluenceV1,
+} from "./indicatorStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -151,6 +158,61 @@ const STRATEGIES: Strategy[] = [
       tags: ["mean-reversion", "grid", "regime-gated"],
     },
     run: (candles) => runGridMeanReversionBacktest(candles),
+  },
+  {
+    meta: {
+      id: "confluence-v1",
+      name: "多指标共振（旗舰·指标组合）",
+      version: "1.0",
+      description:
+        "对标 TradingView「七个值得尝试的指标」的旗舰组合策略，直接回应原文反复强调的「任何单一指标都应与其他指标结合使用」。复用本项目 computeResonance 多指标共振扫描（MACD 金叉 / RSI 超卖修复 / KDJ 低位金叉 / 触布林下轨反抽 / 放量上涨），要求 ≥3 个指标同向共振且 MA60 趋势闸门通过才入场——把原文 7 指标里的 5 个（MACD/RSI/随机指标/布林/成交量）拧成一股绳，单指标噪声被多指标一致性显著抑制。离场：≥2 指标看跌共振翻空，或 ATR(14) 自适应跟踪止损（回撤距离随个股波动伸缩，不猜顶）。纯多头、含双边手续费。",
+      tags: ["indicator", "confluence", "multi-indicator", "trend-filter", "atr-stop", "tradingview"],
+    },
+    run: (candles) => runConfluenceV1(candles),
+  },
+  {
+    meta: {
+      id: "rsi-reversion-v1",
+      name: "RSI 超卖回归（趋势过滤）",
+      version: "1.0",
+      description:
+        "对标原文「相对强弱指标 RSI」。比裸口径「RSI<30 即买」更优：A 股单边下跌里 RSI 会长期钝化在 30 以下、裸抄接飞刀，故①只认 RSI 上穿 30 的修复瞬间（动量真回头）；②叠加 MA60 趋势闸门，仅在「价在 MA60 上或 MA60 近 20 日不下行」时入场，过滤确认下行段；③离场 = RSI 高位回落破 70 落袋 / 跌破 MA20 认错 / ATR(14) 自适应跟踪止损。纯多头、含双边手续费。",
+      tags: ["indicator", "rsi", "mean-reversion", "trend-filter", "atr-stop", "tradingview"],
+    },
+    run: (candles) => runRsiReversionV1(candles),
+  },
+  {
+    meta: {
+      id: "macd-zero-trend-v1",
+      name: "MACD 零轴上金叉趋势跟随",
+      version: "1.0",
+      description:
+        "对标原文「移动平均线收敛/发散 MACD」。比裸口径「一金叉就买」更优：震荡市里 DIF/DEA 在零轴下方反复缠绕、假金叉频发，故①只认零轴之上（DIF>0，已处多头能量区）的金叉；②叠加 MA60 上行闸门 + 放量确认（5 日量能>20 日 1.2 倍）；③离场 = MACD 死叉 / 跌破 MA20 / ATR(14) 自适应跟踪止损。纯多头、含双边手续费。",
+      tags: ["indicator", "macd", "trend", "trend-filter", "atr-stop", "tradingview"],
+    },
+    run: (candles) => runMacdZeroTrendV1(candles),
+  },
+  {
+    meta: {
+      id: "boll-squeeze-v1",
+      name: "布林挤压突破",
+      version: "1.0",
+      description:
+        "对标原文「布林带」。比裸口径「触下轨买/触上轨卖」（均值回归口径，在单边趋势里触下轨抄底会被走轨反复埋）更优：反向取用布林带的波动率属性做动量——①先识别挤压（带宽处于近 100 日低 40 分位，波动收敛=变盘前夜）；②挤压后收盘放量向上突破上轨=选择方向向上，追突破；③跌破中轨(MA20) 离场 + ATR(14) 自适应跟踪止损。与本项目「网格·均值回归」（箱体低吸高抛）形成趋势/震荡互补而非重复。纯多头、含双边手续费。",
+      tags: ["indicator", "bollinger", "volatility", "breakout", "atr-stop", "tradingview"],
+    },
+    run: (candles) => runBollSqueezeV1(candles),
+  },
+  {
+    meta: {
+      id: "fib-kdj-pullback-v1",
+      name: "斐波那契回踩 + KDJ 低位金叉",
+      version: "1.0",
+      description:
+        "一策略同时覆盖原文「斐波那契回撤」与「随机指标(KDJ)」两项。比原文「画回撤线肉眼找支撑」（无趋势前提、无入场触发）更优：①只在上升趋势中用（MA60 近 20 日上行），顺势回踩才有意义；②自动取近 40 日波段低→高算 38.2%~61.8% 黄金回撤区；③价回踩进该区且 KDJ 低位金叉（K 上穿 D 且 D<45）企稳才买，用随机指标做斐波那契支撑的二次确认；④目标看回波段高点，跌破 61.8% 认结构破位止损 + KDJ 高位死叉止盈 + ATR(14) 自适应跟踪止损。纯多头、含双边手续费。",
+      tags: ["indicator", "fibonacci", "kdj", "stochastic", "pullback", "trend-filter", "atr-stop", "tradingview"],
+    },
+    run: (candles) => runFibKdjPullbackV1(candles),
   },
   {
     meta: {

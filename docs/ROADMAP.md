@@ -1,7 +1,7 @@
 # 路线图与交接文档 / Roadmap & Handoff
 
 > 本文档面向**未来新开 session 的交接**。读完应能独立接手本项目的开发、发版与后续路线。
-> 最后更新：随 v0.39.0（2026-06-24）。当前版本 **v0.39.0**，分支 `main`。
+> 最后更新：随 v0.40.0（2026-06-24）。当前版本 **v0.40.0**，分支 `main`。
 
 ---
 
@@ -173,8 +173,22 @@
 
 ---
 
+## 7.5 经典技术指标策略组（对标 TradingView「七个值得尝试的指标」）
+
+> 研读 CMC Markets《七个值得尝试的 TradingView 指标》（RSI / 移动均线 / MACD / 布林带 / 斐波那契回撤 / 随机指标(KDJ) / 成交量）后，结合本项目既有指标库（`indicators.ts`）、回测证明引擎（`/backtest/strategy` 带 z 检验 / PSR / DSR / Purged-CV）与**带版本号的策略注册表**（`strategies.ts`），落地 5 个「比原文裸口径更优」的策略。原文核心观点是「**任何单一指标都应与其他指标结合使用**」，故每个策略都在裸指标上叠加：①MA60 趋势闸门（避开 A 股单边下跌接飞刀）；②多重确认（零轴 / 放量 / 低位金叉企稳）；③ATR(14) 自适应跟踪止损（回撤随个股波动伸缩，不猜顶）。全部**纯多头、A 股主板、含双边手续费**，各带独立 id+版本号便于迭代。新增 `src/lib/indicatorStrategies.ts`，登记进 `strategies.ts` 即**自动接入** `/backtest/strategy` 下拉、证明引擎与 `/analyze`，零新依赖。
+
+- [x] **v0.40.0** 5 个指标策略（均 `@1.0`）：
+  - `confluence-v1`「多指标共振（旗舰）」：复用 `computeResonance`，要求 ≥3 指标（MACD/RSI/KDJ/布林/量能）同向共振 + MA60 闸门才入场，直接回应原文「指标需组合」。
+  - `rsi-reversion-v1`「RSI 超卖回归（趋势过滤）」：只认 RSI 上穿 30 的修复瞬间 + MA60 闸门，离场 RSI 破 70 / 跌破 MA20 / ATR 止损。
+  - `macd-zero-trend-v1`「MACD 零轴上金叉趋势跟随」：只认零轴之上金叉 + MA60 上行 + 放量确认，滤掉震荡假金叉。
+  - `boll-squeeze-v1`「布林挤压突破」：识别带宽近 100 日低 40 分位的挤压后放量突破上轨（动量口径，与既有「网格·均值回归」趋势/震荡互补）。
+  - `fib-kdj-pullback-v1`「斐波那契回踩 + KDJ 低位金叉」：上升趋势中回踩 38.2%~61.8% 黄金区 + KDJ 低位金叉企稳，一策略覆盖原文「斐波那契」与「随机指标」两项。
+  - 门禁全绿（tsc 0 error、改动文件 eslint 0 error、build 过 + 注册表 5 策略自动接入）；真实行情功能级校验 4 股 × 5 策略全 OK（纯多头 shares>0、买卖配对、无 NaN/Infinity、下行样本里多数跑赢买入持有）。
+
+---
+
 ## 7. 新 session 接手 checklist
 1. 读本文档 §1（约束）+ §2（工作流）。向用户索取本机仓库路径与桥接隧道信息（私密、不入库），确认桥接能连通本机仓库。
-2. `git rev-parse --is-shallow-repository`，必要时 `--unshallow`；确认 `git status` 干净、HEAD=origin/main、最新 tag 与 `package.json` version 一致（当前 v0.39.0）。
+2. `git rev-parse --is-shallow-repository`，必要时 `--unshallow`；确认 `git status` 干净、HEAD=origin/main、最新 tag 与 `package.json` version 一致（当前 v0.40.0）。
 3. 接新需求前先确认是否触碰 §1/§5.3 的约束；触碰则先与用户对齐再动手。
 4. 按 §2.4 自动发版（已获授权），中文消息走消息文件，门禁全绿后推 main + tag。

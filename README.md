@@ -14,7 +14,15 @@
 
 ---
 
-## 🆕 v0.39.0 亮点
+## 🆕 v0.40.0 亮点
+
+*   **经典技术指标策略组 · 对标 TradingView「七个值得尝试的指标」**：研读 CMC Markets《七个值得尝试的 TradingView 指标》（RSI / 移动均线 / MACD / 布林带 / 斐波那契回撤 / 随机指标(KDJ) / 成交量）后，结合本项目既有指标库（`indicators.ts`）、回测**证明引擎**（`/backtest/strategy` 带 z 检验 / PSR / DSR / Purged-CV）与**带版本号的策略注册表**（`strategies.ts`），落地 **5 个「比原文裸口径更优」的策略**（新增 `src/lib/indicatorStrategies.ts`，均带独立 `id@1.0` 便于迭代，登记即自动接入回测下拉、证明引擎与 `/analyze`）。原文核心观点是「**任何单一指标都应与其他指标结合使用**」——故每个策略都在裸指标上叠加 ①**MA60 趋势闸门**（避开 A 股单边下跌接飞刀）② **多重确认**（零轴 / 放量 / 低位金叉企稳）③ **ATR(14) 自适应跟踪止损**（回撤随波动伸缩、不猜顶）：
+    *   `confluence-v1`「多指标共振（旗舰）」——`computeResonance` 要求 **≥3 指标**（MACD/RSI/KDJ/布林/量能）同向共振 + MA60 闸门，直接回应「指标需组合」。
+    *   `rsi-reversion-v1`「RSI 超卖回归（趋势过滤）」——只认 RSI **上穿 30** 的修复瞬间 + MA60 闸门。
+    *   `macd-zero-trend-v1`「MACD 零轴上金叉趋势跟随」——只认**零轴之上**金叉 + 放量确认，滤掉震荡假金叉。
+    *   `boll-squeeze-v1`「布林挤压突破」——挤压（带宽近 100 日低 40 分位）后**放量突破上轨**追动量，与既有「网格·均值回归」趋势/震荡互补。
+    *   `fib-kdj-pullback-v1`「斐波那契回踩 + KDJ 低位金叉」——上升趋势中回踩 **38.2%~61.8% 黄金区** + KDJ 低位金叉企稳，一策略覆盖原文「斐波那契」与「随机指标」两项。
+    *   全部**纯多头、A 股主板、含双边手续费、零新依赖**，三关全绿；真实行情 4 股 × 5 策略 = 20 跑全 OK（纯多头、无 NaN、下行样本里多数跑赢买入持有，体现防守性而非过拟合堆收益）。
 
 *   **§6 诚实边界 · 统一口径（Single Source of Truth）**：把全站此前散落在各页面与 API（`note` 字段）里**手写**的「非投资建议 / 统计信号 / 不代表未来 / 含市场 β 自担风险 / AI 可能有误」等免责与风险边界文案，收敛到**唯一可信源** `src/lib/disclaimers.ts`（5 个规范导出：`NFA` / `ARB_BOUNDARY` / `BACKTEST_BOUNDARY` / `FUNDAMENTALS_BOUNDARY` / `AI_BOUNDARY`，纯字符串、无 React 依赖，服务端与客户端皆可引用），并新增统一渲染组件 `src/components/Disclaimer.tsx`（`<Disclaimer variant="..." />`，统一样式的标准免责注脚）。`/analyze`、`/arb`、`/momentum`、`/compare`、`/paper`、`/scanner`、`/backtest*`、`/alerts`、`/mining`、全局页脚与 metadata，以及 `/api/{fundamentals,compare,paper,momentum,arb,backtest,map}` 等 note 字段一律改为引用同一份常量，**杜绝同一句免责在不同页面措辞漂移**。**纯文案收敛、零业务逻辑改动、零新依赖**，三关全绿（type-check / lint 0 error + build 通过）。
 
