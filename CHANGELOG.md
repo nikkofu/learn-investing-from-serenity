@@ -4,6 +4,36 @@
 
 ---
 
+## [0.31.0] - 2026-06-24
+
+> **横截面动量 / 行业轮动 · 纯多头组合回测（不做空）**。在已有组合回测引擎之上补一套**多因子动量打分**：对 A 股主板个股做横截面排名，合成 0~1 综合动量分，并把成分股因子聚合到板块做**行业轮动**信号；两套打分都包成 `PortfolioScorer` 注入既有引擎，每 N 日等权再平衡持有 top-K，**全程只买不卖空（纯多头）**。本版只新增打分逻辑与 API/UI，不改动 `portfolioBacktest.ts` 回测内核与 v0.30 既有功能。
+
+### 新增：横截面动量 / 行业轮动打分引擎
+- `src/lib/momentum.ts`：
+  - `computeMomentumFactors(history)` —— 从单只个股日 K 抽取 7 个因子：近 1/3/6 月收益（`r1m`/`r3m`/`r6m`，W=20/60/120）、12-1 跳月动量（`skip`，250 日收益剔除近 20 日反转）、年化波动率（`vol`）、风险调整收益（`riskAdj`=r3m/vol）、趋势（`trend`，收盘相对均线偏离）；历史不足 `MIN_BARS=61` 根返回 `null` 不参与。
+  - `scoreCrossSection(view, weights)` —— 对 6 个方向性因子**逐因子横截面排名归一**到 [0,1]，按 `MomentumWeights`（默认 r3m 0.3 / r6m 0.25 / r1m 0.15 / skip·riskAdj·trend 各 0.1）加权合成 `composite`，按综合分降序返回 `ScoredStock[]`。
+  - `momentumScorer(weights)` —— 包成 `PortfolioScorer` 回调，每次再平衡返回综合分降序的代码列表（纯多头择优）。
+  - `rankSectors(sectors, weights, topStocksPerSector)` —— 全场统一打分后按板块聚合：板块均综合分 `avgComposite`、上涨宽度 `breadthPct`（近 3 月收益 > 0 占比）、近 3 月均收益 `avgR3mPct`、龙头股 `topStocks`，按 `avgComposite` 降序。
+  - `sectorRotationScorer({ codeToSector, topSectors, weights })` —— 每次再平衡先选动量最强的 top-K 板块，再在这些板块内按个股综合分择优返回（纯多头）。
+  - 新增导出类型 `MomentumWeights` / `MomentumFactors` / `ScoredStock` / `SectorConstituents` / `SectorMomentum` 与常量 `DEFAULT_MOMENTUM_WEIGHTS`。
+- `src/lib/sectorData.ts`：服务端读取板块元数据与「板块 → 成分股」映射，`loadSectorsWithStocks()` 走 `universe.ts` 主板纯净化口径过滤成分股、可选限定板块/单板块成分数。
+
+### 新增：API 路由
+- `src/app/api/momentum/rank/route.ts`：`POST /api/momentum/rank` —— 传入代码池（经 `isExcluded` 主板纯净化过滤）拉日 K 打分，返回横截面动量榜。
+- `src/app/api/momentum/sectors/route.ts`：`GET/POST /api/momentum/sectors` —— 行业轮动信号，调 `loadSectorsWithStocks()` + `rankSectors()`，返回板块动量排名。
+- `src/app/api/momentum/backtest/route.ts`：`POST /api/momentum/backtest` —— 纯多头组合回测，`mode` 支持 `momentum`（个股动量）/`sectorRotation`（行业轮动），注入对应 scorer 到 `backtestPortfolioByCodes()`。
+
+### 新增：动量轮动页面
+- `src/app/momentum/page.tsx`：三个 Tab —— ①个股动量榜（代码池 → 综合分 + 7 因子表）②行业轮动信号（板块动量 + 宽度 + 近 3 月 + 龙头股）③纯多头回测（动量/行业轮动切换 → 净值曲线 SVG + 汇总卡 + 交易流水）。
+- `src/components/Nav.tsx`：导航新增「动量轮动」入口（`/momentum`）。
+
+### 诚实边界
+- 动量为样本内统计特征、会失效；回测含市场 β（纯多头非中性）。结果为研究信号，非投资建议。
+
+### ✅ 质量门禁
+- `tsc --noEmit` 0 error；`eslint`（改动文件 `momentum.ts`/`sectorData.ts`/`momentum/{rank,sectors,backtest}/route.ts`/`momentum/page.tsx`/`Nav.tsx`）0 error；`next build` 通过，`/api/momentum/{rank,sectors,backtest}` 与 `/momentum` 已注册。
+- 数据级校验（真实行情）：10 只主板票横截面打分 composite ∈ [0,1] 且降序 OK；个股动量纯多头回测 93 笔交易全部 shares>0（无做空）；8 板块 37 成分股行业轮动排名正常、行业轮动回测 206 笔交易全部纯多头 OK。
+
 ## [0.30.0] - 2026-06-24
 
 > **套利雷达「信号回测校准面板」**。把套利雷达从「只看当前开口」补上「历史能不能信」的一环：对候选池内**全部协整配对做全历史事后回测**，验证「每次 |z|≥入场阈开口就买入被低估那一只」这套**单边择时规则**历史上的真实表现——回归率、平均回归天数、单边净收益、胜率、最大逆向 z。回归率高·单边胜率高·逆向浅 ⇒ 当前 z 阈更可托付。本版纯属验证/分析层，不改动 v0.29.0 套利引擎本身。
