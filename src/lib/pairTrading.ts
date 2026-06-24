@@ -323,3 +323,139 @@ export function backtestPair(
     profitFactor: sumLoss > 0 ? Number((sumProfit / sumLoss).toFixed(2)) : (sumProfit > 0 ? Infinity : 0),
   };
 }
+
+// ───────────────────── 套利雷达（实时机会捕捉） ─────────────────────
+
+export interface ArbSignal {
+  pair: PairCandidate;
+  /** 价差当前 z 分数（基于最后一根滚动窗口）。 */
+  z: number;
+  /** 当前是否开口：long-spread=多A空B（价差偏低待回升），short-spread=空A多B（价差偏高待回落）。 */
+  side: "long-spread" | "short-spread";
+  /** 当前价差（log A - β·log B）。 */
+  spread: number;
+  /** 偏离绝对值（|z|），雷达排序主键之一。 */
+  deviation: number;
+  entryZ: number;
+  exitZ: number;
+  stopZ: number;
+  /** 是否已逼近/越过止损阈（协整可能破裂，风险高）。 */
+  nearStop: boolean;
+  /** 基于半衰期的预计回归天数：halfLife·log2(|z|/exitZ)，夹到 [1, maxHold]。 */
+  expectedRevertDays: number;
+  /** 该机会近一段的价差序列（供前端画 sparkline）。 */
+  spreadSeries: number[];
+  /** 对应日期序列（与 spreadSeries 等长）。 */
+  dateSeries: string[];
+  /** 信号成立的最后交易日。 */
+  asOf: string;
+  /** 综合分：|z| 偏离 × 协整强度（|adfT|），用于雷达排序。 */
+  rank: number;
+  /** 价差口径预估单次净收益%（z 回到 exitZ，扣 4 腿费）。 */
+  estNetPct: number;
+}
+
+/**
+ * 计算单个配对「当前」是否存在开口的套利机会（最后一根的滚动 z 偏离）。
+ * 与 backtestPair 同口径（同样的滚动窗口/价差定义），但只看最新一根：
+ *   |z| ≥ entryZ → 价差显著偏离，存在均值回归机会；否则返回 null（无开口）。
+ */
+export function currentArbSignal(
+  pair: PairCandidate,
+  aCandles: Candle[],
+  bCandles: Candle[],
+  opts: PairTradeOptions = {},
+): ArbSignal | null {
+  const lookback = opts.lookback ?? 60;
+  const entryZ = opts.entryZ ?? 2.0;
+  const exitZ = opts.exitZ ?? 0.5;
+  const stopZ = opts.stopZ ?? 3.5;
+  const fee = (opts.feeBps ?? 30) / 10000;
+  const maxHold = opts.maxHoldDays ?? 120;
+
+  const al = alignCloses(aCandles, bCandles);
+  const { dates, pa, pb } = al;
+  const n = dates.length;
+  if (n <= lookback) return null;
+
+  const spread: number[] = [];
+  for (let i = 0; i < n; i++) spread.push(Math.log(pa[i]) - pair.beta * Math.log(pb[i]));
+
+  const i = n - 1;
+  const win = spread.slice(i - lookback, i);
+  const d = describe(win);
+  if (d.std <= 1e-9) return null;
+  const z = (spread[i] - d.mean) / d.std;
+  const az = Math.abs(z);
+  if (az < entryZ) return null;
+
+  const side: "long-spread" | "short-spread" = z <= 0 ? "long-spread" : "short-spread";
+  const expectedRevertDays = Math.max(
+    1,
+    Math.min(maxHold, Math.round(pair.halfLifeDays * Math.log2(Math.max(az, exitZ + 1e-9) / exitZ))),
+  );
+  // 预估净收益：z 由当前回到 exitZ，价差变化 ≈ (|z|-exitZ)·std；扣 4 腿手续费。
+  const grossPct = (az - exitZ) * d.std;
+  const estNetPct = Number(((grossPct - 4 * fee) * 100).toFixed(2));
+  const tail = Math.min(lookback, 90);
+
+  return {
+    pair,
+    z: Number(z.toFixed(2)),
+    side,
+    spread: Number(spread[i].toFixed(4)),
+    deviation: Number(az.toFixed(2)),
+    entryZ,
+    exitZ,
+    stopZ,
+    nearStop: az >= stopZ,
+    expectedRevertDays,
+    spreadSeries: spread.slice(n - tail).map((x) => Number(x.toFixed(4))),
+    dateSeries: dates.slice(n - tail),
+    asOf: dates[i],
+    rank: Number((az * Math.abs(pair.adfT)).toFixed(2)),
+    estNetPct,
+  };
+}
+
+export interface ArbRadarResult {
+  universeSize: number;
+  pairsTested: number;
+  cointegratedCount: number;
+  /** 当前开口的套利机会（|z|≥entryZ），按综合分降序。 */
+  signals: ArbSignal[];
+  asOf: string | null;
+  note: string;
+}
+
+/**
+ * 套利雷达：在候选股票池里全两两协整扫描，挑出「当前正开口」的价差机会并排序。
+ * 这是把样本内研究引擎升级为实时捕捉工具——只报当下可行动的偏离，附方向/进出止损/预计回归天数。
+ */
+export function scanArbRadar(
+  candles: Record<string, Candle[]>,
+  opts: { find?: PairFindOptions; trade?: PairTradeOptions; maxSignals?: number } = {},
+): ArbRadarResult {
+  const codes = Object.keys(candles);
+  const pairs = findCointegratedPairs(candles, opts.find);
+  const signals: ArbSignal[] = [];
+  for (const p of pairs) {
+    const sig = currentArbSignal(p, candles[p.a], candles[p.b], opts.trade);
+    if (sig) signals.push(sig);
+  }
+  signals.sort((x, y) => y.rank - x.rank);
+  const limited = signals.slice(0, opts.maxSignals ?? 50);
+  let asOf: string | null = null;
+  for (const cs of Object.values(candles)) {
+    const last = cs.length ? cs[cs.length - 1].date : null;
+    if (last && (!asOf || last > asOf)) asOf = last;
+  }
+  return {
+    universeSize: codes.length,
+    pairsTested: (codes.length * (codes.length - 1)) / 2,
+    cointegratedCount: pairs.length,
+    signals: limited,
+    asOf,
+    note: "仅列出当前价差已开口（|z|≥入场阈）的协整配对机会，按 |z|×协整强度排序。预计回归天数=半衰期·log2(|z|/出场阈)。A股融券受限，纯多空难落地，请优先选两融/ETF 可对冲品种；收益为价差口径、已扣双边成本估算，仅供研究。",
+  };
+}

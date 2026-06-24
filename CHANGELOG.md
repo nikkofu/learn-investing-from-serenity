@@ -4,6 +4,26 @@
 
 ---
 
+## [0.27.0] - 2026-06-23
+
+> **统计套利雷达 StatArb Radar（专业量化套利捕捉 · Phase 1）**。把既有 `pairTrading.ts` 协整引擎从「贴代码→跑回测」的研究工具，升级为「实时机会捕捉」工具：在候选股票池里全两两做 Engle-Granger 协整检验，只报出**当前价差已开口**（|z|≥入场阈）的配对机会，按 **|z|×协整强度** 排序。
+
+### 新增：套利雷达引擎 / API / 页面
+- `src/lib/pairTrading.ts`：新增 `currentArbSignal(pair, aCandles, bCandles, opts)` —— 与 `backtestPair` 同口径（同滚动窗口/价差定义），只看最新一根的 z 偏离，输出方向（long-spread 多A空B / short-spread 空A多B）、进/出/止损 z 阈、`nearStop` 标记、半衰期推算的**预计回归天数** `halfLife·log2(|z|/exitZ)`、价差 sparkline 序列、双边成本后估算净收益 `estNetPct`、综合排序分 `rank=|z|×|adfT|`。
+- `src/lib/pairTrading.ts`：新增 `scanArbRadar(candles, opts)` —— 全两两协整扫描 + 实时开口筛选 + 排序，返回 `ArbRadarResult`。
+- `src/app/api/arb/radar/route.ts`：新增 `POST /api/arb/radar`（接股票池/相关性/z 阈，返回排序后的当前套利机会）。
+- `src/app/arb/page.tsx`：新增「套利雷达」页面（板块预设：白酒/银行/证券/新能源车链/医药，机会表含方向/z 偏离/预计回归/估算净收益/价差走势 sparkline）。
+- `src/components/Nav.tsx`：导航新增「套利雷达」入口（回测 与 策略市场 之间）。
+
+### 诚实边界
+- A 股融券受限，纯多空套利多数标的难实盘——页面/接口均如实标注，定位「信号 + 可行性验证」，优先两融/ETF 可对冲品种，收益为价差口径已扣双边成本估算，仅供研究，非投资建议。
+
+### ✅ 质量门禁
+- `tsc --noEmit` 0 error；`eslint`（新增 4 文件）0 error；`next build` 通过（`/arb`、`/api/arb/radar` 已注册）。
+- 数据级校验：白酒 8 票池，28 对检验出 2 协整对，均当前开口（600702-000568 z=2.26 short-spread 预计回归 44 日；002304-000596 z=1.54）。
+
+---
+
 ## [0.26.0] - 2026-06-23
 
 > **共振纳入成交量确认（量价配合）**。多指标共振扫描在 MACD/RSI/KDJ/BOLL 之外新增成交量维度：放量阳线（量 ≥ 1.5×近 5 日均量且收阳）作为做多确认、放量阴线作为做空确认——量是价的确认而非独立方向，放量印证同向指标、缩量不计，与 A 股「量价配合」常识一致。
