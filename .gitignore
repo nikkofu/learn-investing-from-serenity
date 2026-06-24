@@ -54,3 +54,8 @@ next-env.d.ts
 
 # tmp directory
 tmp/
+
+# session transcripts / 隐私会话记录（不入库）
+*.ndjson
+session-transcript.ndjson
+CLAUDE.local.md

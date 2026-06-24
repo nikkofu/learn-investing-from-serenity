@@ -25,4 +25,4 @@
 * **发布版本流程**：在发版前需先升级 `package.json` 版本号，然后在 `CHANGELOG.md` 记录详细更新条目，编译打包通过后推 tagged 标签。
 
 ---
-*关联开发代理规则请参阅 [AGENTS.md](file:///Users/REDACTED/Documents/WORK/ai/learn-investing-from-serenity/AGENTS.md)*
+*关联开发代理规则请参阅项目根目录下的 `AGENTS.md`。*
