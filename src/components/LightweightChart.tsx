@@ -320,19 +320,23 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
 
     // 策略图层：TradingView 复刻策略叠加（方向线，A 股配色多头红/空头绿，翻转处断开；翻多/翻空标记在 paint 中统一打）
     if (tvLayers) {
-      const stSeries = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+      // 双线着色（多头红 / 空头绿）：各自只在对应方向上有值、其余置空白。
+      // 不依赖 lightweight-charts v5 线序列的「逐点色」（实测 v5 不渲染逐点 color，导致图层不可见），改用两条底色线保证清晰可见。
+      const stUp = chart.addSeries(LineSeries, { color: UP, lineWidth: 3, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+      const stDn = chart.addSeries(LineSeries, { color: DOWN, lineWidth: 3, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
       paintersRef.current.push((vc) => {
-        const data: (LineData<Time> | WhitespaceData<Time>)[] = [];
+        const upData: (LineData<Time> | WhitespaceData<Time>)[] = [];
+        const dnData: (LineData<Time> | WhitespaceData<Time>)[] = [];
         for (let i = 0; i < vc.length; i++) {
+          const t = toTime(vc[i].date);
           const v = tvLayers.line[i];
           const d = tvLayers.dir[i];
-          // 方向翻转处断开线段（避免画出从下方跳到上方的斜线）
-          const flip = i > 0 && d !== 0 && tvLayers.dir[i - 1] !== 0 && d !== tvLayers.dir[i - 1];
-          if (flip) { data.push({ time: toTime(vc[i].date) }); continue; }
-          if (v == null || !Number.isFinite(v)) continue;
-          data.push({ time: toTime(vc[i].date), value: v, color: d === 1 ? UP : DOWN });
+          if (v == null || !Number.isFinite(v) || d === 0) { upData.push({ time: t }); dnData.push({ time: t }); continue; }
+          if (d === 1) { upData.push({ time: t, value: v }); dnData.push({ time: t }); }
+          else { dnData.push({ time: t, value: v }); upData.push({ time: t }); }
         }
-        stSeries.setData(data);
+        stUp.setData(upData);
+        stDn.setData(dnData);
       });
 
       // 当前交易计划（R 倍数目标）：若末根仍为多头，以最近一次翻多价为入场、Supertrend 线为止损，
@@ -352,7 +356,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             { price: entry + 3 * r, color: UP, style: LineStyle.Dashed, title: "T3 · 3R" },
           ];
           for (const ln of lines) {
-            stSeries.createPriceLine({ price: ln.price, color: ln.color, lineWidth: 1, lineStyle: ln.style, axisLabelVisible: true, title: ln.title });
+            stUp.createPriceLine({ price: ln.price, color: ln.color, lineWidth: 1, lineStyle: ln.style, axisLabelVisible: true, title: ln.title });
           }
         }
       }
