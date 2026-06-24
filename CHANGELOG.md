@@ -4,6 +4,28 @@
 
 ---
 
+## [0.43.0] - 2026-06-24
+
+> **K 线图买卖策略从「最旧 v1」升级到旗舰 v7 + Pro 画布可切换买卖引擎（含 GBB）+ 从回测页点进自动叠加 TradingView 风格策略图层**。修复「为什么大趋势启动前没买点、半山腰就卖飞」的根因，并打通「从 GBB 回测点个股 → 图表自动呈现 Supertrend 复刻图层」。**零新依赖**。
+
+### 修复：`/chart` 买卖标记一直用「最旧 v1」固定 35% 止盈，导致卖飞 + 错过主升浪
+- 根因：`src/app/api/market/chart-data/route.ts` 写死 `runChokepointMomentumBacktest(candles, 70)`（瓶颈动量 **v1**，固定 +35% 止盈、且买入要求贴近主力成本线），而 `/strategies` 榜单与 `/backtest/strategy` 早已用旗舰 **v7**。结果图表上的 B/S 是全仓库最旧的策略：大趋势股 +35% 一刀切、强势中又因「价格远离成本线」给不出买点，于是完美错过主升浪（601869：v1 累计 +102.9%，远逊买入持有 +1576.8%）。
+- 修法：路由改为 `runAllStrategies(candles, { chokepointScore: 70, code })` 跑全部已登记策略，返回 `strategies` + `defaultStrategyId`，`backtest` 默认取旗舰 **v7 趋势跟随**（ATR 吊灯自适应跟踪止盈 + 金字塔分批建仓 + 前移/分批止盈 + 结构/箱体/天量止损，让利润奔跑而非固定止盈）。601869 实测：默认买卖收益 **102.9% → 337.6%**。
+- 支持 `?strategy=<id>`：从策略榜 /「多股票池实测」点进 `/chart` 时，路由按该 id 预选买卖引擎。
+
+### 新增：Pro 画布「买卖引擎」下拉 —— 图表上直接切换 B/S 所用策略
+- `src/app/chart/page.tsx`：Pro 画布工具条新增「买卖引擎」下拉，列出全部已登记策略（默认旗舰 v7）。切换即**客户端即时**用所选策略的 `trades` 重画主图 B/S，无需重新拉数（数据已随 `chart-data` 一次性返回）。
+- 选 **Modern Adaptive Supertrend [GBB]**（`tv-supertrend-adaptive-v1`）作买卖引擎时，601869 实测**一笔吃满主升浪 +1498.8%**（翻空才离场、绝不卖飞），与 v7 的波段口径形成对照——直观展示「趋势跟随 vs 分批止盈」的取舍。
+
+### 新增：`/chart?layer=<tvId>` —— 从回测页点个股自动叠加 TradingView 风格策略图层
+- 此前从 GBB 回测「分股票表现」点个股落到 `/chart`，但 Pro 画布「策略图层」下拉默认「关闭」，所以看不到任何 Supertrend 叠加（用户预期的 TV 风格效果缺失）。
+- 修法：① `LightweightChart` 新增 `initialTvStrategyId` 入参，`/chart` 读取 `?layer=` 自动启用对应 TV 复刻图层；② `StockLink` 新增 `chartStrategyId`/`chartLayerId`，`/backtest/strategy` 的个股链接按所跑策略带上 `strategy`+`layer`（TV 策略额外带 `layer`）；③ 图层视觉补齐到接近 TV：读数条加 **regime 效率% 读数**，末根仍为多头时按「最近翻多价=入场、Supertrend 线=止损」画 **入场 / 止损 / 1R~3R 目标横线**（对标 TV [GBB] 右侧 R 目标盒）。
+- 诚实提示：用户的 TV 截图里另叠了 `Cardwell RSI Trade Navigator [MarkitTick]` 指标，右侧盒子部分元素可能来自它；本项目复刻的是 **GBB 本体**的可视化，尽量贴近但不逐像素一致。长期持有的大赢家（如 601869，跟踪止损已远高于初始入场价）不画 1R~3R 目标横线（避免误导），仅显示真实的 Supertrend 跟踪止损线。
+
+### 质量门禁（本机执行）
+- `npm run type-check` 0 error；`npm run lint` 0 error（27 条均历史警告，本轮改动文件零新告警）；`npm run build` 通过，`/chart` 路由正常。
+- 真实行情实测（601869，360 根日线）：chart 默认买卖 v7 = 337.6%（12 笔）、GBB 买卖引擎 = 1498.8%（1 笔，仍持有）、GBB 图层末根多头·效率 65%。**零新依赖**。
+
 ## [0.42.0] - 2026-06-24
 
 > **修复「多股票池实测」按钮丢策略 + 回测页接入东财人气榜热门池**。从 `/strategies` 策略榜点「多股票池实测」过去回测页会丢掉所选策略、永远落到默认 v7.0——本轮修复；并新增实时「东财人气榜」热门股票池来源，弥补原静态清单覆盖偏少的问题。**零新依赖**。

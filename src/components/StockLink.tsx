@@ -10,16 +10,26 @@ export default function StockLink({
   name,
   className,
   newTab = false,
+  chartStrategyId,
+  chartLayerId,
 }: {
   code: string;
   name?: string;
   className?: string;
   /** 是否新标签页打开（列表页常用，避免丢失当前筛选）。 */
   newTab?: boolean;
+  /** K 线图买卖引擎策略 id（传给 /chart?strategy=，让图表默认用该策略画 B/S）。 */
+  chartStrategyId?: string;
+  /** K 线图策略叠加图层 id（传给 /chart?layer=，自动叠加 TV 复刻策略图层）。 */
+  chartLayerId?: string;
 }) {
   const valid = /^\d{6}$/.test(code);
   if (!valid) return <span className={className}>{name ?? code}</span>;
   const target = newTab ? { target: "_blank", rel: "noopener noreferrer" } : {};
+  const chartQs = [
+    chartStrategyId ? `&strategy=${encodeURIComponent(chartStrategyId)}` : "",
+    chartLayerId ? `&layer=${encodeURIComponent(chartLayerId)}` : "",
+  ].join("");
   return (
     <span className={`inline-flex items-center gap-1 ${className ?? ""}`}>
       <Link
@@ -31,7 +41,7 @@ export default function StockLink({
         {name ? `${name} ${code}` : code}
       </Link>
       <Link
-        href={`/chart?code=${code}`}
+        href={`/chart?code=${code}${chartQs}`}
         {...target}
         title="看 K 线图"
         aria-label="看 K 线图"

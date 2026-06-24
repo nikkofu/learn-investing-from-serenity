@@ -8,7 +8,8 @@ import QuantChart from "@/components/QuantChart";
 import LightweightChart from "@/components/LightweightChart";
 import RadarChart from "@/components/RadarChart";
 import BacktestReport from "@/components/BacktestReport";
-import { DEFAULT_MA_PARAMS, type MaStrategyParams, type BacktestResult } from "@/lib/quant";
+import { DEFAULT_MA_PARAMS, type MaStrategyParams, type BacktestResult, type TradeAction } from "@/lib/quant";
+import type { StrategyBacktest } from "@/lib/strategies";
 import type { PerformanceReport } from "@/lib/performance";
 import { DRAW_PRESETS, type ChartDrawing } from "@/lib/drawings";
 
@@ -85,6 +86,8 @@ function ChartInner() {
   const [drawing, setDrawing] = useState(false);
   const [drawErr, setDrawErr] = useState("");
   const [drawQ, setDrawQ] = useState("");
+  // Pro 画布的买卖引擎：可在图表上直接切换所用策略（默认跟随后端 ?strategy= / DEFAULT_STRATEGY_ID）。
+  const [proStrategyId, setProStrategyId] = useState("");
 
   async function runDraw(opts: { question?: string; preset?: string }) {
     const code = data?.quote.code || params.get("code");
@@ -168,7 +171,9 @@ function ChartInner() {
     setAiError("");
     
     // 同时并发发起行情基础数据与 AI 诊断请求，互不阻塞
-    const chartPromise = fetch(`/api/market/chart-data?code=${code}&period=${currentPeriod}&fq=${currentFq}`);
+    const urlStrategy = params.get("strategy")?.trim();
+    const stratQs = urlStrategy ? `&strategy=${encodeURIComponent(urlStrategy)}` : "";
+    const chartPromise = fetch(`/api/market/chart-data?code=${code}&period=${currentPeriod}&fq=${currentFq}${stratQs}`);
     const aiPromise = fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -364,6 +369,13 @@ function ChartInner() {
 
   const up = data ? data.quote.changePct >= 0 : true;
 
+  // 策略图层（?layer=）与 Pro 画布买卖引擎：图层自动叠加 TV 复刻策略；买卖标记按所选策略切换（客户端即时，无需重新拉数）。
+  const layerId = params.get("layer")?.trim() ?? "";
+  const proStrategies: StrategyBacktest[] = data?.quant?.strategies ?? [];
+  const activeProStrategyId = proStrategyId || data?.quant?.defaultStrategyId || "";
+  const proTrades: TradeAction[] =
+    proStrategies.find((s) => s.meta.id === activeProStrategyId)?.result.trades ?? data?.quant?.backtest?.trades ?? [];
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[var(--bg)] text-[var(--text)] font-sans overflow-hidden select-none">
       
@@ -511,6 +523,23 @@ function ChartInner() {
                     </button>
                   ))}
                 </div>
+                {chartView === "pro" && proStrategies.length > 0 && (
+                  <div className="flex items-center gap-1 ml-1" title="Pro 画布买卖标记所用策略；切换即按该策略重画 B/S（默认旗舰 v7 趋势跟随：ATR 跟踪止盈，不再固定 35% 卖飞）">
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono">买卖引擎</span>
+                    <select
+                      value={activeProStrategyId}
+                      onChange={(e) => setProStrategyId(e.target.value)}
+                      className="bg-[var(--inset)] border border-[var(--border)] text-[10px] font-bold tracking-wide text-[var(--text)] px-2 py-1 rounded-[1px] cursor-pointer focus:outline-none focus:border-[var(--accent)]"
+                    >
+                      {proStrategies.map((s) => (
+                        <option key={s.meta.id} value={s.meta.id}>
+                          {s.meta.name} v{s.meta.version}
+                          {s.meta.id === data.quant.defaultStrategyId ? " · 默认" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {chartView === "pro" && (
                   <span className="text-[9px] font-mono text-[var(--faint)] ml-1">筹码/投影/VRVP 请切回「经典 SVG」</span>
                 )}
@@ -563,10 +592,11 @@ function ChartInner() {
               {chartView === "pro" ? (
                 <LightweightChart
                   candles={data.quant.candles ?? []}
-                  trades={data.quant.backtest?.trades ?? []}
+                  trades={proTrades}
                   code={data.quote.code}
                   fq={fq}
                   drawings={drawings}
+                  initialTvStrategyId={layerId}
                 />
               ) : (
                 <QuantChart

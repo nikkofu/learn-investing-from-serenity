@@ -32,6 +32,8 @@ interface LightweightChartProps {
   code?: string;
   fq?: "qfq" | "hfq";
   drawings?: ChartDrawing[];
+  /** 初始策略图层 id（如从 ?layer= 进入时自动叠加 TV 复刻策略，""=关闭）。 */
+  initialTvStrategyId?: string;
 }
 
 // AI 画图叠加层配色（语义色，与蜡烛涨跌色区分开）
@@ -88,7 +90,7 @@ function maOf(candles: Candle[], period: number): (number | null)[] {
   return out;
 }
 
-export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [] }: LightweightChartProps) {
+export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], initialTvStrategyId = "" }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -105,7 +107,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [showBoll, setShowBoll] = useState(true);
   const [showResonance, setShowResonance] = useState(true);
   // 策略图层：选中的 TradingView 复刻策略 id（""=关闭）
-  const [tvStrategyId, setTvStrategyId] = useState("");
+  const [tvStrategyId, setTvStrategyId] = useState(initialTvStrategyId);
+  // 从 ?layer= 进入或外部切换标的时，跟随更新选中的策略图层（让「从回测页点进自动叠加」生效）。
+  useEffect(() => {
+    setTvStrategyId(initialTvStrategyId);
+  }, [initialTvStrategyId]);
   const [maOn, setMaOn] = useState<Record<string, boolean>>({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma250: false });
   const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string; st?: string } | null>(null);
 
@@ -149,9 +155,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       const d = tvLayers.dir[idx];
       const rg = tvLayers.regime[idx];
       const lv = tvLayers.line[idx];
+      const rv = tvLayers.regimeValue[idx];
       const dirTxt = d === 1 ? "多头" : d === -1 ? "空头" : "--";
       const rgTxt = rg === "trend" ? "趋势" : rg === "chop" ? "震荡" : "转折";
-      return `${dirTxt} · ${rgTxt}${Number.isFinite(lv as number) ? ` · 线 ${(lv as number).toFixed(2)}` : ""}`;
+      const effTxt = Number.isFinite(rv) ? ` · 效率 ${(rv * 100).toFixed(0)}%` : "";
+      return `${dirTxt} · ${rgTxt}${effTxt}${Number.isFinite(lv as number) ? ` · 线 ${(lv as number).toFixed(2)}` : ""}`;
     },
     [tvLayers, candles]
   );
@@ -326,6 +334,28 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
         }
         stSeries.setData(data);
       });
+
+      // 当前交易计划（R 倍数目标）：若末根仍为多头，以最近一次翻多价为入场、Supertrend 线为止损，
+      // 画出入场 / 止损 / 1R~3R 目标横线（对标 TV [GBB] 右侧的 R 目标盒，仅供研究、非投资建议）。
+      const lastIdx = candles.length - 1;
+      if (lastIdx >= 0 && tvLayers.dir[lastIdx] === 1) {
+        const upFlips = tvLayers.flips.filter((f) => f.dir === "up" && f.index <= lastIdx);
+        const entry = upFlips.length ? upFlips[upFlips.length - 1].price : NaN;
+        const stop = tvLayers.line[lastIdx];
+        if (Number.isFinite(entry) && stop != null && Number.isFinite(stop) && entry > stop) {
+          const r = entry - stop;
+          const lines: { price: number; color: string; style: LineStyle; title: string }[] = [
+            { price: entry, color: "#f59e0b", style: LineStyle.Solid, title: "入场" },
+            { price: stop, color: DOWN, style: LineStyle.Dashed, title: "止损" },
+            { price: entry + r, color: UP, style: LineStyle.Dashed, title: "T1 · 1R" },
+            { price: entry + 2 * r, color: UP, style: LineStyle.Dashed, title: "T2 · 2R" },
+            { price: entry + 3 * r, color: UP, style: LineStyle.Dashed, title: "T3 · 3R" },
+          ];
+          for (const ln of lines) {
+            stSeries.createPriceLine({ price: ln.price, color: ln.color, lineWidth: 1, lineStyle: ln.style, axisLabelVisible: true, title: ln.title });
+          }
+        }
+      }
     }
 
     // 副图振荡指标：各占独立窗格（分开显示，量纲互不干扰）

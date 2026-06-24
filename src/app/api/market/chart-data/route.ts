@@ -7,6 +7,7 @@ import {
   analyzeTechnicalPatterns,
   generatePriceProjection,
 } from "@/lib/quant";
+import { runAllStrategies, pickDefaultResult, DEFAULT_STRATEGY_ID, getStrategy } from "@/lib/strategies";
 
 export const dynamic = "force-dynamic";
 
@@ -40,12 +41,21 @@ export async function GET(req: Request) {
     const technical = analyzeTechnicalPatterns(candles, refPrice, chips);
     const projections = generatePriceProjection(candles, 70);
 
+    // 跑全部已登记策略（默认 70 中性瓶颈分），供图表「策略」下拉切换；默认展示与 /strategies 一致的旗舰策略（v7 趋势跟随：ATR 跟踪止盈 + 金字塔加仓，而非旧 v1 的固定 35% 止盈）。
+    // 支持 ?strategy=<id>：从策略榜 / 多股票池实测点进时，默认即选中该策略作为买卖引擎。
+    const requested = searchParams.get("strategy")?.trim();
+    const initialStrategyId = requested && getStrategy(requested) ? requested : DEFAULT_STRATEGY_ID;
+    const strategies = runAllStrategies(candles, { chokepointScore: 70, code });
+    const defaultBacktest = strategies.find((s) => s.meta.id === initialStrategyId)?.result ?? pickDefaultResult(strategies) ?? chokepointBacktest;
+
     return NextResponse.json({
       quote,
       stats,
       quant: {
         chips,
-        backtest: chokepointBacktest,
+        backtest: defaultBacktest,
+        strategies,
+        defaultStrategyId: initialStrategyId,
         backtests: {
           traditional: traditionalBacktest,
           chokepoint: chokepointBacktest,

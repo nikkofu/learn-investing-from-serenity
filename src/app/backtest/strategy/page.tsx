@@ -515,7 +515,7 @@ function StrategyBacktestInner() {
                 <tbody>
                   {result.perSymbol.map((s, i) => (
                     <tr key={i} className="border-t border-[var(--border)]">
-                      <td className="px-3 py-1.5 font-mono"><StockLink code={s.code} newTab /></td>
+                      <td className="px-3 py-1.5 font-mono"><StockLink code={s.code} newTab chartStrategyId={result.config.strategyId || undefined} chartLayerId={result.config.strategyId.startsWith("tv-") ? result.config.strategyId : undefined} /></td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{s.trades}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{s.trades ? `${s.winRatePct.toFixed(0)}%` : "—"}</td>
                       <td className={`px-3 py-1.5 text-right tabular-nums ${signClass(s.avgReturnPct)}`}>{s.trades ? fmtPct(s.avgReturnPct) : "—"}</td>
@@ -547,7 +547,7 @@ function StrategyBacktestInner() {
                 <tbody>
                   {result.trades.slice(0, 200).map((t, i) => (
                     <tr key={i} className="border-t border-[var(--border)]">
-                      <td className="px-3 py-1.5 font-mono"><StockLink code={t.code} newTab /></td>
+                      <td className="px-3 py-1.5 font-mono"><StockLink code={t.code} newTab chartStrategyId={result.config.strategyId || undefined} chartLayerId={result.config.strategyId.startsWith("tv-") ? result.config.strategyId : undefined} /></td>
                       <td className="px-3 py-1.5 tabular-nums text-[var(--faint)]">{t.buyDate}@{t.buyPrice.toFixed(2)}</td>
                       <td className="px-3 py-1.5 tabular-nums text-[var(--faint)]">{t.sellDate}@{t.sellPrice.toFixed(2)}</td>
                       <td className={`px-3 py-1.5 text-right tabular-nums ${signClass(t.returnPct)}`}>{fmtPct(t.returnPct)}</td>
