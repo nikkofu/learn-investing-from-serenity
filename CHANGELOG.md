@@ -4,6 +4,15 @@
 
 ---
 
+## [0.32.1] - 2026-06-24
+
+> **修复既存 lint error**：清掉全仓 `npm run lint` 唯一的 1 个 error，使 lint 全绿。
+
+### 修复
+- `src/app/mining/page.tsx`：`useEffect` 在 `fetchDailyStatus` 函数声明之前调用它，被较新的 `react-hooks` 规则判为 "Cannot access variable before it is declared"（运行时因函数声明提升本无影响）。把该 `useEffect` 下移到 `fetchDailyStatus` 声明之后，消除该 error。该问题自 v0.32 之前即存在、与 v0.32 无关。
+
+---
+
 ## [0.32.0] - 2026-06-24
 
 > **自定义股票池 + 收藏 + 持久化**。新增一套用户自建数据沉淀机制：可收藏个股、自建命名股票池（即「配对池」，scanner / momentum / arb 通用）、保存筛选参数集（命名快照，一键复用）。全部复用既有 `.data/` JSON 落盘机制（`fs/promises` + 原子写），零新依赖。并新增 `/watchlist`「自选 / 收藏」管理页，与 scanner / momentum / arb 各页双向打通（深链预填 + 一键存取）。

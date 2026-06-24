@@ -161,11 +161,6 @@ export default function MiningPage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [logs]);
 
-  useEffect(() => {
-    fetchDailyStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   function buildFilters(): Record<string, unknown> {
     const f: Record<string, unknown> = {
       minScore,
@@ -320,6 +315,11 @@ export default function MiningPage() {
       /* 静默：状态获取失败不阻断页面 */
     }
   }
+
+  useEffect(() => {
+    fetchDailyStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** 载入某日已存股票池到结果表。 */
   async function loadDaily(date?: string) {
