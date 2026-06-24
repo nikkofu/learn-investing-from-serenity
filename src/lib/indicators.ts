@@ -139,20 +139,22 @@ export interface ResonancePoint {
   /** 共振首次成立的 K 线下标（episode 的起点；连续共振只取上升沿一次）。 */
   index: number;
   dir: "bull" | "bear";
-  /** 命中同向指标数（2-4）。 */
+  /** 命中同向指标数（2-5，含成交量确认）。 */
   score: number;
   /** 命中的指标信号说明（用于悬停/依据）。 */
   reasons: string[];
 }
 
 /**
- * 多指标共振扫描：逐根检查 MACD/RSI/KDJ/BOLL 的同向信号，
+ * 多指标共振扫描：逐根检查 MACD/RSI/KDJ/BOLL + 成交量的同向信号，
  * 当同一窗口内 ≥minScore 个指标给出同向信号时，认定为「共振点」。
  * 信号口径（与 A 股券商软件常见用法一致）：
  *   MACD 金叉/死叉（DIF 上/下穿 DEA）
  *   RSI 超卖修复（上穿 30）/ 超买回落（下穿 70）
  *   KDJ 低位金叉（D<40 处 K 上穿 D）/ 高位死叉（D>60 处 K 下穿 D）
  *   BOLL 触下轨反抽 / 触上轨回落
+ *   成交量：放量阳线（量 ≥ 1.5×近 5 日均量且收阳）做多确认 / 放量阴线做空确认——
+ *           量是价的确认而非独立方向，放量印证同向指标，缩量背离则不计。
  * 用 2 根窗口聚合（信号很少恰好同根触发），并仅在 episode 上升沿输出一次，避免连续打标。
  */
 export function computeResonance(
@@ -171,7 +173,10 @@ export function computeResonance(
   const rsiBull = mk(), rsiBear = mk();
   const kdjBull = mk(), kdjBear = mk();
   const bollBull = mk(), bollBear = mk();
+  const volBull = mk(), volBear = mk();
   const fin = Number.isFinite;
+  const VOL_MA = 5;       // 均量窗口
+  const VOL_SURGE = 1.5;  // 放量阈值（≥1.5×均量）
 
   for (let i = 1; i < n; i++) {
     if (fin(macd.dif[i]) && fin(macd.dea[i]) && fin(macd.dif[i - 1]) && fin(macd.dea[i - 1])) {
@@ -188,6 +193,26 @@ export function computeResonance(
     }
     if (fin(boll.lower[i]) && fin(boll.lower[i - 1]) && closes[i - 1] <= boll.lower[i - 1] && closes[i] > boll.lower[i]) bollBull[i] = true;
     if (fin(boll.upper[i]) && fin(boll.upper[i - 1]) && closes[i - 1] >= boll.upper[i - 1] && closes[i] < boll.upper[i]) bollBear[i] = true;
+
+    if (i >= VOL_MA) {
+      let sum = 0;
+      let ok = true;
+      for (let j = i - VOL_MA; j < i; j++) {
+        const v = candles[j].volume;
+        if (!fin(v) || v <= 0) { ok = false; break; }
+        sum += v;
+      }
+      const vi = candles[i].volume;
+      if (ok && fin(vi) && sum > 0) {
+        const surge = vi >= (sum / VOL_MA) * VOL_SURGE;
+        if (surge) {
+          const up = candles[i].close > candles[i].open;
+          const down = candles[i].close < candles[i].open;
+          if (up) volBull[i] = true;
+          else if (down) volBear[i] = true;
+        }
+      }
+    }
   }
 
   const fired = (ev: boolean[], i: number) => ev[i] || (i > 0 && ev[i - 1]);
@@ -199,11 +224,13 @@ export function computeResonance(
     if (fired(rsiBull, i)) bull.push("RSI超卖修复");
     if (fired(kdjBull, i)) bull.push("KDJ低位金叉");
     if (fired(bollBull, i)) bull.push("触下轨反抽");
+    if (fired(volBull, i)) bull.push("放量上涨");
     const bear: string[] = [];
     if (fired(macdBear, i)) bear.push("MACD死叉");
     if (fired(rsiBear, i)) bear.push("RSI超买回落");
     if (fired(kdjBear, i)) bear.push("KDJ高位死叉");
     if (fired(bollBear, i)) bear.push("触上轨回落");
+    if (fired(volBear, i)) bear.push("放量下跌");
 
     let dir: "bull" | "bear" | null = null;
     if (bull.length >= minScore && bull.length > bear.length) dir = "bull";
