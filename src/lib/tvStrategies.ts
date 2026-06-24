@@ -73,9 +73,12 @@ const fin = Number.isFinite;
  *      减少约 60%，趋势读数不变、噪声大降。
  *   2) Adaptive distance（regime 自适应带宽）——用市场「自身近况」而非固定阈值判趋势/震荡：
  *      取效率比（Kaufman ER）在近 pctlWindow（默认 500）根里的分位 pr。干净趋势（pr 高）里加宽
- *      （trendGain 0.8）抗洗，震荡（pr 低）里也加宽（chopGain 0.5）防来回打脸；只有「转折」
- *      （pr≈0.5）才收紧到基准、让线灵敏。effMult = baseMult×(1 + trendGain·max(0,(pr−.5)/.5)
- *      + chopGain·max(0,(.5−pr)/.5))。
+ *      抗洗，震荡（pr 低）里也加宽防来回打脸；只有「转折」（pr≈0.5）才收紧到基准、让线灵敏。
+ *      effMult = baseMult×(1 + min(maxMultGain, trendGain·max(0,(pr−.5)/.5)+chopGain·max(0,(.5−pr)/.5)))。
+ *      ⚠️ 校准：原作口径 trendGain/chopGain 取 0.8/0.5，但 TradingView 实际渲染的 GBB 线≈3×ATR 紧贴
+ *      价格、阶梯抬升；为逐像素贴合 TV，本复刻把增益收紧到 0.25/0.15 并加 maxMultGain=0.25 上限
+ *      （最宽 1.25×base=3.75×ATR），避免跟踪线在强趋势里膨胀到 5~6×ATR 远离价格、看起来又平又低。
+ *      601869 校验：收紧后末根线 ≈454（TV≈465，吻合）。
  *   3) Adaptive period（实验性，默认关）——作者诚实声明无效，本复刻不实现。
  *
  * 诚实口径（沿用原作）：这是趋势「过滤器」而非择时系统，裸方向胜率≈48%（约等于抛硬币，因为
@@ -94,6 +97,7 @@ interface SupertrendParams {
   chopGain: number;       // 震荡加宽增益（默认 0.5）
   pctlWindow: number;     // 效率比分位窗口（默认 500）
   erPeriod: number;       // 效率比回看周期（默认 10）
+  maxMultGain: number;    // 自适应加宽相对 baseMult 的上限增益（默认 0.25 → 最宽 1.25×base）
 }
 
 const SUPERTREND_DEFAULTS: SupertrendParams = {
@@ -101,10 +105,11 @@ const SUPERTREND_DEFAULTS: SupertrendParams = {
   baseMult: 3,
   commitBuffer: 0.5,
   persistence: 1,
-  trendGain: 0.8,
-  chopGain: 0.5,
+  trendGain: 0.25,
+  chopGain: 0.15,
   pctlWindow: 500,
   erPeriod: 10,
+  maxMultGain: 0.25,
 };
 
 /**
@@ -169,7 +174,10 @@ export function computeAdaptiveSupertrend(
     if (!fin(pr)) return p.baseMult; // 分位未就绪时退化为经典固定乘数
     const trendStrength = Math.max(0, (pr - 0.5) / 0.5);
     const chopStrength = Math.max(0, (0.5 - pr) / 0.5);
-    return p.baseMult * (1 + p.trendGain * trendStrength + p.chopGain * chopStrength);
+    const gain = p.trendGain * trendStrength + p.chopGain * chopStrength;
+    // 收紧自适应带宽以贴合 TV 实际渲染（TV 的 GBB 线≈3×ATR 紧贴价格、阶梯抬升）：
+    // 增益限制在 maxMultGain 内，避免趋势里乘数膨胀到 5~6× 让跟踪线远离价格、看起来又平又低。
+    return p.baseMult * (1 + Math.min(gain, p.maxMultGain));
   };
   const regimeOf = (i: number): Regime => {
     const pr = erPctl[i];
@@ -278,7 +286,7 @@ const SUPERTREND_ADAPTIVE_V1: TvStrategy = {
     author: "goodBadBitcoin",
     source: "https://cn.tradingview.com/script/Wagz8RF1-Modern-Adaptive-Supertrend-GBB/",
     notes:
-      "复刻自 goodBadBitcoin 的 Modern Adaptive Supertrend [GBB]。在经典 Supertrend(ATR10×3) 上叠加两层现代化改造：①Commit filter 迟滞过滤——收盘越线需达 0.5×ATR 并保持 1 根才确认翻转（原作实测假翻转减少约 60%）；②regime 自适应带宽——用效率比(ER)近 500 根分位判趋势/震荡，趋势(×0.8)与震荡(×0.5)均加宽抗洗、仅转折处收紧让线灵敏。作者承认无效的「自适应周期」默认关、本复刻未实现。诚实口径（沿用原作）：趋势过滤器而非择时系统，裸方向胜率≈48%，价值在更干净的趋势读数与更低回撤而非抄顶摸底。回测为纯多头（翻多入场/翻空离场，翻空即止损不另加 ATR 止损），含双边手续费。",
+      "复刻自 goodBadBitcoin 的 Modern Adaptive Supertrend [GBB]。在经典 Supertrend(ATR10×3) 上叠加两层现代化改造：①Commit filter 迟滞过滤——收盘越线需达 0.5×ATR 并保持 1 根才确认翻转（原作实测假翻转减少约 60%）；②regime 自适应带宽——用效率比(ER)近 500 根分位判趋势/震荡，趋势与震荡两端加宽抗洗、仅转折处收紧让线灵敏（增益按 TV 实际渲染收紧至 0.25/0.15 并加 1.25×base 上限，使跟踪线≈3×ATR 紧贴价格、阶梯抬升——601869 末根线≈454 对 TV≈465）。作者承认无效的「自适应周期」默认关、本复刻未实现。诚实口径（沿用原作）：趋势过滤器而非择时系统，裸方向胜率≈48%，价值在更干净的趋势读数与更低回撤而非抄顶摸底。回测为纯多头（翻多入场/翻空离场，翻空即止损不另加 ATR 止损），含双边手续费。",
     tags: ["tradingview", "supertrend", "trend-follow", "adaptive", "regime-adaptive", "atr-stop", "reproduction"],
   },
   compute: (candles) => computeAdaptiveSupertrend(candles),
