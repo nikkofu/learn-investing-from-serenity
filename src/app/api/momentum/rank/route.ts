@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getKlinesBatch, HISTORY_LIMIT } from "@/lib/sources";
+import { getKlinesBatch, HISTORY_LIMIT, getQuotesFailover } from "@/lib/sources";
 import {
   scoreCrossSection,
   DEFAULT_MOMENTUM_WEIGHTS,
@@ -54,6 +54,17 @@ export async function POST(req: Request) {
 
   try {
     const klineMap = await getKlinesBatch(codes, limit, "baidu-first");
+
+    // 名称兜底：客户端未传或名称仍等于代码时，从基础库（实时行情，带缓存）补全
+    const resolved: Record<string, string> = { ...names };
+    const missing = codes.filter((c) => !resolved[c] || resolved[c] === c);
+    if (missing.length > 0) {
+      const quotes = await getQuotesFailover(missing);
+      for (const [c, q] of Object.entries(quotes)) {
+        if (q?.name) resolved[c] = q.name;
+      }
+    }
+
     const view = codes
       .map((code) => {
         const item = klineMap.get(code);
@@ -61,7 +72,7 @@ export async function POST(req: Request) {
         const clean = item.candles
           .filter((k) => k.close > 0 && k.open > 0 && k.high > 0 && k.low > 0)
           .sort((a, b) => (a.date < b.date ? -1 : 1));
-        return { code, name: names[code] ?? code, history: clean };
+        return { code, name: resolved[code] ?? code, history: clean };
       })
       .filter((v): v is { code: string; name: string; history: Candle[] } => v !== null);
 
