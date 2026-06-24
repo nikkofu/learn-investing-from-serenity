@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
+import PoolControls from "@/components/PoolControls";
 
 interface PairCandidate {
   a: string;
@@ -139,11 +141,20 @@ function StatCard({ label, value, cls }: { label: string; value: string; cls?: s
 }
 
 export default function ArbRadarPage() {
-  const [codesText, setCodesText] = useState(PRESETS[0].codes);
-  const [minCorrelation, setMinCorrelation] = useState(0.7);
-  const [entryZ, setEntryZ] = useState(2.0);
-  const [stopZ, setStopZ] = useState(3.5);
-  const [limit, setLimit] = useState(500);
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-sm text-[var(--muted)]">载入中…</div>}>
+      <ArbRadarInner />
+    </Suspense>
+  );
+}
+
+function ArbRadarInner() {
+  const params = useSearchParams();
+  const [codesText, setCodesText] = useState(params.get("codes")?.trim() || PRESETS[0].codes);
+  const [minCorrelation, setMinCorrelation] = useState(Number(params.get("minCorrelation")) || 0.7);
+  const [entryZ, setEntryZ] = useState(Number(params.get("entryZ")) || 2.0);
+  const [stopZ, setStopZ] = useState(Number(params.get("stopZ")) || 3.5);
+  const [limit, setLimit] = useState(Number(params.get("limit")) || 500);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RadarResult | null>(null);
@@ -327,6 +338,11 @@ export default function ArbRadarPage() {
           {error && <span className="text-sm text-red-500">{error}</span>}
           {calError && <span className="text-sm text-red-500">{calError}</span>}
         </div>
+        <PoolControls
+          codes={codes}
+          onLoad={(c) => setCodesText(c.join(","))}
+          screen={{ scope: "arb", params: { codes: codes.join(","), minCorrelation, entryZ, stopZ, limit } }}
+        />
       </div>
 
       {result && (

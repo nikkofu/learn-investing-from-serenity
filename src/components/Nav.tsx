@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/methodology", label: "方法论 / 知识库" },
   { href: "/map", label: "趋势→产业链" },
   { href: "/analyze", label: "个股分析" },
+  { href: "/watchlist", label: "自选 / 收藏" },
   { href: "/scanner", label: "热门股扫描" },
   { href: "/mining", label: "智能挖掘" },
   { href: "/backtest", label: "回测" },

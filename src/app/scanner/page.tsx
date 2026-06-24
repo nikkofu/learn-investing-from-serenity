@@ -6,6 +6,7 @@ import type { ChokepointAssessment, StockQuote } from "@/lib/types";
 import { readNdjson } from "@/lib/stream-client";
 import RadarChart from "@/components/RadarChart";
 import QuantChart from "@/components/QuantChart";
+import FavoriteButton from "@/components/FavoriteButton";
 
 interface HotStockItem {
   rank: number;
@@ -138,6 +139,33 @@ function ScannerContent() {
       alert(`❌ 榜单同步失败: ${err instanceof Error ? err.message : err}`);
     } finally {
       setSyncingRank(false);
+    }
+  }
+
+  // 把当前列表（自定池或热榜）保存为命名股票池，落盘到 .data/（v0.32）
+  const [savingPool, setSavingPool] = useState(false);
+  async function handleSavePool() {
+    const poolCodes = list.map((it) => it.code);
+    if (poolCodes.length === 0) {
+      alert("当前没有可保存的股票");
+      return;
+    }
+    const name = window.prompt("新股票池名称", customTitle || "");
+    if (name === null) return;
+    setSavingPool(true);
+    try {
+      const res = await fetch("/api/watchlist/pools", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, codes: poolCodes }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "保存失败");
+      alert(`已保存股票池（${json.pool?.codes?.length ?? poolCodes.length} 只），可在「自选 / 收藏」中管理。`);
+    } catch (e) {
+      alert(`保存失败: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setSavingPool(false);
     }
   }
 
@@ -470,6 +498,14 @@ function ScannerContent() {
           >
             {isCustomMode ? "刷新行情" : "刷新榜单"}
           </button>
+          <button
+            onClick={handleSavePool}
+            disabled={loading || savingPool || list.length === 0}
+            title="把当前列表保存为命名股票池（落盘 .data/，可在「自选 / 收藏」管理）"
+            className="rounded-[2px] border border-[var(--border)] px-4 py-1.5 text-xs font-semibold tracking-wider text-[var(--text)] hover:bg-[var(--hover)] transition cursor-pointer disabled:opacity-50"
+          >
+            {savingPool ? "保存中…" : "存为股票池"}
+          </button>
           {!isCustomMode && (
             <button
               onClick={handleSyncRank}
@@ -564,6 +600,8 @@ function ScannerContent() {
                         </td>
                         {/* 股票名 */}
                         <td className="px-4 py-3 font-bold text-[var(--text)]">
+                          <span className="flex items-center gap-1.5">
+                          <FavoriteButton code={item.code} name={item.name} />
                           <a
                             href={`/analyze?code=${item.code}`}
                             target="_blank"
@@ -581,6 +619,7 @@ function ScannerContent() {
                               <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                             </svg>
                           </a>
+                          </span>
                         </td>
                         {/* 代码 */}
                         <td className="px-4 py-3 font-mono text-[var(--muted)]">

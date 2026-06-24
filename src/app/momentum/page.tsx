@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
+import FavoriteButton from "@/components/FavoriteButton";
+import PoolControls from "@/components/PoolControls";
 
 // ── 类型（与 /api/momentum/* 返回对齐）──────────────────────────────────────
 interface MomentumFactors {
@@ -144,6 +147,17 @@ const inputCls = "rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 p
 type Tab = "rank" | "sectors" | "backtest";
 
 export default function MomentumPage() {
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-sm text-[var(--muted)]">载入中…</div>}>
+      <MomentumInner />
+    </Suspense>
+  );
+}
+
+function MomentumInner() {
+  const params = useSearchParams();
+  const initialCodes = params.get("codes")?.trim() || PRESET;
+  const initialLimit = Number(params.get("limit")) || 280;
   const [tab, setTab] = useState<Tab>("rank");
   return (
     <div className="w-full space-y-6">
@@ -173,17 +187,17 @@ export default function MomentumPage() {
         </p>
       </div>
 
-      {tab === "rank" && <RankTab />}
+      {tab === "rank" && <RankTab initialCodes={initialCodes} initialLimit={initialLimit} />}
       {tab === "sectors" && <SectorsTab />}
-      {tab === "backtest" && <BacktestTab />}
+      {tab === "backtest" && <BacktestTab initialCodes={initialCodes} />}
     </div>
   );
 }
 
 // ── Tab 1：个股动量榜 ────────────────────────────────────────────────────────
-function RankTab() {
-  const [codesText, setCodesText] = useState(PRESET);
-  const [limit, setLimit] = useState(280);
+function RankTab({ initialCodes, initialLimit }: { initialCodes: string; initialLimit: number }) {
+  const [codesText, setCodesText] = useState(initialCodes);
+  const [limit, setLimit] = useState(initialLimit);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resp, setResp] = useState<RankResp | null>(null);
@@ -230,10 +244,15 @@ function RankTab() {
             <input type="number" min={70} max={400} step={20} value={limit} onChange={(e) => setLimit(Number(e.target.value))} className={inputCls} />
           </label>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button onClick={run} disabled={loading} className="rounded-md bg-[var(--accent)] px-5 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
             {loading ? "打分中…" : "动量打分"}
           </button>
+          <PoolControls
+            codes={codes}
+            onLoad={(c) => setCodesText(c.join(","))}
+            screen={{ scope: "momentum", params: { codes: codes.join(","), limit } }}
+          />
           {error && <span className="text-sm text-red-500">{error}</span>}
         </div>
       </div>
@@ -264,7 +283,12 @@ function RankTab() {
                   <tr key={s.code} className="border-t border-[var(--border)]">
                     <td className="px-2 py-1.5 tabular-nums text-[var(--faint)]">{i + 1}</td>
                     <td className="px-2 py-1.5 font-mono"><StockLink code={s.code} newTab /></td>
-                    <td className="px-2 py-1.5">{s.name}</td>
+                    <td className="px-2 py-1.5">
+                      <span className="inline-flex items-center gap-1.5">
+                        <FavoriteButton code={s.code} name={s.name} />
+                        {s.name}
+                      </span>
+                    </td>
                     <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{fmtScore(s.composite)}</td>
                     <td className={`px-2 py-1.5 text-right tabular-nums ${signClass(s.factors.r1m ?? 0)}`}>{fmtPctRaw(s.factors.r1m)}</td>
                     <td className={`px-2 py-1.5 text-right tabular-nums ${signClass(s.factors.r3m ?? 0)}`}>{fmtPctRaw(s.factors.r3m)}</td>
@@ -385,9 +409,9 @@ function SectorsTab() {
 }
 
 // ── Tab 3：纯多头回测 ────────────────────────────────────────────────────────
-function BacktestTab() {
+function BacktestTab({ initialCodes }: { initialCodes: string }) {
   const [mode, setMode] = useState<"momentum" | "sectorRotation">("momentum");
-  const [codesText, setCodesText] = useState(PRESET);
+  const [codesText, setCodesText] = useState(initialCodes);
   const [sectorsText, setSectorsText] = useState("");
   const [topSectors, setTopSectors] = useState(3);
   const [maxStocksPerSector, setMaxStocksPerSector] = useState(15);
@@ -506,10 +530,13 @@ function BacktestTab() {
           </label>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button onClick={run} disabled={loading} className="rounded-md bg-[var(--accent)] px-5 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
             {loading ? "回测中…" : "运行纯多头回测"}
           </button>
+          {mode === "momentum" && (
+            <PoolControls codes={codes} onLoad={(c) => setCodesText(c.join(","))} />
+          )}
           {error && <span className="text-sm text-red-500">{error}</span>}
         </div>
       </div>

@@ -4,6 +4,39 @@
 
 ---
 
+## [0.32.0] - 2026-06-24
+
+> **自定义股票池 + 收藏 + 持久化**。新增一套用户自建数据沉淀机制：可收藏个股、自建命名股票池（即「配对池」，scanner / momentum / arb 通用）、保存筛选参数集（命名快照，一键复用）。全部复用既有 `.data/` JSON 落盘机制（`fs/promises` + 原子写），零新依赖。并新增 `/watchlist`「自选 / 收藏」管理页，与 scanner / momentum / arb 各页双向打通（深链预填 + 一键存取）。
+
+### 新增：持久化后端
+- `src/lib/watchlist.ts`：单文件落盘 `.data/watchlist.json`（`{ favorites[], pools[], screens[] }`），`loadStore()` / `saveStore()` 走 `mkdir -p` + 原子 `writeFile`，与 `calibration.ts` 等既有落盘惯例一致。
+  - 收藏：`addFavorite` / `listFavorites` / `removeFavorite`（按 6 位代码 upsert，保留首次收藏时间）。
+  - 股票池：`createPool` / `updatePool` / `deletePool` / `listPools`（命名 + 代码列表，`normalizeCodes` 按 `/[\s,，、]+/` 切分、`^\d{6}$` 校验、去重）。
+  - 保存筛选：`createScreen` / `deleteScreen` / `listScreens`（命名 + `scope` + 标量参数集）。
+
+### 新增：API 路由
+- `src/app/api/watchlist/favorites/route.ts`：`GET`（列收藏）/ `POST`（`{code,name?,note?}` upsert）/ `DELETE`（`?code=` 删）。
+- `src/app/api/watchlist/pools/route.ts`：`GET`（列池）/ `POST`（无 `id` 建池、带 `id` 改池）/ `DELETE`（`?id=` 删）。
+- `src/app/api/watchlist/screens/route.ts`：`GET`（列筛选）/ `POST`（`{name?,scope,params}` 建）/ `DELETE`（`?id=` 删）。
+
+### 新增：自选 / 收藏页
+- `src/app/watchlist/page.tsx`：三 Tab 管理 —— **收藏**（列表 / 删除 / 备注 / 「全部存为股票池」 / 深链到 scanner·momentum）、**股票池**（建池表单 / 列表 / 内联改代码 / 删除 / 深链到 scanner·momentum·arb）、**保存的筛选**（列表 / 删除 / 「应用」按 `scope` 深链回对应页并预填参数）。
+- `src/components/Nav.tsx`：导航新增「自选 / 收藏」入口。
+
+### 新增：可复用组件
+- `src/components/FavoriteButton.tsx`：★ 收藏按钮，模块级 `Set<string>` + 订阅模式缓存收藏集，首次渲染拉一次 `/api/watchlist/favorites`，后续按钮共享缓存、点击乐观更新并同步后端（避免 M 个按钮发 N 次请求）。
+- `src/components/PoolControls.tsx`：股票池工具条（「载入股票池 ▾」下拉 / 「存为股票池」 / 可选「保存筛选」），momentum / arb 页复用。
+
+### 接入现有页
+- `src/app/momentum/page.tsx`：支持 `?codes=` / `?limit=` 深链预填；榜单与回测 Tab 接入 `PoolControls`（存/取池、存动量筛选）；榜单名称列加 ★ 收藏按钮。
+- `src/app/arb/page.tsx`：支持 `?codes=` / `?minCorrelation=` / `?entryZ=` / `?stopZ=` / `?limit=` 深链预填；接入 `PoolControls`（存/取池、存套利筛选）。
+- `src/app/scanner/page.tsx`：新增「存为股票池」按钮（把当前榜单存成命名池）；榜单名称列加 ★ 收藏按钮。
+
+### 质量门禁
+- `tsc --noEmit` 0 error；`next build` 通过且新路由（`/watchlist`、`/api/watchlist/{favorites,pools,screens}`）全部注册；改动文件 `eslint` 0 error。
+
+---
+
 ## [0.31.2] - 2026-06-24
 
 > **图标微调**：个股链接的 K 线图标换成更清爽的折线图（line-chart）样式。
