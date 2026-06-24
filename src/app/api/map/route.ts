@@ -7,6 +7,7 @@ import type { SupplyChainMap, SupplyChainNode } from "@/lib/types";
 import { loadConfig } from "@/lib/config";
 import { getCacheTTL } from "@/lib/cacheSettings";
 import { getPersistent, setPersistent } from "@/lib/llmCache";
+import { NFA } from "@/lib/disclaimers";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export async function POST(req: Request) {
           })),
         })),
         disclaimer:
-          "本图由 AI 依据 Serenity 瓶颈点方法生成，公司/代码可能有误，仅供研究，不构成投资建议。",
+          "本图由 AI 依据 Serenity 瓶颈点方法生成，公司/代码可能有误。" + NFA,
       };
       send({ type: "result", map });
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getKlinesBatch, HISTORY_LIMIT } from "@/lib/sources";
 import { runPairScan } from "@/lib/pairTrading";
 import type { Candle } from "@/lib/types";
+import { NFA } from "@/lib/disclaimers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -66,6 +67,6 @@ export async function POST(req: Request) {
 export async function GET() {
   return NextResponse.json({
     defaults: { limit: 500, topN: 15, trainFrac: 0.6, minCorrelation: 0.7, entryZ: 2.0, exitZ: 0.5, stopZ: 3.5, feeBps: 30 },
-    note: "POST {codes:[...]} 在候选池两两做 Engle-Granger 协整检验（OLS 求对冲比例 β → 残差 ADF 平稳性），挑出协整配对，用 z 分数阈值做市场中性回测（z≥entryZ 做空价差、z≤-entryZ 做多价差、|z|≤exitZ 平仓、|z|≥stopZ 破裂止损），双边手续费。输出样本内 vs 样本外（前 trainFrac 选配对+定 β、后段独立交易）对照——两者差距即过拟合程度。诚实边界：A 股融券受限，纯多空在多数个股难落地，仅供研究。",
+    note: "POST {codes:[...]} 在候选池两两做 Engle-Granger 协整检验（OLS 求对冲比例 β → 残差 ADF 平稳性），挑出协整配对，用 z 分数阈值做市场中性回测（z≥entryZ 做空价差、z≤-entryZ 做多价差、|z|≤exitZ 平仓、|z|≥stopZ 破裂止损），双边手续费。输出样本内 vs 样本外（前 trainFrac 选配对+定 β、后段独立交易）对照——两者差距即过拟合程度。诚实边界：A 股融券受限，纯多空在多数个股难落地。" + NFA,
   });
 }

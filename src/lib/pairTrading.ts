@@ -17,6 +17,7 @@
 import type { Candle } from "./types";
 import { adfTest, ols, halfLife, pearson, describe } from "./stats";
 import { roundTripCostPct } from "./costs";
+import { NFA } from "./disclaimers";
 
 export interface PairCandidate {
   a: string;
@@ -209,7 +210,7 @@ export function runPairScan(
     topBacktests,
     inSample: aggregate(topBacktests),
     outOfSample: aggregate(oosBacktests),
-    note: "样本内为同段选样+交易（含选样泄漏，仅作机制展示）；样本外为前段选配对+定β、后段独立交易。两者差距=过拟合程度。A股融券受限，纯多空难落地，仅供研究。",
+    note: "样本内为同段选样+交易（含选样泄漏，仅作机制展示）；样本外为前段选配对+定β、后段独立交易。两者差距=过拟合程度。A股融券受限，纯多空难落地。" + NFA,
   };
 }
 
@@ -493,7 +494,7 @@ export function scanArbRadar(
     cointegratedCount: pairs.length,
     signals: limited,
     asOf,
-    note: "仅列出当前价差已开口（|z|≥入场阈）的协整配对机会，按 |z|×协整强度排序。预计回归天数=半衰期·log2(|z|/出场阈)。A股融券受限，纯多空难落地，请优先选两融/ETF 可对冲品种；收益为价差口径、已扣双边成本估算，仅供研究。",
+    note: "仅列出当前价差已开口（|z|≥入场阈）的协整配对机会，按 |z|×协整强度排序。预计回归天数=半衰期·log2(|z|/出场阈)。A股融券受限，纯多空难落地，请优先选两融/ETF 可对冲品种；收益为价差口径、已扣双边成本估算。" + NFA,
   };
 }
 
@@ -730,6 +731,6 @@ export function calibrateRadar(
       avgMaxAdverseZ: totalSignals ? Number((sumAdverse / totalSignals).toFixed(2)) : 0,
     },
     asOf,
-    note: "事后回测：对每个协整配对全历史回放，每次 |z|≥入场阈开口就买入被低估的那一只，持有至价差回归/止损/超时。单边收益为该腿真实价格涨跌已扣单边往返成本（含市场 β，非中性）。回归率=由价差回归兑现占比；最大逆向=回归前出现过的最深 |z|。协整为样本内性质会破裂，历史回归率不代表未来，非投资建议。",
+    note: "事后回测：对每个协整配对全历史回放，每次 |z|≥入场阈开口就买入被低估的那一只，持有至价差回归/止损/超时。单边收益为该腿真实价格涨跌已扣单边往返成本（含市场 β，非中性）。回归率=由价差回归兑现占比；最大逆向=回归前出现过的最深 |z|。协整为样本内性质会破裂，历史回归率不代表未来。" + NFA,
   };
 }

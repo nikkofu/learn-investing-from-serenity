@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
 import FavoriteButton from "@/components/FavoriteButton";
 import PoolControls from "@/components/PoolControls";
+import { NFA } from "@/lib/disclaimers";
 
 // ── 类型（与 /api/compare* 返回对齐）─────────────────────────────────────────
 type CompareUnit = "price" | "pct" | "num" | "score";
@@ -274,7 +275,7 @@ function CompareInner() {
       <div>
         <h1 className="text-xl font-semibold text-[var(--text)]">多标的横向对比</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          把任意一组标的拉到同一张表里横向对比（实时行情 + 横截面动量因子，按<strong>截面百分位</strong>着色：绿优红劣），叠加<strong>归一化价格走势</strong>（公共交易日，基点=100）。可把「对比哪些标的 + 显示哪些列 + 排序」沉淀成命名<strong>对比视图</strong>一键复原。仅供研究，不构成投资建议。
+          把任意一组标的拉到同一张表里横向对比（实时行情 + 横截面动量因子，按<strong>截面百分位</strong>着色：绿优红劣），叠加<strong>归一化价格走势</strong>（公共交易日，基点=100）。可把「对比哪些标的 + 显示哪些列 + 排序」沉淀成命名<strong>对比视图</strong>一键复原。{NFA}
         </p>
       </div>
 

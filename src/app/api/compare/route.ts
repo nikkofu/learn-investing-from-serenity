@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getKlinesBatch, HISTORY_LIMIT, getQuotesFailover } from "@/lib/sources";
 import { scoreCrossSection, DEFAULT_MOMENTUM_WEIGHTS } from "@/lib/momentum";
 import { COMPARE_COLUMNS, percentile, normalizeCodes } from "@/lib/compare";
+import { NFA } from "@/lib/disclaimers";
 import type { Candle } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -114,7 +115,7 @@ export async function POST(req: Request) {
       rows,
       chart,
       asOf: latestDate(cleanMap),
-      note: "横向对比：行情 + 横截面动量因子（截面百分位着色）。仅供研究，不构成投资建议。",
+      note: "横向对比：行情 + 横截面动量因子（截面百分位着色）。" + NFA,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

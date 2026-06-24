@@ -3,6 +3,7 @@ import { getKlinesBatch, HISTORY_LIMIT } from "@/lib/sources";
 import { scanArbRadar } from "@/lib/pairTrading";
 import { getUniverseConfig, isExcluded } from "@/lib/universe";
 import type { Candle } from "@/lib/types";
+import { NFA } from "@/lib/disclaimers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -82,6 +83,6 @@ export async function POST(req: Request) {
 export async function GET() {
   return NextResponse.json({
     defaults: { limit: 500, minCorrelation: 0.7, entryZ: 2.0, exitZ: 0.5, stopZ: 3.5, feeBps: 30, maxSignals: 50 },
-    note: "POST {codes:[...]} 在候选池（已按股票池纯净化配置剔除科创/北交所/B 股等）内全两两做 Engle-Granger 协整检验，仅返回当前价差已开口（|z|≥entryZ）的配对机会，按 |z|×协整强度排序。每个机会落到单边可执行动作：被低估的那一只 → 「逢低分批布局」买入择时，被高估的那一只 → 「减仓/规避」。附进出止损 z 阈、半衰期推算的预计回归天数。这是相对强弱择时（不是无风险对冲套利），单边持有承担市场 β 风险，非投资建议。",
+    note: "POST {codes:[...]} 在候选池（已按股票池纯净化配置剔除科创/北交所/B 股等）内全两两做 Engle-Granger 协整检验，仅返回当前价差已开口（|z|≥entryZ）的配对机会，按 |z|×协整强度排序。每个机会落到单边可执行动作：被低估的那一只 → 「逢低分批布局」买入择时，被高估的那一只 → 「减仓/规避」。附进出止损 z 阈、半衰期推算的预计回归天数。这是相对强弱择时（不是无风险对冲套利），单边持有承担市场 β 风险。" + NFA,
   });
 }

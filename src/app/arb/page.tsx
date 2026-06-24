@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
 import PoolControls from "@/components/PoolControls";
 import RobustnessPanel from "@/components/RobustnessPanel";
+import { ARB_BOUNDARY, NFA } from "@/lib/disclaimers";
 
 interface PairCandidate {
   a: string;
@@ -325,7 +326,7 @@ function ArbRadarInner() {
         <p className="mt-1 text-sm text-[var(--muted)]">
           候选池（已按设置页<strong>股票池纯净化</strong>口径剔除科创/北交所/B 股等）内全两两做 Engle-Granger 协整检验，只捕捉<strong>当前价差已开口</strong>（|z|≥入场阈）的机会，
           按 <strong>|z|×协整强度</strong>排序。每条直接落到<strong>单边动作</strong>：相对被低估的那一只 → <span className="text-emerald-500 font-semibold">逢低分批布局</span>（买入择时）；相对被高估的那一只 → <span className="text-rose-500 font-semibold">减仓/规避</span>。
-          <strong>诚实边界</strong>：这是<strong>「相对强弱择时」，不是无风险对冲套利</strong>——A 股主板无融券，单边持有需自担市场 β 与方向风险，结果为统计信号，非投资建议。
+          {ARB_BOUNDARY}
         </p>
       </div>
 
@@ -493,7 +494,7 @@ function ArbRadarInner() {
                               )}
                               <div><span className="font-semibold text-rose-500">可证伪/止损条件：</span>{ist.data.invalidation}</div>
                               <div><span className="font-semibold text-amber-500">单边持有风险/落地：</span>{ist.data.hedgeability}</div>
-                              <div className="text-[10px] text-[var(--muted)]">AI 解读基于统计量推演的单边均值回归择时，非投资建议。</div>
+                              <div className="text-[10px] text-[var(--muted)]">AI 解读基于统计量推演的单边均值回归择时。{NFA}</div>
                             </div>
                           )}
                         </td>
@@ -517,7 +518,7 @@ function ArbRadarInner() {
             <h2 className="text-lg font-semibold text-[var(--text)]">信号回测校准 · 事后验证</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
               对池内全部协整配对<strong>全历史回放</strong>：每次 |z|≥入场阈开口就<strong>买入被低估的那一只</strong>，持有到价差回归/止损/超时，统计这套<strong>单边择时规则</strong>历史上的真实表现。
-              单边收益<strong>含市场 β（非中性）</strong>、已扣单边往返成本。回归率高·单边胜率高·最大逆向浅 ⇒ z 阈更可托付。历史不代表未来，非投资建议。
+              单边收益<strong>含市场 β（非中性）</strong>、已扣单边往返成本。回归率高·单边胜率高·最大逆向浅 ⇒ z 阈更可托付。历史不代表未来。{NFA}
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

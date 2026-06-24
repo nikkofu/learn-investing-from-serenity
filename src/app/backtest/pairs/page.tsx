@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { NFA } from "@/lib/disclaimers";
 
 interface PairCandidate {
   a: string;
@@ -129,7 +130,7 @@ export default function PairsBacktestPage() {
         </div>
         <h1 className="text-xl font-semibold text-[var(--text)]">统计套利 · 配对交易（市场中性）</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          与趋势内核**互补**的机构常用 alpha：在候选池里两两做 Engle-Granger 协整检验（OLS 求对冲比例 β → 残差 ADF 平稳性），挑出**协整**配对，把价差标准化为 z 分数做均值回归——z 过高做空价差、过低做多价差、回归平仓、破裂止损，双腿各计手续费。**重点看样本内 vs 样本外**：协整是样本内性质、会破裂，样本外回落越大越是过拟合。**诚实边界**：A 股融券受限，纯多空在多数个股难落地，仅供研究，不构成投资建议。
+          与趋势内核**互补**的机构常用 alpha：在候选池里两两做 Engle-Granger 协整检验（OLS 求对冲比例 β → 残差 ADF 平稳性），挑出**协整**配对，把价差标准化为 z 分数做均值回归——z 过高做空价差、过低做多价差、回归平仓、破裂止损，双腿各计手续费。**重点看样本内 vs 样本外**：协整是样本内性质、会破裂，样本外回落越大越是过拟合。**诚实边界**：A 股融券受限，纯多空在多数个股难落地。{NFA}
         </p>
       </div>
 

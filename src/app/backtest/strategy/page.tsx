@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import StockLink from "@/components/StockLink";
+import { NFA } from "@/lib/disclaimers";
 
 interface StrategyMeta {
   id: string;
@@ -259,7 +260,7 @@ export default function StrategyBacktestPage() {
         </div>
         <h1 className="text-xl font-semibold text-[var(--text)]">建议忠实回测 · 胜率证明</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          选定一个策略，在股票池上逐只独立重放它与个股看盘页**完全同一套**的买卖规则，信号**只用当日之前数据**（无未来函数），含 A 股涨跌停撮合（涨停买不进、跌停卖不出顺延）与双边手续费。把所有完成交易**汇总**，对比「同持有期买入持有」基线并做 z 检验，诚实回答「照该策略买卖到底有没有较大胜率」。池内不带逐股基本面分（给中性瓶颈点分），故不触发依赖高基本面分的「强势起爆」信号。仅供研究，不构成投资建议。
+          选定一个策略，在股票池上逐只独立重放它与个股看盘页**完全同一套**的买卖规则，信号**只用当日之前数据**（无未来函数），含 A 股涨跌停撮合（涨停买不进、跌停卖不出顺延）与双边手续费。把所有完成交易**汇总**，对比「同持有期买入持有」基线并做 z 检验，诚实回答「照该策略买卖到底有没有较大胜率」。池内不带逐股基本面分（给中性瓶颈点分），故不触发依赖高基本面分的「强势起爆」信号。{NFA}
         </p>
       </div>
 

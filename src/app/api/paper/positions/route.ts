@@ -20,6 +20,7 @@ import {
   type PaperPosition,
 } from "@/lib/paperTrades";
 import { getUniverseConfig, isExcluded } from "@/lib/universe";
+import { NFA } from "@/lib/disclaimers";
 import type { Candle } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -143,7 +144,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     positions,
     summary,
-    note: "纸面仓=按当前开口信号前向跟踪：盯市重算 z 与实时盈亏，命中回归/止损/超时自动平仓。成本走 A 股模型，仅供研究、非投资建议。",
+    note: "纸面仓=按当前开口信号前向跟踪：盯市重算 z 与实时盈亏，命中回归/止损/超时自动平仓。成本走 A 股模型。" + NFA,
   });
 }
 

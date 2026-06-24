@@ -8,6 +8,7 @@ import RadarChart from "@/components/RadarChart";
 import QuantChart from "@/components/QuantChart";
 import { readNdjson } from "@/lib/stream-client";
 import SharingCard from "@/components/SharingCard";
+import Disclaimer from "@/components/Disclaimer";
 
 const FACTOR_LABELS: Record<string, string> = {
   demand: "确定需求",
@@ -658,9 +659,7 @@ function Result({ data }: { data: AnalyzeResponse }) {
           />
         </div>
       )}
-      <p className="text-xs text-[var(--faint)]">
-        以上由 AI 依据公开行情与 Serenity 方法生成，可能有误，仅供研究，不构成投资建议。
-      </p>
+      <Disclaimer variant="ai" className="text-xs" />
       {showPoster && (
         <SharingCard
           quote={quote}

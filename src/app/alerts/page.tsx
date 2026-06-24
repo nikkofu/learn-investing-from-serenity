@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { NFA } from "@/lib/disclaimers";
 
 // ── 类型（与 /api/alerts/* 对齐）──────────────────────────────────────────────
 type AlertKind = "arb" | "price";
@@ -147,7 +148,7 @@ export default function AlertsPage() {
         <h1 className="text-xl font-semibold text-[var(--text)]">盘中盯盘告警</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
           为<strong>套利配对</strong>（价差开口 / 逼近回归止损）与<strong>个股价格</strong>设盯盘规则，盘中轮询实时行情触发告警。
-          投递站内告警箱 + 可选 <code>webhook</code>（邮件可经 webhook 桥接）。全部落 <code>.data/</code> 本地持久化。仅供研究，不构成投资建议。
+          投递站内告警箱 + 可选 <code>webhook</code>（邮件可经 webhook 桥接）。全部落 <code>.data/</code> 本地持久化。{NFA}
         </p>
       </div>
 

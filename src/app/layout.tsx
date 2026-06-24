@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Nav from "@/components/Nav";
 import { loadTheme, loadThemeMode } from "@/lib/config";
+import { NFA } from "@/lib/disclaimers";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -10,7 +11,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: "Serenity 瓶颈点投研台",
   description:
-    "学习 Serenity（白毛股神）瓶颈点投资法，结合 AI 与 A 股数据进行选股与分析。仅供研究，不构成投资建议。",
+    "学习 Serenity（白毛股神）瓶颈点投资法，结合 AI 与 A 股数据进行选股与分析。" + NFA,
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -49,7 +50,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <Nav />
         <main className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
         <footer className="border-t border-[var(--border)] px-4 py-4 text-center text-xs leading-5 text-[var(--faint)] sm:px-6 lg:px-8">
-          仅供学习研究，不构成任何投资建议（NFA）。AI 与量化结果均可能出错；历史回测/情景模拟不代表未来收益；股市有风险，决策与盈亏由您自行承担。数据来自东方财富/腾讯财经公开接口。
+          {NFA}AI 与量化结果均可能出错；历史回测/情景模拟不代表未来收益；股市有风险，决策与盈亏由您自行承担。数据来自东方财富/腾讯财经公开接口。
         </footer>
       </body>
     </html>

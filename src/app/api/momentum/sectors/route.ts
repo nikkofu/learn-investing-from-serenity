@@ -7,6 +7,7 @@ import {
   type MomentumWeights,
 } from "@/lib/momentum";
 import { loadSectorsWithStocks } from "@/lib/sectorData";
+import { NFA } from "@/lib/disclaimers";
 import type { Candle } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -67,7 +68,7 @@ async function compute(body: SectorsBody) {
     weights,
     sectorCount: ranked.length,
     sectors: ranked,
-    note: "行业轮动信号：板块合成动量 = 成分股截面动量分均值；宽度=近 3 月正收益占比。仅供研究，不构成投资建议。",
+    note: "行业轮动信号：板块合成动量 = 成分股截面动量分均值；宽度=近 3 月正收益占比。" + NFA,
   });
 }
 

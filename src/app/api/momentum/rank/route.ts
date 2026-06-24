@@ -6,6 +6,7 @@ import {
   type MomentumWeights,
 } from "@/lib/momentum";
 import { isExcluded } from "@/lib/universe";
+import { NFA } from "@/lib/disclaimers";
 import type { Candle } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
       weights,
       universe: { requested: (body.codes ?? []).length, eligible: ranked.length },
       ranked,
-      note: "横截面多因子动量分（[0,1] 截面百分位加权）。仅供研究，不构成投资建议。",
+      note: "横截面多因子动量分（[0,1] 截面百分位加权）。" + NFA,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

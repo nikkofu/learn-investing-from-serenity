@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import StockLink from "@/components/StockLink";
+import { NFA } from "@/lib/disclaimers";
 
 interface PortfolioBar {
   date: string;
@@ -178,7 +179,7 @@ export default function BacktestPage() {
         </div>
         <h1 className="text-xl font-semibold text-[var(--text)]">组合回测</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          给定股票池，按价格动量截面排名每 N 个交易日轮动等权持有 top-K，含手续费与 A 股涨跌停撮合约束（涨停买不进、跌停卖不出）。仅供研究，不构成投资建议。
+          给定股票池，按价格动量截面排名每 N 个交易日轮动等权持有 top-K，含手续费与 A 股涨跌停撮合约束（涨停买不进、跌停卖不出）。{NFA}
         </p>
       </div>
 

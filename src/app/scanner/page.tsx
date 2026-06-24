@@ -7,6 +7,7 @@ import { readNdjson } from "@/lib/stream-client";
 import RadarChart from "@/components/RadarChart";
 import QuantChart from "@/components/QuantChart";
 import FavoriteButton from "@/components/FavoriteButton";
+import Disclaimer from "@/components/Disclaimer";
 
 interface HotStockItem {
   rank: number;
@@ -873,10 +874,8 @@ function ScannerContent() {
         </div>
       )}
 
-      {/* 免责申明 */}
-      <div className="text-[10px] text-[var(--faint)] leading-4 font-mono uppercase tracking-wide">
-        NOTICE: DATA IS EXTRACTED FROM EASTMONEY REALTIME FORUM AND STOCK GRAPHS. LLM ASSESSMENT AND SUGGESTED PRICE RANGES ARE GENERATED AUTOMATICALLY BY AI AND IN NO WAY CONSTITUTE FORMAL FINANCIAL ADVICE (NFA).
-      </div>
+      {/* 诚实边界 */}
+      <Disclaimer variant="ai" className="text-[10px]" />
 
     </div>
   );

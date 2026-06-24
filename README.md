@@ -14,7 +14,11 @@
 
 ---
 
-## 🆕 v0.38.0 亮点
+## 🆕 v0.39.0 亮点
+
+*   **§6 诚实边界 · 统一口径（Single Source of Truth）**：把全站此前散落在各页面与 API（`note` 字段）里**手写**的「非投资建议 / 统计信号 / 不代表未来 / 含市场 β 自担风险 / AI 可能有误」等免责与风险边界文案，收敛到**唯一可信源** `src/lib/disclaimers.ts`（5 个规范导出：`NFA` / `ARB_BOUNDARY` / `BACKTEST_BOUNDARY` / `FUNDAMENTALS_BOUNDARY` / `AI_BOUNDARY`，纯字符串、无 React 依赖，服务端与客户端皆可引用），并新增统一渲染组件 `src/components/Disclaimer.tsx`（`<Disclaimer variant="..." />`，统一样式的标准免责注脚）。`/analyze`、`/arb`、`/momentum`、`/compare`、`/paper`、`/scanner`、`/backtest*`、`/alerts`、`/mining`、全局页脚与 metadata，以及 `/api/{fundamentals,compare,paper,momentum,arb,backtest,map}` 等 note 字段一律改为引用同一份常量，**杜绝同一句免责在不同页面措辞漂移**。**纯文案收敛、零业务逻辑改动、零新依赖**，三关全绿（type-check / lint 0 error + build 通过）。
+
+## v0.38.0 亮点
 
 *   **基本面面板增强（Fundamentals Panel）**：`/analyze` 个股研判结果区新增 **「基本面 · 财务质量」** 面板（独立 `fetch /api/fundamentals`，与主流式 AI 推理链路解耦、零回归风险），把此前只在调试接口暴露的**真实财报**显性化为研判依据。新增 `src/lib/fundamentals.ts` 的 `scoreFundamentals()`：以 **ROE 25% / 净利率 15% / 营收增速 15% / 净利增速 20% / 资产负债率 15%（逆向）/ 估值 10%** 透明加权（阈值全部显式写死、可解释），合成 **0~100 基本面质量分**与 **A/B/C/D 评级 + 星级**，仅用单只个股自身指标（不做同业对标、不预测未来）。面板内含：**质量分徽标 + 6 因子拆解条**、**估值行**（PE-TTM / PB / **PEG**（=PE/净利增速）/ **TTM 股息率**（近 365 天除权派现推导）/ 总市值 / 流通市值）、**财务摘要网格**（营收 / 归母净利 + 同比、毛利率 / 净利率 / ROE / 资产负债率 / EPS）、**营收 / 净利近 N 期 SVG 趋势**、**近期分红送转**。新增 `getFinancialsHistory()`（近 N 期主要财务指标）与 `GET /api/fundamentals`（`Promise.allSettled` 聚合估值 + 财报 + 趋势 + 分红 + 质量分，各源 best-effort 容错、单源失败不影响其余字段），零新依赖、纯 SVG 自绘。**诚实边界**：财务季度更新、质量分为单只自评，仅供研究、非投资建议。
 

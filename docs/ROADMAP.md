@@ -1,7 +1,7 @@
 # 路线图与交接文档 / Roadmap & Handoff
 
 > 本文档面向**未来新开 session 的交接**。读完应能独立接手本项目的开发、发版与后续路线。
-> 最后更新：随 v0.34.0（2026-06-24）。当前版本 **v0.34.0**，分支 `main`。
+> 最后更新：随 v0.39.0（2026-06-24）。当前版本 **v0.39.0**，分支 `main`。
 
 ---
 
@@ -169,10 +169,12 @@
 - 协整为**样本内**性质，会破裂；历史回归率/胜率/收益**不代表未来**。
 - 单边持有自担方向与 β 风险。**所有产物标注「非投资建议 (NFA)」**。
 
+- [x] **v0.39.0 统一口径落地**：把全站分散手写的免责 / 风险边界文案收敛到唯一可信源 `src/lib/disclaimers.ts`（5 个规范导出 `NFA`/`ARB_BOUNDARY`/`BACKTEST_BOUNDARY`/`FUNDAMENTALS_BOUNDARY`/`AI_BOUNDARY`）+ 统一渲染组件 `src/components/Disclaimer.tsx`（`<Disclaimer variant="..." />`）。页面与 API（note 字段）一律从此引用，杜绝口径漂移。纯文案收敛、零业务逻辑改动。
+
 ---
 
 ## 7. 新 session 接手 checklist
 1. 读本文档 §1（约束）+ §2（工作流）。向用户索取本机仓库路径与桥接隧道信息（私密、不入库），确认桥接能连通本机仓库。
-2. `git rev-parse --is-shallow-repository`，必要时 `--unshallow`；确认 `git status` 干净、HEAD=origin/main、最新 tag 与 `package.json` version 一致（当前 v0.38.0）。
+2. `git rev-parse --is-shallow-repository`，必要时 `--unshallow`；确认 `git status` 干净、HEAD=origin/main、最新 tag 与 `package.json` version 一致（当前 v0.39.0）。
 3. 接新需求前先确认是否触碰 §1/§5.3 的约束；触碰则先与用户对齐再动手。
 4. 按 §2.4 自动发版（已获授权），中文消息走消息文件，门禁全绿后推 main + tag。

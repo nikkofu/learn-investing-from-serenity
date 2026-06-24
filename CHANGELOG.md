@@ -4,6 +4,30 @@
 
 ---
 
+## [0.39.0] - 2026-06-24
+
+> **§6 诚实边界 · 统一口径（单一可信源 + 组件化渲染）**。把全站此前散落在各页面与 API（note 字段）里**手写**的「非投资建议 / 统计信号 / 不代表未来 / 含市场 β 自担风险 / AI 可能有误」等免责与风险边界文案，收敛到**唯一可信源** `src/lib/disclaimers.ts`，并新增统一渲染组件 `src/components/Disclaimer.tsx`。**纯文案收敛、零业务逻辑改动、零新依赖**——只把既有口径集中到一处维护，杜绝同一句免责在不同页面措辞漂移。
+
+### 新增：唯一可信源 + 渲染组件
+- `src/lib/disclaimers.ts`（纯字符串、无 React 依赖，服务端 API note 与客户端页面皆可引用）导出 5 个规范文案：
+  - `NFA`：通用尾注「仅供研究，不构成投资建议（NFA）。」所有 AI / 量化产物统一以此收尾。
+  - `ARB_BOUNDARY`：套利雷达 / 协整校准 / 配对回测的统计信号边界（相对强弱择时 · 含市场 β 非市场中性 · 非无风险对冲套利 · 样本内会破裂 · 历史不代表未来 · 单边自担风险）。
+  - `BACKTEST_BOUNDARY`：回测 / 情景模拟边界（不代表未来收益、样本内偏高需看样本外）。
+  - `FUNDAMENTALS_BOUNDARY`：基本面质量分边界（单只透明加权自评、不做同业对标、不预测未来）。
+  - `AI_BOUNDARY`：AI 生成内容边界（依据公开行情与量化方法生成、可能有误、仅供研究）。
+- `src/components/Disclaimer.tsx`：`<Disclaimer variant="nfa|arb|backtest|fundamentals|ai" />`，统一样式（`text-[11px] text-[var(--faint)]`）的标准免责注脚，保证全站口径与外观一致。
+
+### 变更：各页 / 各 API 接入统一口径
+- 页面（JSX）：`/analyze`、`/scanner`、`/arb`、`/momentum`、`/compare`、`/paper`、`/watchlist`、`/alerts`、`/backtest`、`/backtest/pairs`、`/backtest/strategy`、`/mining`、全局 `layout.tsx`（metadata 描述 + 页脚）改为引用 `NFA` / `ARB_BOUNDARY` 等常量或 `<Disclaimer />` 组件。
+- API（note 字段）：`/api/fundamentals`、`/api/compare`、`/api/paper/positions`、`/api/momentum/{rank,sectors}`、`/api/arb/{radar,calibrate,robustness}`、`/api/backtest/pairs`、`/api/map` 的免责说明改为拼接 `disclaimers.ts` 常量。
+- 库：`src/lib/pairTrading.ts` 导出的 backtest / radar / calibrate note 文案统一收敛到 `NFA`。
+
+### 质量门禁（本机执行）
+- `npm run type-check`（`tsc --noEmit`）0 error；`npm run lint` 0 error（27 个历史遗留 warning，与上一版同数、非本次引入）；`npm run build` 通过，全部路由如常注册。
+- 纯文案收敛，未改 API JSON 结构与任何业务逻辑，无回归风险。
+
+---
+
 ## [0.38.0] - 2026-06-24
 
 > **基本面面板增强**。§5.2-D：把此前只在调试接口（`/api/market/data`）暴露的**真实财报**搬到 `/analyze` 个股研判结果区，新增 **「基本面 · 财务质量」** 面板。面板**独立 fetch** `/api/fundamentals`，与主流式 AI 推理链路完全解耦（不延迟推理、零回归风险）。透明加权出 **0~100 基本面质量分** + **A/B/C/D 评级**，并把营收/净利近 N 期做成 SVG 趋势。全部复用既有数据源（东财 RPT_F10_FINANCE_MAINFINADATA / 分红 / 实时行情），各源 best-effort 容错，零新依赖；产物为单只个股自评、不做同业对标、不预测未来，仅供研究、非投资建议。

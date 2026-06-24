@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getQuotesFailover, getFinancialsHistory, getDividendHistory } from "@/lib/sources";
 import { scoreFundamentals, pegRatio } from "@/lib/fundamentals";
+import { FUNDAMENTALS_BOUNDARY } from "@/lib/disclaimers";
 import type { StockFinancials } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -66,7 +67,7 @@ export async function GET(req: Request) {
       financials: histDesc.length > 0,
       dividends: dividends.length > 0,
     },
-    note: "基本面面板：财务指标季度更新、估值/股息为实时推导，质量分为透明加权的单只自评（不做同业对标、不预测未来）。仅供研究，不构成投资建议。",
+    note: FUNDAMENTALS_BOUNDARY,
   });
 }
 

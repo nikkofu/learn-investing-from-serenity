@@ -3,6 +3,7 @@ import { getKlinesBatch, HISTORY_LIMIT } from "@/lib/sources";
 import { evaluatePair } from "@/lib/pairTrading";
 import { robustnessReport } from "@/lib/robustness";
 import { getUniverseConfig, isExcluded } from "@/lib/universe";
+import { NFA } from "@/lib/disclaimers";
 import type { Candle } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -62,7 +63,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       report,
       asOf: aCandles[aCandles.length - 1]?.date ?? null,
-      note: "参数高原=入场阈×z窗口两维全样本扫描；walk-forward=锚定式前推（IS选优→OOS验证）。仅统计信号，非投资建议。",
+      note: "参数高原=入场阈×z窗口两维全样本扫描；walk-forward=锚定式前推（IS选优→OOS验证）。" + NFA,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readNdjson } from "@/lib/stream-client";
+import { NFA } from "@/lib/disclaimers";
 
 type LogLevel = "info" | "success" | "warn" | "error" | "debug";
 interface LogEntry {
@@ -742,7 +743,7 @@ export default function MiningPage() {
       </div>
 
       <p className="mt-4 text-[11px] leading-relaxed text-[var(--faint)]">
-        风险提示：预期收益率基于几何布朗运动(GBM)概率区间与历史回测推导，非未来收益承诺；目标/止损为参考价位，不构成投资建议。市场有风险，决策需自负。
+        风险提示：预期收益率基于几何布朗运动(GBM)概率区间与历史回测推导，非未来收益承诺；目标/止损为参考价位。{NFA}市场有风险，决策需自负。
       </p>
     </main>
   );

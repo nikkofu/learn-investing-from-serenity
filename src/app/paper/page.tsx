@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import StockLink from "@/components/StockLink";
+import { NFA } from "@/lib/disclaimers";
 
 // ── 类型（与 src/lib/paperTrades.ts 对齐） ─────────────────────────────────────
 
@@ -433,7 +434,7 @@ export default function PaperTradingPage() {
         <div className="mb-1 font-semibold text-[var(--text)]">口径说明</div>
         纸面仓按「当前开口信号」前向跟踪：开仓记录买入腿（被低估那只）价格与 z，持仓中按最新日 K + 实时价重算滚动 z 与盈亏；
         命中回归（|z|≤exitZ）/ 止损（|z|≥stopZ）/ 超时（持有≥最长天数）自动平仓。盈亏走 A 股成本模型（佣金/印花税/过户费/滑点）。
-        <span className="text-rose-500">盈红</span> / <span className="text-emerald-500">亏绿</span>。回归达成率 = 已平仓中由「价差回归」兑现的占比。仅供研究，非投资建议。
+        <span className="text-rose-500">盈红</span> / <span className="text-emerald-500">亏绿</span>。回归达成率 = 已平仓中由「价差回归」兑现的占比。{NFA}
       </div>
     </main>
   );

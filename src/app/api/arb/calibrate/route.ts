@@ -3,6 +3,7 @@ import { getKlinesBatch, HISTORY_LIMIT } from "@/lib/sources";
 import { calibrateRadar } from "@/lib/pairTrading";
 import { getUniverseConfig, isExcluded } from "@/lib/universe";
 import type { Candle } from "@/lib/types";
+import { NFA } from "@/lib/disclaimers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -77,6 +78,6 @@ export async function POST(req: Request) {
 export async function GET() {
   return NextResponse.json({
     defaults: { limit: 500, minCorrelation: 0.7, entryZ: 2.0, exitZ: 0.5, stopZ: 3.5, feeBps: 30 },
-    note: "POST {codes:[...]} 对候选池（已按股票池纯净化配置剔除科创/北交所/B 股等）内全部协整配对做全历史信号事后回测：每次 |z|≥入场阈开口就买入被低估的那一只，持有至价差回归/止损/超时，统计回归率、平均回归天数、单边净收益、胜率、最大逆向 z。单边收益含市场 β（非中性），协整为样本内性质会破裂，历史不代表未来，非投资建议。",
+    note: "POST {codes:[...]} 对候选池（已按股票池纯净化配置剔除科创/北交所/B 股等）内全部协整配对做全历史信号事后回测：每次 |z|≥入场阈开口就买入被低估的那一只，持有至价差回归/止损/超时，统计回归率、平均回归天数、单边净收益、胜率、最大逆向 z。单边收益含市场 β（非中性），协整为样本内性质会破裂，历史不代表未来。" + NFA,
   });
 }

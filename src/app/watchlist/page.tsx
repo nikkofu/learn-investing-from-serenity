@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import StockLink from "@/components/StockLink";
+import { NFA } from "@/lib/disclaimers";
 
 // ── 类型（与 /api/watchlist/* 对齐）────────────────────────────────────────────
 interface FavoriteStock {
@@ -105,7 +106,7 @@ export default function WatchlistPage() {
         <h1 className="text-xl font-semibold text-[var(--text)]">自选 / 收藏</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
           统一管理<strong>收藏个股</strong>、<strong>自定义股票池</strong>（套利雷达即按池内成分两两配对）与<strong>保存的筛选</strong>。
-          全部落 <code>.data/</code> 本地持久化，可一键深链到扫描 / 动量 / 套利页复用。仅供研究，不构成投资建议。
+          全部落 <code>.data/</code> 本地持久化，可一键深链到扫描 / 动量 / 套利页复用。{NFA}
         </p>
       </div>
 
