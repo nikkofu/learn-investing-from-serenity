@@ -349,6 +349,7 @@ function shortExitReason(reason: string): string {
   if (reason.includes("趋势突破")) return "趋势突破离场";
   if (reason.includes("高抛")) return "网格高抛止盈";
   if (reason.includes("分批止盈")) return "分批止盈(留runner)";
+  if (reason.includes("KAMA")) return "跌破 KAMA 离场";
   if (reason.includes("ATR") || reason.includes("自适应")) return "ATR自适应跟踪止盈";
   if (reason.includes("跟踪")) return "跟踪止盈";
   if (reason.includes("支撑") || reason.includes("止损")) return "跌破筹码支撑止损";

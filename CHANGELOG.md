@@ -4,6 +4,35 @@
 
 ---
 
+## [0.49.1] - 2026-06-25
+
+> **复刻 TradingView 开源策略：Kaufman Moving Average Adaptive Strategy [MKB]**。继 v0.49.0 的「发现同步」之后，走既有「逐个、具名、原作链接 + 差异说明、人工 + 回测双校验」路线，复刻 muratkbesiroglu(MKB) 的开源脚本 **KAMA Momentum Strategy**（`qgTc4zie`）。登记进策略注册表后**自动接入** `/analyze`、`/backtest/strategy`、`/chart` 策略图层、UI 下拉，无需改 UI。**零新依赖、不改任何既有计算口径。**
+
+### 原作逻辑（开源可见）
+- **KAMA（Kaufman 自适应均线）**：用效率比 ER（|净变动|/Σ|逐根变动|，近 21 根）在快(2)/慢(30) 两个 EMA 平滑常数间插值——趋势强时贴快线灵敏跟随、震荡时贴慢线迟钝抗洗。
+- **入场**：收盘上穿「KAMA + 0.5×标准差(20)」上带（用波动率带抬高门槛、过滤震荡市里 KAMA 附近的弱信号与噪声）。
+- **出场**：收盘跌破 KAMA，纪律化离场，以 KAMA 作主趋势参考。
+- 纯多头、单仓位、不加仓；建议参数 KAMA 长度 21 / 标准差长度 20 / 倍数 0.5（默认采用）。
+
+### 实现（`src/lib/tvStrategies.ts`）
+- 新增 `kaufmanAMA(closes, erPeriod, fast, slow)`（KAMA 序列，复用既有 `efficiencyRatio`）+ `rollingStdev`（总体标准差，对齐 Pine `ta.stdev` 默认）。
+- `computeKamaMomentum()` 产出 `TvStrategyLayers`：KAMA 跟踪线 / 多空方向（持仓态状态机）/ 翻多(上穿上带)·翻空(跌破KAMA) 点 / regime（按 ER 分趋势·震荡）/ regimeValue(ER)。
+- `runTvKamaMomentumV1()` 纯多头可回测包装：翻多入场 / 跌破 KAMA 离场，含双边手续费；**忠实原版不另叠加 ATR 止损**（`atrMult=0`，出场只认跌破 KAMA）。
+- 登记进 `TV_STRATEGIES` + `strategies.ts` 的 `STRATEGIES[]`（id `tv-kama-momentum-v1`、具名 muratkbesiroglu、原作链接、诚实差异说明）。
+
+### 诚实口径（差异说明）
+- Pine 内 KAMA 的「首根种子值」实现细节不公开，本复刻在首个可算根用前一根收盘播种（差异数根内收敛）。
+- 标准差用总体口径（除以 N）对齐 Pine `ta.stdev` 默认 `biased=true`。
+- 原作面向加密日线，A 股主板日线同样适用；入场带=动量确认而非择时预测，震荡市仍会有「突破后跌回 KAMA」的小亏损。**实测在小样本(300750+000001)上胜率 22.6% 未跑赢买入持有(+78%)，证明引擎诚实标注 `z=-3.05, p=0.0023` 不显著**——价值在过滤弱信号、吃干净单边动量，符合原作「趋势跟随动量过滤器」定位。
+
+### 顺带修复
+- `recommendationBacktest.ts` 的 `shortExitReason` 新增 `KAMA` 离场标签分支（置于 `自适应` 关键词前），避免本策略「跌破 Kaufman 自适应均线」的离场原因被误归类为「ATR自适应跟踪止盈」。纯标签展示、不改任何回测计算。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint` 改动文件 0 error · `next build` 通过 27/27 页；合成数据断言 + 真实 A 股数据（300750/000001）跨股票跑通 + dev 浏览器实测（/chart 策略图层叠加 + /backtest/strategy 证明引擎）+ 标注录屏。**零新依赖、不改任何既有回测/套利/打分/复权计算口径。**
+
+---
+
 ## [0.49.0] - 2026-06-25
 
 > **TradingView 热门策略发现同步（合规·元数据·参考）**。在「策略市场 `/strategies`」新增 **「TradingView 热门策略（参考）」** 区，一键同步 `https://cn.tradingview.com/scripts/?script_type=strategies` **第一页热门**策略的**公开元数据**，建立「值得复刻」清单。**只抓公开元信息、不抓脚本源码、不绕付费墙、保留原作者署名 + 回链**；版权归 TradingView 与各原作者。**零新依赖、不改任何计算口径**。

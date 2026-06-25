@@ -469,8 +469,194 @@ const CARDWELL_RSI_NAVIGATOR_V1: TvStrategy = {
   backtest: (candles) => runTvCardwellRsiNavigatorV1(candles),
 };
 
+/* ============================================================================
+ * 策略③：Kaufman Moving Average Adaptive Strategy [MKB] —— tv-kama-momentum-v1
+ *
+ * 原作：muratkbesiroglu（MKB），
+ * https://cn.tradingview.com/script/qgTc4zie-Kaufman-Moving-Average-Adaptive-Strategy-by-MKB/
+ *
+ * 原作自述（KAMA Momentum Strategy）：一个基于 Kaufman 自适应均线（KAMA）的趋势跟随动量策略。
+ *   - 入场：仅当价格向上突破「KAMA + 基于波动率的标准差过滤带」时做多（crossover）——用标准差带
+ *     抬高门槛、过滤掉震荡市里 KAMA 附近的弱信号与噪声；
+ *   - 出场：价格跌回 KAMA 下方即平仓（crossunder KAMA），简单纪律化，以 KAMA 作主趋势参考；
+ *   - 纯多头、单仓位、不加仓；作者称日线最佳、加密资产上尤甚。
+ *   - 建议参数：KAMA 长度 21 / 标准差长度 20 / 标准差倍数 0.5。
+ *
+ * KAMA 本身 = Kaufman 自适应均线：用效率比 ER（|净变动|/Σ|逐根变动|，近 erPeriod 根）在「快(2)/慢(30)」
+ * 两个 EMA 平滑常数间插值——趋势强(ER→1)时贴近快线灵敏跟随、震荡(ER→0)时贴近慢线迟钝抗洗：
+ *   SC = (ER×(2/(fast+1) − 2/(slow+1)) + 2/(slow+1))²；KAMA = KAMA₋₁ + SC×(close − KAMA₋₁)。
+ *
+ * 诚实口径：
+ *   - Pine 内 KAMA 的「首根种子值」实现细节不公开，本复刻在首个可计算根用前一根收盘播种，差异在数根内收敛。
+ *   - 标准差用总体口径（除以 N，对齐 Pine `ta.stdev` 默认 biased=true）。
+ *   - 原作面向加密日线；A 股主板日线同样适用，纯多头、含双边手续费。入场带过滤=动量确认而非择时预测，
+ *     震荡市仍可能出现「突破带→跌回 KAMA」的小亏损交易，价值在过滤弱信号、吃干净的单边动量。
+ *   - 忠实原版：出场仅用「跌回 KAMA」，不另叠加 ATR 跟踪止损（atrMult=0）。
+ * ==========================================================================*/
+
+interface KamaMomentumParams {
+  erPeriod: number;   // KAMA 效率比/长度（原作「KAMA Length」，默认 21）
+  fast: number;       // 最快 EMA 周期（KAMA 标准常数，默认 2）
+  slow: number;       // 最慢 EMA 周期（KAMA 标准常数，默认 30）
+  stdevLen: number;   // 标准差窗口（原作「Standard Deviation Length」，默认 20）
+  stdevMult: number;  // 标准差倍数（原作「Standard Deviation Multiplier」，默认 0.5）
+}
+
+const KAMA_MOMENTUM_DEFAULTS: KamaMomentumParams = {
+  erPeriod: 21,
+  fast: 2,
+  slow: 30,
+  stdevLen: 20,
+  stdevMult: 0.5,
+};
+
+/**
+ * Kaufman 自适应均线（KAMA）。erPeriod=效率比回看；fast/slow=快慢 EMA 周期（平滑常数）。
+ * 首个可计算根（i=erPeriod）用前一根收盘播种，其后按 KAMA 递推。预热段为 NaN。
+ */
+export function kaufmanAMA(
+  closes: number[],
+  erPeriod = 21,
+  fast = 2,
+  slow = 30,
+): number[] {
+  const n = closes.length;
+  const out = new Array<number>(n).fill(NaN);
+  const er = efficiencyRatio(closes, erPeriod);
+  const fastSC = 2 / (fast + 1);
+  const slowSC = 2 / (slow + 1);
+  let prev = NaN;
+  for (let i = erPeriod; i < n; i++) {
+    const e = fin(er[i]) ? er[i] : 0;
+    const sc = (e * (fastSC - slowSC) + slowSC) ** 2;
+    if (!fin(prev)) prev = closes[i - 1]; // 首根种子：前一根收盘
+    prev = prev + sc * (closes[i] - prev);
+    out[i] = prev;
+  }
+  return out;
+}
+
+/** 滚动总体标准差（除以 N，对齐 Pine `ta.stdev` 默认）。预热不足处为 NaN。 */
+function rollingStdev(values: number[], len: number): number[] {
+  const n = values.length;
+  const out = new Array<number>(n).fill(NaN);
+  for (let i = len - 1; i < n; i++) {
+    let sum = 0;
+    for (let k = i - len + 1; k <= i; k++) sum += values[k];
+    const mean = sum / len;
+    let varSum = 0;
+    for (let k = i - len + 1; k <= i; k++) varSum += (values[k] - mean) ** 2;
+    out[i] = Math.sqrt(varSum / len);
+  }
+  return out;
+}
+
+/**
+ * 计算 KAMA Momentum 策略图层：KAMA 跟踪线 + 多空方向（持仓态）+ 翻多/翻空（入场/出场）点
+ * + regime（按效率比 ER 分趋势/震荡）。
+ *   - 入场（翻多）：收盘上穿「KAMA + stdevMult×stdev(close)」上带；
+ *   - 出场（翻空）：收盘下穿 KAMA。
+ * 用持仓状态机产出 flips，保证与回测口径逐笔一致。
+ */
+export function computeKamaMomentum(
+  candles: Candle[],
+  params: Partial<KamaMomentumParams> = {},
+): TvStrategyLayers {
+  const p = { ...KAMA_MOMENTUM_DEFAULTS, ...params };
+  const n = candles.length;
+  const line = new Array<number | null>(n).fill(null);
+  const dir = new Array<1 | -1 | 0>(n).fill(0);
+  const regime = new Array<Regime>(n).fill("transition");
+  const flips: TvStrategyLayers["flips"] = [];
+
+  const closes = candles.map((c) => c.close);
+  const kama = kaufmanAMA(closes, p.erPeriod, p.fast, p.slow);
+  const std = rollingStdev(closes, p.stdevLen);
+  const er = efficiencyRatio(closes, p.erPeriod);
+  const regimeValue = er.slice();
+
+  const upper = (i: number): number => kama[i] + p.stdevMult * std[i];
+
+  let inPos = false;
+  let curDir: 1 | -1 | 0 = 0;
+  for (let i = 0; i < n; i++) {
+    if (fin(er[i])) regime[i] = er[i] >= 0.5 ? "trend" : er[i] <= 0.3 ? "chop" : "transition";
+    if (fin(kama[i])) line[i] = kama[i];
+
+    const ready = i > 0 && fin(kama[i]) && fin(kama[i - 1]) && fin(std[i]) && fin(std[i - 1]);
+    if (ready) {
+      if (!inPos) {
+        // 翻多：收盘上穿上带（KAMA + 倍数×标准差）
+        const crossUp = closes[i - 1] <= upper(i - 1) && closes[i] > upper(i);
+        if (crossUp) {
+          inPos = true;
+          curDir = 1;
+          flips.push({ index: i, dir: "up", price: closes[i] });
+        }
+      } else {
+        // 翻空：收盘下穿 KAMA
+        const crossDn = closes[i - 1] >= kama[i - 1] && closes[i] < kama[i];
+        if (crossDn) {
+          inPos = false;
+          curDir = -1;
+          flips.push({ index: i, dir: "down", price: closes[i] });
+        }
+      }
+    }
+    dir[i] = curDir;
+  }
+
+  return { line, dir, flips, regime, regimeValue };
+}
+
+/**
+ * 纯多头可回测包装：收盘上穿「KAMA + 0.5×标准差」上带入场、收盘跌破 KAMA 离场，单仓位，
+ * 含双边手续费。忠实原版——不另叠加 ATR 跟踪止损（atrMult=0），出场只认 KAMA 跌破。
+ */
+export function runTvKamaMomentumV1(candles: Candle[]): BacktestResult {
+  const p = KAMA_MOMENTUM_DEFAULTS;
+  const layers = computeKamaMomentum(candles);
+  const closes = candles.map((c) => c.close);
+  const kama = kaufmanAMA(closes, p.erPeriod, p.fast, p.slow);
+  const std = rollingStdev(closes, p.stdevLen);
+  const flipUp = new Array<boolean>(candles.length).fill(false);
+  const flipDown = new Array<boolean>(candles.length).fill(false);
+  for (const f of layers.flips) (f.dir === "up" ? flipUp : flipDown)[f.index] = true;
+
+  return runSignalBacktest(candles, {
+    warmup: Math.max(35, p.erPeriod + 10, p.stdevLen + 5),
+    atrMult: 0,
+    atrFloorPct: 0,
+    atrCeilPct: 0,
+    entry: (i) => {
+      if (!flipUp[i]) return null;
+      const band = fin(kama[i]) && fin(std[i]) ? kama[i] + p.stdevMult * std[i] : NaN;
+      return `【KAMA 动量突破】收盘 ${closes[i].toFixed(2)} 元上穿「KAMA${fin(kama[i]) ? ` ${kama[i].toFixed(2)}` : ""} + ${p.stdevMult}×标准差(${p.stdevLen})${fin(band) ? `=${band.toFixed(2)} 元` : ""}」上带（波动率过滤确认动量），顺势做多。`;
+    },
+    exit: (i) => {
+      if (!flipDown[i]) return null;
+      return `【跌破 KAMA】收盘 ${closes[i].toFixed(2)} 元跌破 Kaufman 自适应均线${fin(kama[i]) ? ` ${kama[i].toFixed(2)} 元` : ""}，趋势参考转弱，纪律离场。`;
+    },
+  });
+}
+
+const KAMA_MOMENTUM_V1: TvStrategy = {
+  meta: {
+    id: "tv-kama-momentum-v1",
+    name: "Kaufman Moving Average Adaptive Strategy [MKB] 复刻",
+    version: "1.0",
+    author: "muratkbesiroglu",
+    source: "https://cn.tradingview.com/script/qgTc4zie-Kaufman-Moving-Average-Adaptive-Strategy-by-MKB/",
+    notes:
+      "复刻自 muratkbesiroglu(MKB) 的 KAMA Momentum Strategy——基于 Kaufman 自适应均线(KAMA)的趋势跟随动量策略。KAMA 用效率比 ER 在快(2)/慢(30) 平滑常数间插值：趋势强时贴快线灵敏、震荡时贴慢线抗洗。入场=收盘上穿「KAMA + 0.5×标准差(20)」上带（用波动率带抬高门槛、过滤震荡噪声/弱信号）；出场=收盘跌破 KAMA，纪律化离场。建议参数 KAMA 长度 21 / 标准差长度 20 / 倍数 0.5（默认采用）。诚实口径：Pine 内 KAMA 首根种子细节不公开，本复刻在首个可算根用前一根收盘播种（差异数根内收敛）；标准差用总体口径对齐 Pine ta.stdev 默认。原作面向加密日线，A 股主板日线同样适用，纯多头、单仓位、不加仓、含双边手续费；忠实原版不另加 ATR 止损（出场只认跌破 KAMA）。入场带=动量确认而非择时预测，震荡市仍会有「突破后跌回」的小亏损，价值在过滤弱信号、吃干净单边动量。",
+    tags: ["tradingview", "kama", "kaufman", "adaptive-ma", "momentum", "trend-follow", "stdev-filter", "reproduction"],
+  },
+  compute: (candles) => computeKamaMomentum(candles),
+  backtest: (candles) => runTvKamaMomentumV1(candles),
+};
+
 /** 已复刻的 TV 策略注册表（顺序即 UI 下拉顺序）。新增脚本只需在此追加一项。 */
-const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1];
+const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, KAMA_MOMENTUM_V1];
 
 /** 列出所有已复刻 TV 策略的元信息（供「策略图层」下拉）。 */
 export function listTvStrategies(): TvStrategyMeta[] {

@@ -25,7 +25,7 @@ import {
   runFibKdjPullbackV1,
   runConfluenceV1,
 } from "./indicatorStrategies";
-import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1 } from "./tvStrategies";
+import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvKamaMomentumV1 } from "./tvStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -181,6 +181,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["tradingview", "rsi", "cardwell", "trade-plan", "risk-reward", "r-multiple", "reproduction"],
     },
     run: (candles) => runTvCardwellRsiNavigatorV1(candles),
+  },
+  {
+    meta: {
+      id: "tv-kama-momentum-v1",
+      name: "Kaufman Moving Average Adaptive Strategy [MKB] 复刻",
+      version: "1.0",
+      description:
+        "复刻 TradingView 社区脚本 KAMA Momentum Strategy（作者 muratkbesiroglu/MKB）。基于 Kaufman 自适应均线(KAMA) 的趋势跟随动量策略：KAMA 用效率比 ER 在快(2)/慢(30) 平滑常数间插值——趋势强时贴快线灵敏跟随、震荡时贴慢线迟钝抗洗。入场=收盘上穿「KAMA + 0.5×标准差(20)」上带（用波动率带抬高门槛、过滤震荡市里 KAMA 附近的弱信号与噪声）；出场=收盘跌破 KAMA，纪律化离场，以 KAMA 作主趋势参考。建议参数 KAMA 长度 21 / 标准差长度 20 / 倍数 0.5（默认采用）。回测纯多头、单仓位不加仓、含双边手续费，忠实原版不另叠加 ATR 止损（出场只认跌破 KAMA）。诚实口径：Pine 内 KAMA 首根种子细节不公开，本复刻在首个可算根用前一根收盘播种（差异数根内收敛），标准差用总体口径对齐 Pine ta.stdev 默认；原作面向加密日线、A 股主板日线同样适用，入场带=动量确认而非择时预测，震荡市仍会有「突破后跌回」的小亏损。对应 /chart「策略图层」可叠加 KAMA 线/翻多翻空标记/regime 读数。",
+      tags: ["tradingview", "kama", "kaufman", "adaptive-ma", "momentum", "trend-follow", "stdev-filter", "reproduction"],
+    },
+    run: (candles) => runTvKamaMomentumV1(candles),
   },
   {
     meta: {
