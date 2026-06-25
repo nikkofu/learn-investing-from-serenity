@@ -1,6 +1,6 @@
 {
   "name": "learn-investing-from-serenity",
-  "version": "0.48.0",
+  "version": "0.48.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -13,6 +13,7 @@
     "html-to-image": "^1.11.13",
     "iconv-lite": "^0.7.2",
     "lightweight-charts": "5.2.0",
+    "lucide-react": "1.20.0",
     "next": "16.2.9",
     "openai": "^6.42.0",
     "react": "19.2.4",

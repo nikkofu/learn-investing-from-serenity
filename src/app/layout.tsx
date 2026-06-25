@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Sans_SC } from "next/font/google";
 import "./globals.css";
-import Nav from "@/components/Nav";
+import AppShell from "@/components/shell/AppShell";
 import { loadTheme, loadThemeMode } from "@/lib/config";
 import { NFA } from "@/lib/disclaimers";
 
@@ -53,12 +53,16 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           }}
         />
       </head>
-      <body className="flex min-h-full flex-col">
-        <Nav />
-        <main className="w-full flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
-        <footer className="border-t border-[var(--border)] px-4 py-4 text-center text-xs leading-5 text-[var(--faint)] sm:px-6 lg:px-8">
-          {NFA}AI 与量化结果均可能出错；历史回测/情景模拟不代表未来收益；股市有风险，决策与盈亏由您自行承担。数据来自东方财富/腾讯财经公开接口。
-        </footer>
+      <body className="min-h-full">
+        <AppShell
+          footer={
+            <footer className="border-t border-[var(--border)] px-4 py-4 text-center text-xs leading-5 text-[var(--faint)] sm:px-6 lg:px-8">
+              {NFA}AI 与量化结果均可能出错；历史回测/情景模拟不代表未来收益；股市有风险，决策与盈亏由您自行承担。数据来自东方财富/腾讯财经公开接口。
+            </footer>
+          }
+        >
+          {children}
+        </AppShell>
       </body>
     </html>
   );
