@@ -4,6 +4,7 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { calculateChipDistribution } from "@/lib/quant";
 import type { ChipDistributionResult, BacktestResult, TradeAction, TechnicalAssessment } from "@/lib/quant";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL } from "@/lib/indicators";
+import { PREFERRED_PRO_STRATEGY_ID, readSavedStrategyId, saveStrategyId } from "@/lib/strategyPref";
 import { computePerformanceReport } from "@/lib/performance";
 import BacktestReport from "./BacktestReport";
 import type { Candle } from "@/lib/types";
@@ -245,9 +246,20 @@ const calculateMA = (data: Candle[], period: number): number[] => {
 export default function QuantChart({ quantData, currentPrice, height: _height, externalPeriod }: QuantChartProps) {
   const { chips, technical, candles } = quantData;
 
-  const [activeStrategy, setActiveStrategy] = useState<string>(
-    quantData.defaultStrategyId ?? quantData.strategies?.[0]?.meta.id ?? "chokepoint",
-  );
+  // 初始策略用「不读 localStorage」的确定性口径，避免 SSR/CSR 水合不一致：偏好 Cardwell > 后端默认 > 列表首个。
+  const [activeStrategy, setActiveStrategy] = useState<string>(() => {
+    const ids = (quantData.strategies ?? []).map((s) => s.meta.id);
+    const has = (id?: string | null): id is string => !!id && ids.includes(id);
+    if (has(PREFERRED_PRO_STRATEGY_ID)) return PREFERRED_PRO_STRATEGY_ID;
+    if (has(quantData.defaultStrategyId)) return quantData.defaultStrategyId;
+    return ids[0] ?? quantData.defaultStrategyId ?? "chokepoint";
+  });
+  // 挂载后按「最后一次选择」（localStorage）校正，与全站各页面一致；失效则保持上面的默认。
+  useEffect(() => {
+    const ids = (quantData.strategies ?? []).map((s) => s.meta.id);
+    const saved = readSavedStrategyId();
+    if (saved && ids.includes(saved)) setActiveStrategy(saved);
+  }, [quantData.strategies]);
   const [hoveredTrade, setHoveredTrade] = useState<any | null>(null);
 
   const currentBacktest = useMemo(() => {
@@ -1225,7 +1237,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
               <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--faint)] select-none">策略</span>
               <select
                 value={activeStrategy}
-                onChange={(e) => setActiveStrategy(e.target.value)}
+                onChange={(e) => { setActiveStrategy(e.target.value); saveStrategyId(e.target.value); }}
                 title={activeStrategyMeta?.description}
                 className="bg-[var(--inset)] border border-[var(--border)] text-[10px] font-bold tracking-wide text-[var(--text)] px-2 py-1 rounded-[1px] cursor-pointer focus:outline-none focus:border-[var(--accent)]"
               >

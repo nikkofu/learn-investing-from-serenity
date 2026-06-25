@@ -12,6 +12,7 @@ import { DEFAULT_MA_PARAMS, tradeSizeTag, type MaStrategyParams, type BacktestRe
 import type { StrategyBacktest } from "@/lib/strategies";
 import type { PerformanceReport } from "@/lib/performance";
 import { DRAW_PRESETS, type ChartDrawing } from "@/lib/drawings";
+import { PREFERRED_PRO_STRATEGY_ID, readSavedStrategyId, saveStrategyId } from "@/lib/strategyPref";
 
 interface AnalyzeResponse {
   quote: StockQuote;
@@ -86,8 +87,15 @@ function ChartInner() {
   const [drawing, setDrawing] = useState(false);
   const [drawErr, setDrawErr] = useState("");
   const [drawQ, setDrawQ] = useState("");
-  // Pro 画布的买卖引擎：可在图表上直接切换所用策略（默认跟随后端 ?strategy= / DEFAULT_STRATEGY_ID）。
+  // Pro 画布的买卖引擎：默认 Cardwell RSI Trade，且记忆用户上次选择（localStorage），下次自动带出。
   const [proStrategyId, setProStrategyId] = useState("");
+
+  // 进入页面时恢复上次选择的买卖引擎；若带有深链 ?strategy=，则尊重链接、不覆盖。
+  useEffect(() => {
+    if (params.get("strategy")) return;
+    const saved = readSavedStrategyId();
+    if (saved) setProStrategyId(saved);
+  }, [params]);
 
   async function runDraw(opts: { question?: string; preset?: string }) {
     const code = data?.quote.code || params.get("code");
@@ -372,9 +380,21 @@ function ChartInner() {
   // 策略图层（?layer=）与 Pro 画布买卖引擎：图层自动叠加 TV 复刻策略；买卖标记按所选策略切换（客户端即时，无需重新拉数）。
   const layerId = params.get("layer")?.trim() ?? "";
   const proStrategies: StrategyBacktest[] = data?.quant?.strategies ?? [];
-  const activeProStrategyId = proStrategyId || data?.quant?.defaultStrategyId || "";
-  const proTrades: TradeAction[] =
-    proStrategies.find((s) => s.meta.id === activeProStrategyId)?.result.trades ?? data?.quant?.backtest?.trades ?? [];
+  const hasProStrategy = (id: string) => !!id && proStrategies.some((s) => s.meta.id === id);
+  // 默认买卖引擎优先级：深链 ?strategy= > 偏好默认 Cardwell RSI Trade > 后端默认。
+  const urlStrategyId = params.get("strategy")?.trim() ?? "";
+  const preferredDefaultStrategyId =
+    (hasProStrategy(urlStrategyId) && urlStrategyId) ||
+    (hasProStrategy(PREFERRED_PRO_STRATEGY_ID) && PREFERRED_PRO_STRATEGY_ID) ||
+    data?.quant?.defaultStrategyId ||
+    "";
+  // 当前买卖引擎：用户在本会话/上次的选择（须存在于策略列表）优先，否则取默认。
+  const activeProStrategyId = (hasProStrategy(proStrategyId) && proStrategyId) || preferredDefaultStrategyId;
+  // 当前买卖引擎对应的回测结果：左侧 B/S 标记、右侧「交易信号/回测统计/历史明细」统一取自它，
+  // 与所选策略一致（而非后端默认 defaultBacktest）；缺失时回退后端默认。
+  const activeProResult: BacktestResult | null =
+    proStrategies.find((s) => s.meta.id === activeProStrategyId)?.result ?? data?.quant?.backtest ?? null;
+  const proTrades: TradeAction[] = activeProResult?.trades ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[var(--bg)] text-[var(--text)] font-sans overflow-hidden select-none">
@@ -528,7 +548,11 @@ function ChartInner() {
                     <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono">买卖引擎</span>
                     <select
                       value={activeProStrategyId}
-                      onChange={(e) => setProStrategyId(e.target.value)}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setProStrategyId(id);
+                        saveStrategyId(id);
+                      }}
                       className="bg-[var(--inset)] border border-[var(--border)] text-[10px] font-bold tracking-wide text-[var(--text)] px-2 py-1 rounded-[1px] cursor-pointer focus:outline-none focus:border-[var(--accent)]"
                     >
                       {proStrategies.map((s) => (
@@ -784,7 +808,10 @@ function ChartInner() {
 
               {/* 交易回测与模拟明细面板 */}
               {activeTab === "trades" && data.quant && (() => {
-                const bt = tuned?.backtest ?? data.quant.backtest;
+                // 未调参时统一取「所选买卖引擎」的回测结果，与左侧 B/S 标记一致；调参（传统均线）优先。
+                const bt = tuned?.backtest ?? activeProResult ?? data.quant.backtest;
+                const activeProStrategyName =
+                  proStrategies.find((s) => s.meta.id === activeProStrategyId)?.meta.name ?? "";
                 return (
                 <div className="space-y-4">
                   {/* 策略调参表单（参数可调 + 实时重跑回测，对标 TradingView Strategy 参数面板） */}
@@ -836,7 +863,11 @@ function ChartInner() {
                   <div className="border border-[var(--border)] bg-[var(--bg)] p-3 rounded-[2px] space-y-2 font-mono text-[11px]">
                     <div className="font-bold text-[var(--text)] border-b border-[var(--border)] pb-1.5 text-[10.5px] uppercase flex items-center justify-between">
                       <span>回测统计 (BACKTEST STATS)</span>
-                      {tuned && <span className="text-[8.5px] text-[var(--accent)] normal-case">调参 · 传统均线</span>}
+                      {tuned ? (
+                        <span className="text-[8.5px] text-[var(--accent)] normal-case">调参 · 传统均线</span>
+                      ) : activeProStrategyName ? (
+                        <span className="text-[8.5px] text-[var(--accent)] normal-case">{activeProStrategyName}</span>
+                      ) : null}
                     </div>
                     <div className="flex justify-between py-1 border-b border-[var(--border)]/20">
                       <span className="text-[var(--faint)]">策略胜率:</span>
@@ -868,8 +899,11 @@ function ChartInner() {
 
                   {/* 交易历史卡片列表 */}
                   <div className="space-y-2">
-                    <div className="text-[10px] font-bold text-[var(--faint)] uppercase tracking-wider">
-                      量化策略历史交易信号明细
+                    <div className="text-[10px] font-bold text-[var(--faint)] uppercase tracking-wider flex items-center justify-between">
+                      <span>量化策略历史交易信号明细</span>
+                      {!tuned && activeProStrategyName && (
+                        <span className="text-[8.5px] text-[var(--accent)] normal-case tracking-normal">{activeProStrategyName}</span>
+                      )}
                     </div>
                     {bt?.trades && bt.trades.length > 0 ? (
                       <div className="border border-[var(--border)] bg-[var(--surface)] rounded-[2px] overflow-hidden">

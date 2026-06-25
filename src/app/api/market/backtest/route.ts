@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getKlineFailover, type FqMode } from "@/lib/sources";
-import { runTraditionalMaBacktest, sanitizeMaParams, type MaStrategyParams } from "@/lib/quant";
+import { runTraditionalMaBacktest, executeTradesNextOpen, sanitizeMaParams, type MaStrategyParams } from "@/lib/quant";
 import { computePerformanceReport } from "@/lib/performance";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,8 @@ export async function POST(req: Request) {
 
     const params = sanitizeMaParams(body.params);
     const candles = await getKlineFailover(code, 360, klt, fq);
-    const backtest = runTraditionalMaBacktest(candles, params);
+    // 成交价统一走「次日开盘成交（T+1 open）」口径。
+    const backtest = executeTradesNextOpen(candles, runTraditionalMaBacktest(candles, params));
     const report = computePerformanceReport(backtest.history, backtest.trades);
 
     return NextResponse.json({ params, backtest, report });

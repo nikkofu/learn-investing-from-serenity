@@ -4,6 +4,7 @@ import {
   calculateChipDistribution,
   generatePriceProjection,
   runChokepointMomentumBacktest,
+  executeTradesNextOpen,
   type ChipDistributionResult,
   type TechnicalAssessment,
 } from "./quant";
@@ -269,7 +270,8 @@ export function evaluateMiningSignal(input: MiningCandidate & { candles: Candle[
 
   const chips = calculateChipDistribution(candles, price);
   const tech = analyzeTechnicalPatterns(candles, price, chips);
-  const backtest = runChokepointMomentumBacktest(candles, NEUTRAL_SCORE, { code });
+  // 成交价统一走「次日开盘成交（T+1 open）」口径，B 信号点与全站一致。
+  const backtest = executeTradesNextOpen(candles, runChokepointMomentumBacktest(candles, NEUTRAL_SCORE, { code }));
   const projections = generatePriceProjection(candles, NEUTRAL_SCORE);
 
   const bottom = scoreBottom(closes, price);

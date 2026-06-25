@@ -16,6 +16,7 @@ import {
   runChokepointMomentumBacktestV7,
   runChokepointMomentumBacktestV8,
   runGridMeanReversionBacktest,
+  executeTradesNextOpen,
   type BacktestResult,
 } from "./quant";
 import {
@@ -276,9 +277,12 @@ export function getStrategy(id: string): Strategy | undefined {
   return STRATEGIES.find((s) => s.meta.id === id);
 }
 
-/** 跑全部已登记策略，返回 {元信息, 结果} 数组（顺序同 STRATEGIES）。 */
+/**
+ * 跑全部已登记策略，返回 {元信息, 结果} 数组（顺序同 STRATEGIES）。
+ * 所有策略统一走「次日开盘成交（T+1 open）」撮合（executeTradesNextOpen），口径全站一致。
+ */
 export function runAllStrategies(candles: Candle[], ctx: StrategyContext): StrategyBacktest[] {
-  return STRATEGIES.map((s) => ({ meta: s.meta, result: s.run(candles, ctx) }));
+  return STRATEGIES.map((s) => ({ meta: s.meta, result: executeTradesNextOpen(candles, s.run(candles, ctx)) }));
 }
 
 /** 从策略产物数组中取默认策略的结果（找不到则取第一个）。 */

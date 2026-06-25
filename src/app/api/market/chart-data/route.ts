@@ -4,6 +4,7 @@ import {
   calculateChipDistribution,
   runTraditionalMaBacktest,
   runChokepointMomentumBacktest,
+  executeTradesNextOpen,
   analyzeTechnicalPatterns,
   generatePriceProjection,
 } from "@/lib/quant";
@@ -36,8 +37,9 @@ export async function GET(req: Request) {
 
     // 纯数学指标计算 (无模型延迟，毫秒级计算完毕)
     const chips = calculateChipDistribution(candles, refPrice);
-    const traditionalBacktest = runTraditionalMaBacktest(candles);
-    const chokepointBacktest = runChokepointMomentumBacktest(candles, 70); // 默认使用中性分数 70 进行初筛回测
+    // 成交价统一走「次日开盘成交（T+1 open）」口径，与 runAllStrategies 一致。
+    const traditionalBacktest = executeTradesNextOpen(candles, runTraditionalMaBacktest(candles));
+    const chokepointBacktest = executeTradesNextOpen(candles, runChokepointMomentumBacktest(candles, 70)); // 默认使用中性分数 70 进行初筛回测
     const technical = analyzeTechnicalPatterns(candles, refPrice, chips);
     const projections = generatePriceProjection(candles, 70);
 

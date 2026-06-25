@@ -72,6 +72,128 @@ function annualizedSharpe(history: { strategyWorth: number }[]): number {
 }
 
 /**
+ * 成交价口径：次日开盘成交（T+1 open）。
+ *
+ * 各策略的信号判定仍在「第 i 根收盘」确认（保持原有择时逻辑不变），但撮合统一顺延到「第 i+1 根
+ * 开盘价」成交——彻底消除「当根收盘才知道信号、却假设当根能按收盘价成交」的未来函数，最贴近 A 股
+ * 实盘可执行性。本函数以策略原始产出的 trades 为「信号序列」（仅取 type/sizePct/reason/date），
+ * 按次日开盘重新撮合，重算成交价、profitPct、胜率、净值曲线与同期个股基准，统一全站口径。
+ *
+ * 仓位语义沿用 TradeAction.sizePct 约定：
+ * - buy.sizePct 缺省=整仓（投入全部现金）；有值=占满仓资金（初始 10 万）的比例，按现金上限截断；
+ * - sell.sizePct 缺省或 ≥1=清仓；否则按「当前持仓股数 × sizePct」减仓（均价不变，清仓才结算盈亏）。
+ * 末根才出现的信号无次日开盘可成交，按「不可执行」丢弃。
+ */
+export function executeTradesNextOpen(candles: Candle[], base: BacktestResult): BacktestResult {
+  const signals = base.trades;
+  const n = candles.length;
+  if (!signals || signals.length === 0 || n < 2) return base;
+
+  const idxByDate = new Map<string, number>();
+  for (let i = 0; i < n; i++) idxByDate.set(candles[i].date, i);
+
+  interface Order { type: "buy" | "sell"; sizePct?: number; reason: string }
+  const ordersAt = new Map<number, Order[]>();
+  let firstExecIdx = Number.POSITIVE_INFINITY;
+  for (const t of signals) {
+    const sigIdx = idxByDate.get(t.date);
+    if (sigIdx == null) continue;
+    const execIdx = sigIdx + 1;
+    if (execIdx >= n) continue; // 末根信号无次日开盘，不可成交
+    if (!ordersAt.has(execIdx)) ordersAt.set(execIdx, []);
+    ordersAt.get(execIdx)!.push({ type: t.type, sizePct: t.sizePct, reason: t.reason });
+    if (execIdx < firstExecIdx) firstExecIdx = execIdx;
+  }
+  if (!Number.isFinite(firstExecIdx)) {
+    return { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+  }
+
+  const trades: TradeAction[] = [];
+  const history: BacktestResult["history"] = [];
+  let cash = 100000;
+  let shares = 0;
+  let avgCost = 0;
+  let posDeployed = 0;
+  let posProceeds = 0;
+  let winCount = 0;
+  let tradeCount = 0;
+  const initialStockWorth = candles[firstExecIdx].close;
+
+  for (let i = firstExecIdx; i < n; i++) {
+    const c = candles[i];
+    const fill = Number.isFinite(c.open) && c.open > 0 ? c.open : c.close;
+    const orders = ordersAt.get(i);
+    if (orders) {
+      for (const o of orders) {
+        if (o.type === "buy") {
+          const spend = o.sizePct == null ? cash : Math.min(cash, Math.max(0, o.sizePct) * 100000);
+          if (spend > 0) {
+            const bought = buyShares(spend, fill, DEFAULT_COST_MODEL);
+            if (bought > 0) {
+              avgCost = shares + bought > 0 ? (avgCost * shares + fill * bought) / (shares + bought) : fill;
+              shares += bought;
+              cash -= spend;
+              posDeployed += spend;
+              trades.push({
+                type: "buy",
+                date: c.date,
+                price: fill,
+                reason: o.reason,
+                ...(o.sizePct != null ? { sizePct: o.sizePct } : {}),
+              });
+            }
+          }
+        } else if (shares > 1e-9) {
+          const sold = o.sizePct == null || o.sizePct >= 1 ? shares : shares * o.sizePct;
+          if (sold > 1e-12) {
+            const proceeds = sellProceeds(sold, fill, DEFAULT_COST_MODEL);
+            cash += proceeds;
+            shares -= sold;
+            posProceeds += proceeds;
+            trades.push({
+              type: "sell",
+              date: c.date,
+              price: fill,
+              reason: o.reason,
+              profitPct: avgCost > 0 ? ((fill - avgCost) / avgCost) * 100 : 0,
+              ...(o.sizePct != null ? { sizePct: o.sizePct } : {}),
+            });
+            if (shares <= 1e-6) {
+              tradeCount++;
+              if (posProceeds > posDeployed) winCount++;
+              shares = 0;
+              avgCost = 0;
+              posDeployed = 0;
+              posProceeds = 0;
+            }
+          }
+        }
+      }
+    }
+    const worth = shares > 1e-9 ? shares * c.close : cash;
+    history.push({
+      date: c.date,
+      strategyWorth: Number(worth.toFixed(0)),
+      stockWorth: Number(((c.close / initialStockWorth) * 100000).toFixed(0)),
+    });
+  }
+
+  const finalWorth = shares > 1e-9 ? shares * candles[n - 1].close : cash;
+  const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
+  const stockReturn = ((candles[n - 1].close - initialStockWorth) / initialStockWorth) * 100;
+  const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
+
+  return {
+    winRate: Number(winRate.toFixed(1)),
+    sharpe: annualizedSharpe(history),
+    strategyReturn: Number(strategyReturn.toFixed(2)),
+    stockReturn: Number(stockReturn.toFixed(2)),
+    trades,
+    history,
+  };
+}
+
+/**
  * 估算个股在最新收盘价下的筹码分布。
  * 算法原理：基于 120 天日K线，以每日换手率进行筹码历史衰减。
  * 每日新筹码以当天的收盘价为中心，结合最高/最低价进行三角概率分布沉淀。

@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
 import { NFA } from "@/lib/disclaimers";
 import { PageHeader } from "@/components/ui";
+import { resolveInitialStrategyId, saveStrategyId } from "@/lib/strategyPref";
 
 interface StrategyMeta {
   id: string;
@@ -268,8 +269,14 @@ function StrategyBacktestInner() {
         if (!alive) return;
         const list = j.strategies ?? [];
         setStrategies(list);
-        const fromUrl = urlStrategy && list.some((s) => s.id === urlStrategy) ? urlStrategy : null;
-        setStrategyId(fromUrl ?? j.defaultStrategyId ?? "");
+        // 与全站一致：深链 ?strategy= > 上次选择 > 偏好默认(Cardwell) > 后端默认 > 首个。
+        setStrategyId(
+          resolveInitialStrategyId({
+            ids: list.map((s) => s.id),
+            urlId: urlStrategy,
+            backendDefaultId: j.defaultStrategyId ?? null,
+          }),
+        );
       })
       .catch(() => {});
     return () => {
@@ -453,7 +460,12 @@ function StrategyBacktestInner() {
           <span className="text-[var(--muted)]">回测策略（与个股看盘页同一套买卖规则，忠实重放 + 涨跌停撮合 + 手续费）</span>
           <select
             value={strategyId}
-            onChange={(e) => setStrategyId(e.target.value)}
+            onChange={(e) => {
+              const id = e.target.value;
+              setStrategyId(id);
+              // 伪 id（内置简化口径）不写入全站偏好，以免污染其他页面。
+              if (id !== BUILTIN_SIMPLE) saveStrategyId(id);
+            }}
             className={inputCls}
           >
             {strategies.map((s) => (

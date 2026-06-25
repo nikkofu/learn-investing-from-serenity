@@ -378,6 +378,8 @@ function simulateSymbolViaStrategy(
   const fee = cfg.feeBps / 10_000;
   const limitFrac = priceLimitFraction(s.code, s.name);
   const prices = candles.map((c) => c.close);
+  // 成交价口径：次日开盘成交（T+1 open）。信号于第 i 根收盘确认，撮合顺延到第 i+1 根开盘价。
+  const opens = candles.map((c) => (Number.isFinite(c.open) && c.open > 0 ? c.open : c.close));
 
   const dayReturn = (i: number): number | null => {
     if (i < 1 || prices[i - 1] <= 0) return null;
@@ -440,18 +442,20 @@ function simulateSymbolViaStrategy(
     const i = idxByDate.get(tr.date);
     if (i === undefined) continue;
     if (tr.type === "buy") {
-      if (atLimitUp(i)) continue; // 涨停买不进，丢弃该（加）仓点
+      const execIdx = i + 1; // 次日开盘成交
+      if (execIdx >= N) continue; // 末根信号无次日开盘可成交
+      if (atLimitUp(execIdx)) continue; // 次日开盘即涨停，买不进，丢弃该（加）仓点
       const wantFrac = tr.sizePct === undefined ? 1 : Math.max(0, Math.min(1, tr.sizePct));
       const room = pos ? Math.max(0, 1 - pos.deployedFrac) : 1;
       const useFrac = Math.min(wantFrac, room);
       if (useFrac <= 1e-9) continue; // 已满仓或无效买点 → 忽略（v1–v5 整仓后多余买点在此被忽略）
-      const effBuy = prices[i] * (1 + fee);
+      const effBuy = opens[execIdx] * (1 + fee);
       if (effBuy <= 0) continue;
       const sharesBought = useFrac / effBuy;
       if (!pos) {
         pos = {
-          firstIdx: i,
-          firstDate: tr.date,
+          firstIdx: execIdx,
+          firstDate: candles[execIdx].date,
           deployedFrac: 0,
           deployedCash: 0,
           shares: 0,
@@ -460,17 +464,17 @@ function simulateSymbolViaStrategy(
           buyFracSum: 0,
           sellPxNum: 0,
           sellSharesSum: 0,
-          lastSellIdx: i,
+          lastSellIdx: execIdx,
         };
       }
       pos.shares += sharesBought;
       pos.deployedFrac += useFrac;
       pos.deployedCash += useFrac;
-      pos.buyPxNum += prices[i] * useFrac;
+      pos.buyPxNum += opens[execIdx] * useFrac;
       pos.buyFracSum += useFrac;
     } else {
       if (!pos) continue;
-      let j = i;
+      let j = i + 1; // 次日开盘成交
       while (j < N && atLimitDown(j)) j++; // 跌停卖不出，顺延到可成交日
       const sellFracOfHolding = tr.sizePct === undefined ? 1 : Math.max(0, Math.min(1, tr.sizePct));
       const sellingAll = sellFracOfHolding >= 1;
@@ -481,10 +485,10 @@ function simulateSymbolViaStrategy(
       }
       const sharesSold = sellingAll ? pos.shares : pos.shares * sellFracOfHolding;
       if (sharesSold <= 1e-12) continue;
-      const effSell = prices[j] * (1 - fee);
+      const effSell = opens[j] * (1 - fee);
       pos.proceedsCash += sharesSold * effSell;
       pos.shares -= sharesSold;
-      pos.sellPxNum += prices[j] * sharesSold;
+      pos.sellPxNum += opens[j] * sharesSold;
       pos.sellSharesSum += sharesSold;
       pos.lastSellIdx = j;
       if (pos.shares <= 1e-9) closePosition(shortExitReason(tr.reason));
