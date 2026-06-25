@@ -15,6 +15,30 @@ const MAP_STAGES: { key: string; label: string }[] = [
   { key: "summary", label: "整理产业链节点" },
 ];
 
+/** K 线图标（蜡烛图），用于个股「看 K 线」入口。 */
+function ChartGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M9 5v4" />
+      <rect width="4" height="6" x="7" y="9" rx="1" />
+      <path d="M9 15v2" />
+      <path d="M17 3v2" />
+      <rect width="4" height="8" x="15" y="5" rx="1" />
+      <path d="M17 13v3" />
+      <path d="M3 3v18h18" />
+    </svg>
+  );
+}
+
 function MapPageInner() {
   const searchParams = useSearchParams();
   const [trend, setTrend] = useState("");
@@ -242,24 +266,25 @@ function MapPageInner() {
                           ? "border-[var(--accent-line)] bg-gradient-to-br from-[var(--accent-soft)] to-[var(--panel)] shadow-[0_0_10px_rgba(245,158,11,0.06)]" 
                           : "border-[var(--border)] bg-[var(--panel)]"
                       }`}>
-                        {n.isChokepoint && (
-                          <div className="absolute top-3 right-3 flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-1.5 mb-1.5">
-                          <h3 className="font-semibold text-sm text-[var(--text)]">{n.layer}</h3>
+                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                          <h3 className="min-w-0 font-semibold text-sm leading-snug text-[var(--text)]">{n.layer}</h3>
                           {n.isChokepoint && (
-                            <span className="rounded bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 text-[9px] font-medium text-amber-500">瓶颈点</span>
+                            <span className="shrink-0 inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-500">
+                              <span className="relative flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
+                              </span>
+                              瓶颈点
+                            </span>
                           )}
                         </div>
                         <p className="text-xs text-[var(--muted)] line-clamp-2 leading-relaxed" title={n.role}>{n.role}</p>
                         
                         {n.bomRatio && (
-                          <div className="mt-2 text-[10px] font-mono text-[var(--muted)] flex items-center gap-1">
-                            <span className="w-1 h-1 rounded-full bg-[var(--accent)]" />
-                            BOM占比: <span className="font-bold text-[var(--text)]">{n.bomRatio}</span>
+                          <div className="mt-2 flex items-start gap-1.5 text-[10px] font-mono leading-relaxed text-[var(--muted)]">
+                            <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-[var(--accent)]" />
+                            <span className="shrink-0 whitespace-nowrap">BOM占比</span>
+                            <span className="font-bold text-[var(--text)]">{n.bomRatio}</span>
                           </div>
                         )}
 
@@ -282,7 +307,12 @@ function MapPageInner() {
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                                 <div className="flex flex-col text-left">
                                   <Link href={`/analyze?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="个股分析" className="font-semibold text-[var(--text)] text-[11px] leading-tight hover:text-[var(--accent)] hover:underline">{t.name}</Link>
-                                  <Link href={`/chart?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="看 K 线图" className="font-mono text-[9px] text-[var(--faint)] hover:text-[var(--accent)] hover:underline">{t.code} · 图</Link>
+                                  <span className="flex items-center gap-1 font-mono text-[9px] text-[var(--faint)]">
+                                    {t.code}
+                                    <Link href={`/chart?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="看 K 线图" aria-label="看 K 线图" className="text-[var(--faint)] transition hover:text-[var(--accent)]">
+                                      <ChartGlyph className="h-3 w-3" />
+                                    </Link>
+                                  </span>
                                 </div>
                               </div>
                             ) : (
@@ -352,7 +382,10 @@ function MapPageInner() {
                               <span className="font-medium text-[var(--text)]">{t.name}</span>
                             )}
                             {t.code && (isA ? (
-                              <Link href={`/chart?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="看 K 线图" className="ml-1 font-mono text-xs text-[var(--faint)] hover:text-[var(--accent)] hover:underline">{t.code} · 图</Link>
+                              <Link href={`/chart?code=${t.code}`} target="_blank" rel="noopener noreferrer" title="看 K 线图" className="ml-1 inline-flex items-center gap-1 align-middle font-mono text-xs text-[var(--faint)] transition hover:text-[var(--accent)]">
+                                {t.code}
+                                <ChartGlyph className="h-3.5 w-3.5" />
+                              </Link>
                             ) : (
                               <span className="ml-1 font-mono text-xs text-[var(--faint)]">{t.code}</span>
                             ))}

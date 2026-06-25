@@ -1,7 +1,7 @@
 # 路线图与交接文档 / Roadmap & Handoff
 
 > 本文档面向**未来新开 session 的交接**。读完应能独立接手本项目的开发、发版与后续路线。
-> 最后更新：随 v0.49.1（2026-06-25）。当前版本 **v0.49.1**，分支 `main`。
+> 最后更新：随 v0.49.3（2026-06-25）。当前版本 **v0.49.3**，分支 `main`。
 
 ---
 
@@ -151,6 +151,7 @@
 - [x] **v0.49.0** **TV 热门策略发现同步**（**已于 v0.49.2 下线**）：抓取解析库 `src/lib/tvScripts.ts`（解析列表页内嵌 JSON → `TvScriptRef`：名称/作者/链接/点赞/评论/访问级别/缩略图/标的/Pine 版本/时间戳/摘要）；接入 `sync.ts` 新增 `tvStrategies` 源（版本化 + 快照 + 防缩水校验），`/sync` 中心新增一行，读取接口 `GET /api/tv-scripts`；`/strategies` 新增「TradingView 热门策略（参考）」卡片区（缩略图 + 访问徽章 + 元信息 + 回链新开页 + 一键同步第一页热门）。只抓公开元信息、不抓源码、不绕付费墙、保留署名；落盘 `.data/tv-strategies.json`；零新依赖、不改任何计算口径。
 - [x] **v0.49.2** **下线 TV 热门策略发现板块**：该发现板块只抓公开元数据作外链引用，社区策略无法在本项目内直接使用、价值有限，按用户要求整体移除（删 `tvScripts.ts` + `/api/tv-scripts` + `sync.ts` 的 `tvStrategies` 源 + `/strategies` 卡片区 + `/sync` 对应行）。**复刻库 `tvStrategies.ts`（GBB / Cardwell / KAMA）不受影响。** 零新依赖、不改任何既有计算口径；三关全绿。
 - [x] **v0.49.1** **复刻首个具名开源策略：Kaufman MA Adaptive [MKB]**（`qgTc4zie`，作者 muratkbesiroglu）：走「逐个、具名、原作链接 + 差异说明、人工 + 回测双校验」路线。`src/lib/tvStrategies.ts` 新增 `kaufmanAMA()`/`rollingStdev()`/`computeKamaMomentum()`（KAMA 线 + 翻多翻空 + regime + ER 图层）+ `runTvKamaMomentumV1()`（翻多入场=上穿「KAMA+0.5×stdev(20)」上带、跌破 KAMA 离场、双边手续费、忠实原版不另加 ATR 止损）；登记进 `STRATEGIES[]`（id `tv-kama-momentum-v1`），自动接入 `/analyze`、`/backtest/strategy`、`/chart` 策略图层、UI 下拉。诚实口径：KAMA 首根用前一根收盘播种、stdev 总体口径对齐 Pine；实测小样本胜率 22.6% 未跑赢买入持有，证明引擎诚实标注不显著。顺带修 `recommendationBacktest.ts` `shortExitReason` 加 KAMA 离场标签分支（避免被误归类 ATR）。零新依赖、不改任何既有计算口径。
+- [x] **v0.49.3** **UI 修复（非 TV 策略）**：修 `/map` 思维导图卡片「瓶颈点」徽章被挤成竖排 / 与脉冲点重叠的破版、BOM 占比标签折断；个股「· 图」文字入口换成蜡烛图 K 线图标（`ChartGlyph`，`/chart` 直达）；`CommandPalette` 列表改内缩圆角高亮 + 图标容器化。纯前端样式 / 标记，零新依赖、不改任何计算口径；三关全绿。
 - [ ] **（后续）** 复刻工作台（半自动、强制人工 + 回测双校验）：针对清单里**开源可见**脚本，LLM 辅助逆向成 `TvStrategyMeta` 草稿 → 人工校验 + 回测证明引擎跑通后才登记，不自动上线。
 - [ ] **（后续）** 增量发现「新出来的」脚本（定时 / cron，仅元数据）。
 

@@ -268,7 +268,7 @@ export default function CommandPalette() {
           </kbd>
         </div>
 
-        <div ref={listRef} className="max-h-[52vh] overflow-y-auto py-2">
+        <div ref={listRef} className="max-h-[54vh] overflow-y-auto px-2 py-2">
           {actions.length === 0 ? (
             <p className="px-4 py-8 text-center text-[var(--text-sm)] text-[var(--faint)]">
               {query.trim() ? "未找到匹配的页面或个股" : "暂无最近访问"}
@@ -282,7 +282,7 @@ export default function CommandPalette() {
               return (
                 <div key={a.id}>
                   {showHeader && (
-                    <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--faint)]">
+                    <p className="px-2.5 pb-1 pt-2.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--faint)]">
                       {a.section === "recent" && (
                         <Clock className="mr-1 inline h-3 w-3 align-[-1px]" />
                       )}
@@ -296,18 +296,18 @@ export default function CommandPalette() {
                     aria-selected={isActive}
                     onClick={() => a.run()}
                     onMouseMove={() => setActive(idx)}
-                    className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition duration-[var(--dur-fast)] ${
+                    className={`flex w-full items-center gap-3 rounded-[var(--radius-md)] px-2.5 py-2 text-left transition duration-[var(--dur-fast)] ${
                       isActive ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--hover)]"
                     }`}
                   >
                     <span
-                      className={`grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] ${
+                      className={`grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius-md)] border transition duration-[var(--dur-fast)] ${
                         isActive
-                          ? "text-[var(--accent)]"
-                          : "text-[var(--muted)]"
+                          ? "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                          : "border-[var(--border)] bg-[var(--inset)] text-[var(--muted)]"
                       }`}
                     >
-                      <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
+                      <Icon className="h-4 w-4" strokeWidth={2} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span

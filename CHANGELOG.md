@@ -4,6 +4,25 @@
 
 ---
 
+## [0.49.3] - 2026-06-25
+
+> **/map 产业链图谱破版修复 + ⌘K 命令面板式样优化**。修复思维导图卡片中「瓶颈点」徽章被挤成竖排、与脉冲点重叠的破版与 BOM 占比标签折断问题，个股「· 图」文字入口换成蜡烛图 K 线图标；命令面板列表改为内缩圆角高亮 + 图标容器化，观感对齐主流命令面板。**纯前端样式 / 标记调整，零新依赖、不改任何业务逻辑与计算口径。**
+
+### /map 修复
+- `src/app/map/page.tsx`：
+  - 思维导图环节卡头部由 `flex items-center` 改 `flex items-start justify-between`，标题 `min-w-0` 顶对齐自然换行；「瓶颈点」徽章加 `shrink-0 whitespace-nowrap` 保持单行，不再被挤成竖排「瓶颈\n点」。
+  - 删除独立的右上 `absolute` 脉冲点，将脉冲小圆点**内联合并进徽章**，消除徽章与脉冲点重叠。
+  - BOM 占比行改 `items-start` 顶对齐，标签「BOM占比」加 `shrink-0 whitespace-nowrap` 不再被拦腰折断，长占比文案整体优雅换行。
+  - 新增内联蜡烛图图标组件 `ChartGlyph`，把个股链接里的「`{code} · 图`」文字入口替换为 **K 线图标**（`/chart` 直达，带 `title`/`aria-label`），思维导图 + 卡片列表两视图同步。
+
+### ⌘K 命令面板优化
+- `src/components/shell/CommandPalette.tsx`：列表容器加 `px-2`，每行改 `rounded-[var(--radius-md)] px-2.5 py-2` 内缩圆角高亮（不再通栏贴边）；图标包进 `h-8 w-8` 带边框/底色方形容器，选中态用 `accent-line` 描边 + `accent-soft` 软底；分节标题留白对齐。
+
+### 质量门禁
+- `npm run lint` 0 error（21 项 pre-existing warning，均不在本次改动文件）· `tsc --noEmit` 0 error · `next build` 通过 27/27 页；dev 实测 /map 思维导图徽章单行不重叠、BOM 行不折断、个股 K 线图标可点直达 `/chart`，⌘K 面板内缩高亮 + 图标容器化生效（最近访问 / 页面 / 个股直达三态）。**零新依赖、不改任何既有计算口径。**
+
+---
+
 ## [0.49.2] - 2026-06-25
 
 > **下线「📡 TradingView 热门策略（参考）」发现板块**。v0.49.0 引入的该板块只能抓取 TradingView 脚本列表的**公开元数据**作外链引用——这些社区策略**无法在本项目内直接使用**（闭源拿不到源码 / 无可靠 Pine→TS 转译），仅提供外链跳转，价值有限，故按用户要求整体移除。**真正可用的复刻库 `tvStrategies.ts`（GBB / Cardwell / KAMA 策略）完全不受影响**，照旧运行。
