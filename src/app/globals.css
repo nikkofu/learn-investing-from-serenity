@@ -537,3 +537,11 @@ select:disabled,
 /* 错误提示条：同样随模式自适应，避免亮色下淡红字看不清。 */
 .msg-error { border-color: rgba(239, 68, 68, 0.45); background: rgba(69, 10, 10, 0.28); color: #fca5a5; }
 [data-mode="light"] .msg-error { border-color: rgba(220, 38, 38, 0.45); background: rgba(220, 38, 38, 0.08); color: #b91c1c; }
+
+/* BS 信号浮层涨跌语义色（A股 红涨绿跌）：深色模式用亮档，浅色模式加深，避免白底上淡绿/淡红看不清。 */
+.bs-up { color: #f87171; }
+.bs-dn { color: #34d399; }
+[data-mode="light"] .bs-up { color: #dc2626; }
+[data-mode="light"] .bs-dn { color: #059669; }
+[data-mode="light"] .bs-badge-up { background: rgba(220, 38, 38, 0.12); border-color: rgba(220, 38, 38, 0.4); color: #b91c1c; }
+[data-mode="light"] .bs-badge-dn { background: rgba(5, 150, 105, 0.14); border-color: rgba(5, 150, 105, 0.45); color: #047857; }

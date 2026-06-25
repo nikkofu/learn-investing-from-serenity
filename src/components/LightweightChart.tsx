@@ -932,7 +932,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             >
               <div className={`flex items-center justify-between gap-2 px-2 py-1 border-b border-[var(--border)] ${isBuy ? "bg-red-500/10" : "bg-emerald-500/10"}`}>
                 <span className="flex items-center gap-1.5">
-                  <span className={`px-1 py-0.5 rounded-[1px] font-bold text-[8px] leading-none ${isBuy ? "bg-red-500/15 text-red-400 border border-red-500/25" : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25"}`}>
+                  <span className={`px-1 py-0.5 rounded-[1px] font-bold text-[8px] leading-none ${isBuy ? "bs-badge-up bg-red-500/15 text-red-400 border border-red-500/25" : "bs-badge-dn bg-emerald-500/15 text-emerald-400 border border-emerald-500/25"}`}>
                     {isBuy ? "BUY 买入" : "SELL 卖出"}
                   </span>
                   {sizeTag && <span className="text-[8.5px] font-bold text-[var(--accent)]">{sizeTag}</span>}
@@ -941,13 +941,13 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
               </div>
               <div className="px-2 py-1 space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-[var(--faint)]">成交价</span>
+                  <span className="text-[var(--muted)]">成交价</span>
                   <span className="font-semibold tabular-nums text-[var(--text)]">{t.price.toFixed(2)} 元</span>
                 </div>
                 {!isBuy && t.profitPct != null && (
                   <div className="flex justify-between">
-                    <span className="text-[var(--faint)]">单笔盈亏</span>
-                    <span className={`font-bold tabular-nums ${t.profitPct >= 0 ? "text-red-400" : "text-emerald-400"}`}>
+                    <span className="text-[var(--muted)]">单笔盈亏</span>
+                    <span className={`font-bold tabular-nums ${t.profitPct >= 0 ? "bs-up" : "bs-dn"}`}>
                       {t.profitPct >= 0 ? "+" : ""}{t.profitPct.toFixed(2)}%
                     </span>
                   </div>
