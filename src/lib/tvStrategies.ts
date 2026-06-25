@@ -16,7 +16,7 @@
 import type { Candle } from "./types";
 import { atrWilder, type BacktestResult } from "./quant";
 import { runSignalBacktest } from "./indicatorStrategies";
-import { computeRSI } from "./indicators";
+import { computeRSI, computeKDJ, computeMACD, sma } from "./indicators";
 
 /** 市场状态（自适应带宽用）：趋势 / 震荡 / 转折。 */
 export type Regime = "trend" | "chop" | "transition";
@@ -470,6 +470,115 @@ const CARDWELL_RSI_NAVIGATOR_V1: TvStrategy = {
 };
 
 /* ============================================================================
+ * 策略②-V2：Cardwell RSI Trade Navigator 趋势延续版 —— tv-cardwell-rsi-navigator-v2
+ *
+ * 解决 V1 的「强趋势出局后回不来」：V1 被 1.5×ATR 跟踪止损洗出时，RSI 往往仍在多头区(>50)，
+ * 而 V1 唯一的入场钥匙是「RSI 全新上穿 50」——必须 RSI 先跌回 ≤50 再上穿才会再触发。可在主升浪里
+ * RSI 长期钉在 50 上方，这把钥匙永远插不上，于是空仓走完整段主升浪（实测 600522：2026-05-27 止损
+ * 离场后 21 根里 RSI 最低 50.6、全程 ≥50，0 次再入场，错过 close 39→62 的整段拉升）。
+ *
+ * V2「只增不改」：完整保留 V1 的 RSI 上穿 50 入场 / 下穿 50 离场 / 1.5×ATR 跟踪止损，额外增加一条
+ * **趋势延续再入场（continuation re-entry）** 入场通道——当空仓且趋势仍未破时，用价量/KDJ 确认转强
+ * 即顺势重新建仓，无需等 RSI 跌破再上穿：
+ *   再入场 = 收盘 ≥ MA20（趋势闸门未破） 且 RSI(14) > 中线 且 RSI 较前一根上行
+ *           且（KDJ 金叉：K 上穿 D  或  MACD 柱由负转正「翻红」）；量能放大(量≥1.2×量MA5) 作附注。
+ * 即把用户在主升浪里看到的「柱子翻红 / KDJ 金叉」显式纳入为补充买点。离场口径与 V1 完全一致
+ * （RSI 下穿 50 或 ATR 跟踪止损）。仍为纯多头、单仓、含双边手续费。
+ *
+ * 诚实口径：再入场是顺势加仓式的「趋势延续」确认，本质仍是趋势跟随而非抄底；它会增加交易笔数、
+ * 在主升浪里抓回 V1 错过的段落，但震荡市也可能多出几笔小亏损交易（由跟踪止损兜底）。
+ * ==========================================================================*/
+
+interface CardwellV2Params extends CardwellParams {
+  maPeriod: number;     // 趋势闸门均线（收盘需站上，默认 20）
+  volMaPeriod: number;  // 量能基准均线（默认 5）
+  volMult: number;      // 量能放大阈值（量 ≥ volMult×量MA 视为放量，默认 1.2）
+}
+
+const CARDWELL_V2_DEFAULTS: CardwellV2Params = {
+  ...CARDWELL_DEFAULTS,
+  maPeriod: 20,
+  volMaPeriod: 5,
+  volMult: 1.2,
+};
+
+/**
+ * 纯多头可回测包装（V2 趋势延续版）：在 V1「RSI 上穿 50 入场 / 下穿 50 离场 + 1.5×ATR 跟踪止损」
+ * 基础上，增加「趋势延续再入场」入场通道——空仓且趋势未破（收盘≥MA20、RSI>中线且上行）时，
+ * KDJ 金叉 或 MACD 柱翻红 即重新建仓。离场口径与 V1 完全一致。含双边手续费。
+ */
+export function runTvCardwellRsiNavigatorV2(candles: Candle[]): BacktestResult {
+  const p = CARDWELL_V2_DEFAULTS;
+  const layers = computeCardwellRsiNavigator(candles, p);
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const kdj = computeKDJ(candles);
+  const macd = computeMACD(candles);
+  const closes = candles.map((c) => c.close);
+  const ma = sma(closes, p.maPeriod);
+  const volProxy = candles.map((c) =>
+    c.turnoverPct && c.turnoverPct > 0 ? c.turnoverPct : c.volume && c.volume > 0 ? c.volume : 0,
+  );
+  const volMa = sma(volProxy, p.volMaPeriod);
+
+  const flipUp = new Array<boolean>(candles.length).fill(false);
+  const flipDown = new Array<boolean>(candles.length).fill(false);
+  for (const f of layers.flips) (f.dir === "up" ? flipUp : flipDown)[f.index] = true;
+
+  // 趋势延续再入场（仅用 ≤ i 数据）：趋势闸门 + 价量/KDJ 确认转强。
+  const reentryReason = (i: number): string | null => {
+    if (i < 1) return null;
+    const trendGate =
+      fin(ma[i]) && closes[i] >= ma[i] &&
+      fin(rsi[i]) && fin(rsi[i - 1]) && rsi[i] > p.mid && rsi[i] >= rsi[i - 1];
+    if (!trendGate) return null;
+    const kdjCross =
+      fin(kdj.k[i]) && fin(kdj.d[i]) && fin(kdj.k[i - 1]) && fin(kdj.d[i - 1]) &&
+      kdj.k[i - 1] <= kdj.d[i - 1] && kdj.k[i] > kdj.d[i];
+    const macdFlip =
+      fin(macd.macd[i]) && fin(macd.macd[i - 1]) && macd.macd[i - 1] <= 0 && macd.macd[i] > 0;
+    if (!kdjCross && !macdFlip) return null;
+    const volPump = fin(volMa[i]) && volMa[i] > 0 && volProxy[i] >= p.volMult * volMa[i];
+    const conf: string[] = [];
+    if (kdjCross) conf.push("KDJ 金叉");
+    if (macdFlip) conf.push("MACD 柱翻红");
+    if (volPump) conf.push("量能放大");
+    return `【趋势延续再入场】空仓期价仍站上 MA${p.maPeriod}、RSI(${p.rsiPeriod})=${rsi[i].toFixed(1)}>${p.mid} 且上行（多头未破），${conf.join("、")}确认转强，收盘 ${closes[i].toFixed(2)} 元顺势重新建仓；止损 ${p.stopMult}×ATR、目标 1R/2R/3R。`;
+  };
+
+  return runSignalBacktest(candles, {
+    warmup: Math.max(30, p.rsiPeriod + 5),
+    atrMult: p.stopMult,
+    atrFloorPct: 3,
+    atrCeilPct: 25,
+    entry: (i) => {
+      if (flipUp[i]) {
+        return `【RSI 上穿中线】RSI(${p.rsiPeriod})=${fin(rsi[i]) ? rsi[i].toFixed(1) : "--"} 上穿 ${p.mid}（Cardwell 多头区），收盘 ${candles[i].close.toFixed(2)} 元转多入场，止损 ${p.stopMult}×ATR、目标 1R/2R/3R。`;
+      }
+      return reentryReason(i);
+    },
+    exit: (i) => {
+      if (!flipDown[i]) return null;
+      return `【RSI 下穿中线】RSI(${p.rsiPeriod})=${fin(rsi[i]) ? rsi[i].toFixed(1) : "--"} 下穿 ${p.mid}（转入 Cardwell 空头区），趋势转空，离场。`;
+    },
+  });
+}
+
+const CARDWELL_RSI_NAVIGATOR_V2: TvStrategy = {
+  meta: {
+    id: "tv-cardwell-rsi-navigator-v2",
+    name: "Cardwell RSI Trade Navigator 趋势延续版 V2",
+    version: "2.0",
+    author: "MarkitTick（V2 趋势延续再入场改造）",
+    source: "https://cn.tradingview.com/chart/JTqSjJYn/",
+    notes:
+      "在 V1 基础上「只增不改」解决「强趋势被跟踪止损洗出后再也回不来」的问题。V1 唯一入场钥匙是 RSI(14) 全新上穿中线 50，被 1.5×ATR 跟踪止损打出来时 RSI 常仍在多头区(>50)，要再入场必须 RSI 先跌回 ≤50 再上穿；主升浪里 RSI 长期 >50，钥匙永远插不上，于是空仓走完整段拉升。V2 完整保留 V1 的入场/离场/止损口径，额外增加一条「趋势延续再入场」通道：空仓且趋势未破（收盘≥MA20、RSI>50 且上行）时，KDJ 金叉 或 MACD 柱翻红即顺势重新建仓（量能放大作附注），把主升浪里的「柱子翻红/KDJ金叉」显式纳为补充买点。离场与 V1 一致（RSI 下穿 50 或 ATR 跟踪止损）。纯多头、含双边手续费。诚实口径：再入场是趋势跟随式的延续确认而非抄底，会增加交易笔数、抓回 V1 错过的主升浪段落，震荡市也可能多出几笔由跟踪止损兜底的小亏损。",
+    tags: ["tradingview", "rsi", "cardwell", "trade-plan", "trend-continuation", "re-entry", "kdj", "macd", "reproduction"],
+  },
+  compute: (candles) => computeCardwellRsiNavigator(candles, CARDWELL_V2_DEFAULTS),
+  backtest: (candles) => runTvCardwellRsiNavigatorV2(candles),
+};
+
+/* ============================================================================
  * 策略③：Kaufman Moving Average Adaptive Strategy [MKB] —— tv-kama-momentum-v1
  *
  * 原作：muratkbesiroglu（MKB），
@@ -656,7 +765,7 @@ const KAMA_MOMENTUM_V1: TvStrategy = {
 };
 
 /** 已复刻的 TV 策略注册表（顺序即 UI 下拉顺序）。新增脚本只需在此追加一项。 */
-const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, KAMA_MOMENTUM_V1];
+const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, KAMA_MOMENTUM_V1];
 
 /** 列出所有已复刻 TV 策略的元信息（供「策略图层」下拉）。 */
 export function listTvStrategies(): TvStrategyMeta[] {

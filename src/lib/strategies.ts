@@ -26,7 +26,7 @@ import {
   runFibKdjPullbackV1,
   runConfluenceV1,
 } from "./indicatorStrategies";
-import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvKamaMomentumV1 } from "./tvStrategies";
+import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvKamaMomentumV1 } from "./tvStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -182,6 +182,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["tradingview", "rsi", "cardwell", "trade-plan", "risk-reward", "r-multiple", "reproduction"],
     },
     run: (candles) => runTvCardwellRsiNavigatorV1(candles),
+  },
+  {
+    meta: {
+      id: "tv-cardwell-rsi-navigator-v2",
+      name: "Cardwell RSI Trade Navigator 趋势延续版 V2",
+      version: "2.0",
+      description:
+        "Cardwell RSI Trade Navigator 的趋势延续改进版，针对 V1「强趋势被跟踪止损洗出后再也回不来」的痛点。V1 唯一入场钥匙是 RSI(14) 全新上穿中线 50，被 1.5×ATR 跟踪止损打出来时 RSI 常仍在多头区(>50)，要再入场必须 RSI 先跌回 ≤50 再上穿；主升浪里 RSI 长期 >50，钥匙永远插不上，于是空仓走完整段拉升。V2「只增不改」：完整保留 V1 的入场/离场/止损口径，额外增加一条「趋势延续再入场」通道——空仓且趋势未破（收盘≥MA20、RSI>50 且上行）时，KDJ 金叉 或 MACD 柱翻红即顺势重新建仓（量能放大作附注），把主升浪里的「柱子翻红/KDJ金叉」显式纳为补充买点。离场与 V1 一致（RSI 下穿 50 或 ATR 自适应跟踪止损）。纯多头、含双边手续费。诚实口径：再入场是趋势跟随式的延续确认而非抄底，会增加交易笔数、抓回 V1 错过的主升浪段落，震荡市也可能多出几笔由跟踪止损兜底的小亏损。",
+      tags: ["tradingview", "rsi", "cardwell", "trade-plan", "trend-continuation", "re-entry", "kdj", "macd", "reproduction"],
+    },
+    run: (candles) => runTvCardwellRsiNavigatorV2(candles),
   },
   {
     meta: {
