@@ -25,7 +25,7 @@ import {
   runFibKdjPullbackV1,
   runConfluenceV1,
 } from "./indicatorStrategies";
-import { runTvSupertrendAdaptiveV1 } from "./tvStrategies";
+import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1 } from "./tvStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -170,6 +170,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["tradingview", "supertrend", "trend-follow", "adaptive", "regime-adaptive", "atr-stop", "reproduction"],
     },
     run: (candles) => runTvSupertrendAdaptiveV1(candles),
+  },
+  {
+    meta: {
+      id: "tv-cardwell-rsi-navigator-v1",
+      name: "Cardwell RSI Trade Navigator [MarkitTick] 复刻",
+      version: "1.0",
+      description:
+        "复刻 TradingView 社区脚本 Cardwell RSI Trade Navigator（作者 MarkitTick）——一个把交易计划可视化的导航器。用 Andrew Cardwell 的 RSI 方法定方向/择时：RSI(14) 上穿中线 50 转多、下穿转空（两次翻转最少间隔 2 根降噪）。出信号即以入场价为锚投影交易计划——止损取 1.5×ATR(14)，盈利目标按风险 R=|入场−止损| 的 1/2/3 倍投影 TP1/TP2/TP3。回测为纯多头：上穿 50 入场、下穿 50 离场，叠加 1.5×ATR 跟踪止损保护，含双边手续费。诚实口径：Cardwell 原脚本精确的入场/止损/目标公式并非公开，本复刻是「同款 UI/UX + 一套合理可解释的 RSI/R 倍数交易计划」，数字不会与 TV 逐位相同。对应 /chart「策略图层」可叠加风险带(红)/盈利带(绿)矩形色块 + ×SL/►Entry/●TP1/★TP2/▲TP3 右轴标签。",
+      tags: ["tradingview", "rsi", "cardwell", "trade-plan", "risk-reward", "r-multiple", "reproduction"],
+    },
+    run: (candles) => runTvCardwellRsiNavigatorV1(candles),
   },
   {
     meta: {

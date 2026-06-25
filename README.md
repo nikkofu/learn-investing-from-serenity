@@ -14,7 +14,14 @@
 
 ---
 
-## 🆕 v0.44.1 亮点
+## 🆕 v0.45.0 亮点
+
+*   **复刻 Cardwell RSI Trade Navigator [MarkitTick]——交易计划色块**：复刻你 TV 截图里那套醒目的红/绿矩形 + 价标 UI/UX。新增第二个 TV 复刻策略 `tv-cardwell-rsi-navigator-v1`：用 RSI(14) 上/下穿中线 50 定多空，一旦出信号即以入场价为锚向右投影**交易计划色块**——**风险带（Entry↔SL，红）+ 多层盈利带（Entry↔TP1/TP2/TP3，绿）** + 右轴 **× SL / ► Entry / ● TP1 / ★ TP2 / ▲ TP3** 标签（止损 1.5×ATR、目标按风险 R 的 1/2/3 倍投影）。
+    *   矩形带用 **lightweight-charts v5 自定义 series primitive**（`tradeZonesPrimitive.ts`）绘制：填充矩形画在 K 线之下（半透明不挡蜡烛）、价位虚线画在 K 线之上、价标贴右轴；以入场根为锚向右延伸，逐根回放时游标到达入场根才显现。
+    *   `/chart`「策略图层」下拉新增此策略，可单选或与 GBB 切换；右上角配套 **Navigator 读数面板**（Bias / RSI / Entry / SL / TP1-3 / Since Signal）。同步登记进 `/backtest/strategy` 与 `/analyze`（纯多头：上穿 50 入场/下穿 50 离场，叠加 1.5×ATR 跟踪止损，含双边手续费）。
+    *   **诚实口径**：Cardwell 原脚本精确公式并非公开，本复刻是「同款 UI/UX + 一套合理可解释的 RSI/R 倍数交易计划」，盒子位置不与 TV 逐位相同。三关全绿、**零新依赖**。
+
+## v0.44.1 亮点
 
 *   **校准 GBB 自适应带宽，让 Supertrend 跟踪线贴合 TradingView 实际渲染**：原先 `trendGain/chopGain=0.8/0.5` 在干净趋势里把乘数推到 5~6×ATR，跟踪线远离价格、又平又低；现收紧到 `0.25/0.15` 并加 `1.25×base` 上限，使线 ≈3×ATR 紧贴价格、阶梯抬升（601869：末根线 ≈454 对 TV≈465）。该带宽同时用于 GBB 回测，止损更紧、更贴近 TV 真实表现。三关全绿、**零新依赖**。
 

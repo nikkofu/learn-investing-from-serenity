@@ -4,6 +4,28 @@
 
 ---
 
+## [0.45.0] - 2026-06-24
+
+> **复刻 Cardwell RSI Trade Navigator [MarkitTick]——交易计划色块（Entry/SL/TP1-3 矩形带 + 右轴标签）**。回应用户：「他这里做出了多个矩形色块，对应不同功能的价位，看着很醒目，UI/UX 很棒，你知道原理并能复刻在我们的 chart 页面吗？」——懂原理，已复刻。**零新依赖**。
+
+### 新增：第二个 TV 复刻策略 `tv-cardwell-rsi-navigator-v1`（`tvStrategies.ts`）
+- **原理**：你 TV 截图里那套红/绿矩形来自 Cardwell RSI Trade Navigator（图例首行，非 GBB）——一个「交易计划可视化」层：出信号定方向后，以**入场价 Entry** 为锚向右画一组水平矩形带——**红=风险带（Entry↔止损）**、**绿=盈利带（Entry↔TP1/TP2/TP3）**，右轴贴 × SL / ► Entry / ● TP1 / ★ TP2 / ▲ TP3 标签。
+- **复刻口径**（诚实——Cardwell 原脚本精确公式并非公开）：①方向/择时用 RSI(14) 上/下穿中线 50 判多空转换（两次翻转最少间隔 2 根降噪）；②止损取 1.5×ATR(14)；③目标按风险 R=|入场−止损| 的 1/2/3 倍投影 TP1/TP2/TP3（对应原作参数 1.5 与 1/2/3）。即「同款 UI/UX + 一套合理可解释的 RSI/R 倍数交易计划」，盒子位置不与 TV 逐位相同。
+- 输出扩展 `TvStrategyLayers.tradePlan`（`{anchorIndex, dir, entry, stop, targets[]}`），渲染端据此画色块；该策略不画跟踪线（`line` 整列 null）。
+
+### 新增：交易计划色块渲染层（`tradeZonesPrimitive.ts`，lightweight-charts v5 自定义 series primitive）
+- LineSeries/AreaSeries 无法表达「两价位之间、自某根向右延伸的填充矩形」，故用官方 `ISeriesPrimitive` 在画布上直接绘制：**填充矩形** zOrder `bottom`（画在 K 线之下，半透明不挡蜡烛）、**价位虚线** zOrder `top`（画在 K 线之上，清晰可见）、**右轴标签** 走 `priceAxisViews`（库自动避让堆叠，文案/配色完全自定义）。坐标用 media 空间，与 `priceToCoordinate / timeToCoordinate` 同口径。
+- 以入场根为锚向右延伸；逐根回放时锚定根不在序列里则不画（游标到达入场根才显现，避免色块铺满全图）。
+- 配色按「盈亏语义」（红=风险/绿=盈利，同 TV），与 A 股蜡烛涨跌色（红涨绿跌）属不同维度；盈利带越近入场越浓。
+
+### 接入：`/chart` 图层 + 回测引擎
+- `/chart`「策略图层」下拉自动新增该策略（注册表驱动），可单选或与 GBB 切换；右上角配套 **Navigator 读数面板**（Bias / RSI / Entry / SL / TP1-3 / Since Signal），与 GBB 统计表互斥显示（带 `tradePlan` 的策略显示 Navigator 面板、跟踪线型策略显示 GBB 面板）。
+- `strategies.ts` 登记 `tv-cardwell-rsi-navigator-v1`，自动接入 `/backtest/strategy`（z 检验/PSR/DSR）与 `/analyze`（纯多头：上穿 50 入场/下穿 50 离场，叠加 1.5×ATR 跟踪止损，含双边手续费）。
+
+### 校验
+- 合成 K 线校验：空头计划 entry 151.15 / stop 154.53（在上方）/ TP1-3 在下方，实测倍数精确 1.00/2.00/3.00R、止损方向正确；多头为对称镜像。
+- 三关全绿（type-check / lint 0 error、build 通过）。
+
 ## [0.44.1] - 2026-06-24
 
 > **校准 GBB 自适应带宽，让 Supertrend 跟踪线贴合 TradingView 实际渲染**。用户对比 TV 截图发现我们的跟踪线「又平又低」、远离价格，与 TV「紧贴价格、阶梯抬升」差距明显。**零新依赖**。

@@ -25,7 +25,8 @@ import type { TradeAction } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance } from "@/lib/indicators";
 import type { ChartDrawing, MarkerDrawing, DrawingColor } from "@/lib/drawings";
-import { listTvStrategies, getTvStrategy, type TvStrategyLayers } from "@/lib/tvStrategies";
+import { listTvStrategies, getTvStrategy, type TvStrategyLayers, type TradePlan } from "@/lib/tvStrategies";
+import { TradeZonesPrimitive, type TradeZonesData, type TradeZoneBand, type TradeZoneLevel } from "./tradeZonesPrimitive";
 
 interface LightweightChartProps {
   candles: Candle[];
@@ -134,6 +135,34 @@ function adxOf(candles: Candle[], period = 14): number[] {
   return out;
 }
 
+// 由交易计划构造色块渲染数据（对标 TV Cardwell RSI Trade Navigator）：
+// 风险带（Entry↔SL，红）+ 多层盈利带（Entry↔TP1↔TP2↔TP3，绿，越近入场越浓）+ 各价位右轴标签。
+// 配色按「盈亏语义」（红=风险/绿=盈利，同 TV），与 A 股蜡烛涨跌色（红涨绿跌）属不同维度。
+const ZONE_RISK = "239,68,68"; // 红
+const ZONE_REWARD = "16,185,129"; // 绿
+const ZONE_TP_SYM = ["●", "★", "▲"];
+const ZONE_REWARD_ALPHA = [0.2, 0.15, 0.11, 0.08];
+function buildTradeZones(plan: TradePlan, anchorTime: Time): TradeZonesData {
+  const f = (v: number) => v.toFixed(2);
+  const bands: TradeZoneBand[] = [{ from: plan.entry, to: plan.stop, fill: `rgba(${ZONE_RISK},0.16)` }];
+  const ladder = [plan.entry, ...plan.targets.map((t) => t.price)];
+  for (let k = 0; k < ladder.length - 1; k++) {
+    bands.push({ from: ladder[k], to: ladder[k + 1], fill: `rgba(${ZONE_REWARD},${ZONE_REWARD_ALPHA[Math.min(k, ZONE_REWARD_ALPHA.length - 1)]})` });
+  }
+  const levels: TradeZoneLevel[] = [
+    { price: plan.stop, lineColor: `rgba(${ZONE_RISK},0.9)`, axisText: `× SL ${f(plan.stop)}`, axisBg: "#b91c1c", axisFg: "#fff" },
+    { price: plan.entry, lineColor: "rgba(96,165,250,0.95)", axisText: `► Entry ${f(plan.entry)}`, axisBg: "#1e3a8a", axisFg: "#fff" },
+    ...plan.targets.map((t, k): TradeZoneLevel => ({
+      price: t.price,
+      lineColor: `rgba(${ZONE_REWARD},0.9)`,
+      axisText: `${ZONE_TP_SYM[Math.min(k, ZONE_TP_SYM.length - 1)]} ${t.label} ${f(t.price)}`,
+      axisBg: "#047857",
+      axisFg: "#fff",
+    })),
+  ];
+  return { anchorTime, bands, levels };
+}
+
 export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], initialTvStrategyId = "" }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -215,8 +244,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   );
 
   // GBB 统计表（对标 TV [GBB] 右上角面板）：当前显露末根的 Trend / ATR / ADX / Strength / HTF Bias / Since Signal。
+  // 仅对「跟踪线型」策略（无 tradePlan，如 GBB）展示；带交易计划的策略（如 Cardwell）改用下方 Navigator 面板。
   const gbbStats = useMemo(() => {
-    if (!tvLayers || viewCandles.length === 0) return null;
+    if (!tvLayers || tvLayers.tradePlan || viewCandles.length === 0) return null;
     const idx = viewCandles.length - 1;
     const atr = atrOf(candles, 10);
     const adx = adxOf(candles, 14);
@@ -237,6 +267,23 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       sinceSignal,
     };
   }, [tvLayers, viewCandles, candles]);
+
+  // Navigator 面板（对标 TV Cardwell RSI Trade Navigator 右上角读数）：方向 / RSI / 入场 / 止损 / 目标 / 距信号根数。
+  const navStats = useMemo(() => {
+    const plan = tvLayers?.tradePlan;
+    if (!plan || viewCandles.length === 0) return null;
+    const idx = viewCandles.length - 1;
+    const sinceSignal = idx - plan.anchorIndex;
+    return {
+      dir: plan.dir,
+      bias: plan.dir === 1 ? "多 Bull" : "空 Bear",
+      rsiVal: Number.isFinite(rsi[idx]) ? rsi[idx] : NaN,
+      entry: plan.entry,
+      stop: plan.stop,
+      targets: plan.targets,
+      sinceSignal: sinceSignal >= 0 ? sinceSignal : null,
+    };
+  }, [tvLayers, viewCandles, rsi]);
 
   // 切换标的/周期后回放参数复位
   useEffect(() => {
@@ -436,6 +483,14 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           }
         }
       }
+    }
+
+    // 交易计划色块（对标 TV「Cardwell RSI Trade Navigator」）：策略给出 tradePlan 时，以入场根为锚
+    // 向右画风险带(红)/盈利带(绿) + 各价位右轴标签（× SL / ► Entry / ● TP1 / ★ TP2 / ▲ TP3）。
+    const plan = tvLayers?.tradePlan;
+    if (plan && plan.anchorIndex >= 0 && plan.anchorIndex < candles.length) {
+      const zones = buildTradeZones(plan, toTime(candles[plan.anchorIndex].date));
+      candleSeries.attachPrimitive(new TradeZonesPrimitive(zones));
     }
 
     // 副图振荡指标：各占独立窗格（分开显示，量纲互不干扰）
@@ -682,6 +737,24 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
               <div key={k as string} className="flex justify-between gap-4 px-2 py-0.5">
                 <span className="text-[var(--faint)]">{k}</span>
                 <span style={{ color: color as string }} className="font-semibold tabular-nums">{v}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {navStats && (
+          <div className="absolute right-2 top-1 z-10 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/85 border border-[var(--border)] rounded-[2px] overflow-hidden min-w-[150px]">
+            <div className="px-2 py-0.5 bg-[var(--inset)] text-[var(--faint)] tracking-wide border-b border-[var(--border)]">Navigator · {code ?? ""}</div>
+            {([
+              ["Bias", navStats.bias, navStats.dir === 1 ? UP : DOWN],
+              ["RSI", Number.isFinite(navStats.rsiVal) ? navStats.rsiVal.toFixed(1) : "--", navStats.rsiVal >= 50 ? UP : DOWN],
+              ["► Entry", navStats.entry.toFixed(2), "#60a5fa"],
+              ["× SL", navStats.stop.toFixed(2), UP],
+              ...navStats.targets.map((t): [string, string, string] => [`${ZONE_TP_SYM[Math.min(t.r - 1, ZONE_TP_SYM.length - 1)]} ${t.label}·${t.r}R`, t.price.toFixed(2), DOWN]),
+              ["Since Signal", navStats.sinceSignal == null ? "--" : `${navStats.sinceSignal} 根`, "var(--muted)"],
+            ] as [string, string, string][]).map(([k, v, color]) => (
+              <div key={k} className="flex justify-between gap-4 px-2 py-0.5">
+                <span className="text-[var(--faint)]">{k}</span>
+                <span style={{ color }} className="font-semibold tabular-nums">{v}</span>
               </div>
             ))}
           </div>

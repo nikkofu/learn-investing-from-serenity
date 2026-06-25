@@ -16,13 +16,41 @@
 import type { Candle } from "./types";
 import { atrWilder, type BacktestResult } from "./quant";
 import { runSignalBacktest } from "./indicatorStrategies";
+import { computeRSI } from "./indicators";
 
 /** 市场状态（自适应带宽用）：趋势 / 震荡 / 转折。 */
 export type Regime = "trend" | "chop" | "transition";
 
+/** 交易计划的单个目标价位（盈利目标，按风险 R 的倍数投影）。 */
+export interface TradeTarget {
+  /** 标签（如 "TP1" / "TP2" / "TP3"）。 */
+  label: string;
+  /** 目标价。 */
+  price: number;
+  /** 相对入场的风险倍数（1R / 2R / 3R …）。 */
+  r: number;
+}
+
+/**
+ * 交易计划（对标 TV「Cardwell RSI Trade Navigator」那套色块）：以某根为入场锚，
+ * 给出方向 + 入场 / 止损 / 多层目标，渲染端据此画风险带（红）+ 盈利带（绿）+ 右轴标签。
+ */
+export interface TradePlan {
+  /** 入场锚定根的下标（矩形带从这根向右画）。 */
+  anchorIndex: number;
+  /** 方向：1=多（止损在下、目标在上）/ -1=空（止损在上、目标在下）。 */
+  dir: 1 | -1;
+  /** 入场价。 */
+  entry: number;
+  /** 止损价。 */
+  stop: number;
+  /** 盈利目标（按 R 倍数投影）。 */
+  targets: TradeTarget[];
+}
+
 /** 单个 TV 策略产出的分析图层（与输入 K 线等长，预热不足处用 null/NaN，渲染端跳过）。 */
 export interface TvStrategyLayers {
-  /** 主图叠加线的值（如 Supertrend 跟踪线）；预热段为 null。 */
+  /** 主图叠加线的值（如 Supertrend 跟踪线）；预热段为 null。无跟踪线的策略可整列为 null。 */
   line: (number | null)[];
   /** 每根的方向：1=多头（线在价下方）/ -1=空头（线在价上方）/ 0=未定。 */
   dir: (1 | -1 | 0)[];
@@ -32,6 +60,8 @@ export interface TvStrategyLayers {
   regime: Regime[];
   /** 每根的 regime 强度代理（效率比的分位，0~1；NaN=未就绪）。 */
   regimeValue: number[];
+  /** 可选：当前交易计划色块（Entry/SL/TP 矩形带）；提供则渲染端画成填充矩形 + 右轴标签。 */
+  tradePlan?: TradePlan | null;
 }
 
 /** TV 策略元信息（含原作链接与诚实差异说明，供 UI 展示与下拉切换）。 */
@@ -293,8 +323,154 @@ const SUPERTREND_ADAPTIVE_V1: TvStrategy = {
   backtest: (candles) => runTvSupertrendAdaptiveV1(candles),
 };
 
+/* ============================================================================
+ * 策略②：Cardwell RSI Trade Navigator [MarkitTick] —— tv-cardwell-rsi-navigator-v1
+ *
+ * 原作：MarkitTick，cn.tradingview.com（与 GBB 同图叠加的第二个脚本，图例首行）。
+ *
+ * 这是一个「交易计划导航器」：用 Andrew Cardwell 的 RSI 方法定方向/择时，一旦出信号就以
+ * 入场价为锚，向右投影一组**交易计划色块**——风险带（Entry↔止损）+ 多层盈利带（Entry↔
+ * TP1/TP2/TP3），并在右轴贴 × SL / ► Entry / ● TP1 / ★ TP2 / ▲ TP3 标签（即你截图里那套
+ * 醒目的红/绿矩形 + 价标）。它最被记住的就是这套「把一笔交易的风险/回报可视化」的 UI/UX。
+ *
+ * 复刻口径（诚实说明——Cardwell 原脚本的精确入场/止损/目标公式并非公开）：
+ *   1) 方向/择时：用 RSI(14) 相对 Cardwell 中线 50 的上/下穿判定多空转换（上穿→转多、
+ *      下穿→转空）；为降噪要求两次翻转间至少间隔 minGap 根。
+ *   2) 风险（止损）：入场后按 stopMult×ATR(14) 设保护止损（默认 1.5×ATR，对应原作参数里的 1.5）。
+ *   3) 回报（目标）：按风险 R=|入场−止损| 的 1/2/3 倍投影 TP1/TP2/TP3（对应原作 1/2/3）。
+ * 即「同款可视化 + 一套合理可解释的 RSI/R 倍数交易计划」，盒子位置不会与 TV 逐位相同。
+ *
+ * 回测为纯多头（RSI 上穿 50 入场 / 下穿 50 离场，叠加 1.5×ATR 跟踪止损保护），含双边手续费。
+ * ==========================================================================*/
+
+interface CardwellParams {
+  rsiPeriod: number;   // RSI 周期（默认 14）
+  atrPeriod: number;   // ATR 周期（默认 14）
+  mid: number;         // Cardwell 中线（默认 50）
+  stopMult: number;    // 止损 = stopMult×ATR（默认 1.5）
+  tpR: number[];       // 盈利目标的 R 倍数（默认 [1,2,3]）
+  minGap: number;      // 两次翻转最小间隔根数（降噪，默认 2）
+}
+
+const CARDWELL_DEFAULTS: CardwellParams = {
+  rsiPeriod: 14,
+  atrPeriod: 14,
+  mid: 50,
+  stopMult: 1.5,
+  tpR: [1, 2, 3],
+  minGap: 2,
+};
+
+/**
+ * 计算 Cardwell RSI Trade Navigator 的图层：方向 / 翻多翻空点 / regime（按 RSI 偏离中线的强度）
+ * + 当前交易计划色块（入场/止损/TP1~TP3）。不画跟踪线（line 整列 null）。
+ */
+export function computeCardwellRsiNavigator(
+  candles: Candle[],
+  params: Partial<CardwellParams> = {},
+): TvStrategyLayers {
+  const p = { ...CARDWELL_DEFAULTS, ...params };
+  const n = candles.length;
+  const line = new Array<number | null>(n).fill(null);
+  const dir = new Array<1 | -1 | 0>(n).fill(0);
+  const regime = new Array<Regime>(n).fill("transition");
+  const regimeValue = new Array<number>(n).fill(NaN);
+  const flips: TvStrategyLayers["flips"] = [];
+
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const atr = atrWilder(candles, p.atrPeriod);
+
+  // 由方向 + 入场根算出交易计划（风险带 + R 倍数目标带）。
+  const planAt = (idx: number, d: 1 | -1): TradePlan | null => {
+    const entry = candles[idx].close;
+    const a = atr[idx];
+    if (!fin(a) || a <= 0) return null;
+    const risk = p.stopMult * a;
+    const stop = d === 1 ? entry - risk : entry + risk;
+    const targets: TradeTarget[] = p.tpR.map((r, k) => ({
+      label: `TP${k + 1}`,
+      price: d === 1 ? entry + r * risk : entry - r * risk,
+      r,
+    }));
+    return { anchorIndex: idx, dir: d, entry, stop, targets };
+  };
+
+  let curDir: 1 | -1 | 0 = 0;
+  let lastFlip = -p.minGap - 1;
+  let tradePlan: TradePlan | null = null;
+
+  for (let i = 0; i < n; i++) {
+    if (fin(rsi[i])) {
+      const dev = Math.abs(rsi[i] - p.mid);
+      regime[i] = dev >= 20 ? "trend" : dev <= 10 ? "chop" : "transition";
+    }
+    if (i > 0 && fin(rsi[i]) && fin(rsi[i - 1]) && i - lastFlip >= p.minGap) {
+      const crossUp = rsi[i - 1] <= p.mid && rsi[i] > p.mid;
+      const crossDn = rsi[i - 1] >= p.mid && rsi[i] < p.mid;
+      if (crossUp && curDir !== 1) {
+        curDir = 1;
+        lastFlip = i;
+        flips.push({ index: i, dir: "up", price: candles[i].close });
+        const plan = planAt(i, 1);
+        if (plan) tradePlan = plan;
+      } else if (crossDn && curDir !== -1) {
+        curDir = -1;
+        lastFlip = i;
+        flips.push({ index: i, dir: "down", price: candles[i].close });
+        const plan = planAt(i, -1);
+        if (plan) tradePlan = plan;
+      }
+    }
+    dir[i] = curDir;
+  }
+
+  return { line, dir, flips, regime, regimeValue, tradePlan };
+}
+
+/**
+ * 纯多头可回测包装：RSI 上穿 50 入场 / 下穿 50 离场，叠加 1.5×ATR 跟踪止损保护，含双边手续费。
+ */
+export function runTvCardwellRsiNavigatorV1(candles: Candle[]): BacktestResult {
+  const p = CARDWELL_DEFAULTS;
+  const layers = computeCardwellRsiNavigator(candles);
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const flipUp = new Array<boolean>(candles.length).fill(false);
+  const flipDown = new Array<boolean>(candles.length).fill(false);
+  for (const f of layers.flips) (f.dir === "up" ? flipUp : flipDown)[f.index] = true;
+
+  return runSignalBacktest(candles, {
+    warmup: Math.max(30, p.rsiPeriod + 5),
+    atrMult: p.stopMult,
+    atrFloorPct: 3,
+    atrCeilPct: 25,
+    entry: (i) => {
+      if (!flipUp[i]) return null;
+      return `【RSI 上穿中线】RSI(${p.rsiPeriod})=${fin(rsi[i]) ? rsi[i].toFixed(1) : "--"} 上穿 ${p.mid}（Cardwell 多头区），收盘 ${candles[i].close.toFixed(2)} 元转多入场，止损 ${p.stopMult}×ATR、目标 1R/2R/3R。`;
+    },
+    exit: (i) => {
+      if (!flipDown[i]) return null;
+      return `【RSI 下穿中线】RSI(${p.rsiPeriod})=${fin(rsi[i]) ? rsi[i].toFixed(1) : "--"} 下穿 ${p.mid}（转入 Cardwell 空头区），趋势转空，离场。`;
+    },
+  });
+}
+
+const CARDWELL_RSI_NAVIGATOR_V1: TvStrategy = {
+  meta: {
+    id: "tv-cardwell-rsi-navigator-v1",
+    name: "Cardwell RSI Trade Navigator [MarkitTick] 复刻",
+    version: "1.0",
+    author: "MarkitTick",
+    source: "https://cn.tradingview.com/chart/JTqSjJYn/",
+    notes:
+      "复刻自 MarkitTick 的 Cardwell RSI Trade Navigator——一个把交易计划可视化的导航器：用 Andrew Cardwell 的 RSI 方法定方向/择时（RSI(14) 上/下穿中线 50 判多空转换），一旦出信号即以入场价为锚向右投影**交易计划色块**——风险带(Entry↔止损,红) + 多层盈利带(Entry↔TP1/TP2/TP3,绿) + 右轴 ×SL/►Entry/●TP1/★TP2/▲TP3 标签。止损取 1.5×ATR(14)，目标按风险 R 的 1/2/3 倍投影（对应原作参数 1.5 与 1/2/3）。诚实口径：Cardwell 原脚本精确的入场/止损/目标公式并非公开，本复刻是「同款 UI/UX + 一套合理可解释的 RSI/R 倍数交易计划」，盒子位置不会与 TV 逐位相同。回测为纯多头（上穿 50 入场/下穿 50 离场，叠加 1.5×ATR 跟踪止损），含双边手续费。",
+    tags: ["tradingview", "rsi", "cardwell", "trade-plan", "risk-reward", "r-multiple", "reproduction"],
+  },
+  compute: (candles) => computeCardwellRsiNavigator(candles),
+  backtest: (candles) => runTvCardwellRsiNavigatorV1(candles),
+};
+
 /** 已复刻的 TV 策略注册表（顺序即 UI 下拉顺序）。新增脚本只需在此追加一项。 */
-const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1];
+const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1];
 
 /** 列出所有已复刻 TV 策略的元信息（供「策略图层」下拉）。 */
 export function listTvStrategies(): TvStrategyMeta[] {
