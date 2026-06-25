@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import StockLink from "@/components/StockLink";
 import { NFA } from "@/lib/disclaimers";
+import { PageHeader } from "@/components/ui";
 
 interface PortfolioBar {
   date: string;
@@ -177,10 +178,13 @@ export default function BacktestPage() {
             建议忠实回测（胜率证明）
           </Link>
         </div>
-        <h1 className="text-xl font-semibold text-[var(--text)]">组合回测</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          给定股票池，按价格动量截面排名每 N 个交易日轮动等权持有 top-K，含手续费与 A 股涨跌停撮合约束（涨停买不进、跌停卖不出）。{NFA}
-        </p>
+        <PageHeader
+          className="mb-0"
+          title="组合回测"
+          subtitle={
+            <>给定股票池，按价格动量截面排名每 N 个交易日轮动等权持有 top-K，含手续费与 A 股涨跌停撮合约束（涨停买不进、跌停卖不出）。{NFA}</>
+          }
+        />
       </div>
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">

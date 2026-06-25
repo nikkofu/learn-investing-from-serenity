@@ -1,7 +1,7 @@
 # 路线图与交接文档 / Roadmap & Handoff
 
 > 本文档面向**未来新开 session 的交接**。读完应能独立接手本项目的开发、发版与后续路线。
-> 最后更新：随 v0.40.0（2026-06-24）。当前版本 **v0.40.0**，分支 `main`。
+> 最后更新：随 v0.48.4（2026-06-25）。当前版本 **v0.48.4**，分支 `main`。
 
 ---
 
@@ -137,6 +137,14 @@
   - [x] **v0.32.1** 修掉 `mining/page.tsx` 既存 react-hooks lint error（`useEffect` 在声明前调用），全仓 lint 0 error。
 - [x] **v0.33.0** **盘中盯盘告警**：`alerts.ts` + `alertEngine.ts` → `.data/alerts.json`；套利型（价差开口 / 逼近止损）+ 个股价格型规则；拉日 K + 实时行情拼盘中 live z，命中按 `cooldownMin` 冷却去重，投递站内告警箱 + 可选 webhook；`/alerts` 页（规则管理 + 告警箱 + 自动轮询）+ `POST/GET /api/alerts/{rules,events,check}`。
 - [x] **v0.34.0** **信号 → 策略沉淀**：`savedStrategies.ts` → `.data/saved-strategies.json`；把校准过的配对 + 参数 + 战绩快照沉淀为可复检、可分享策略，`scorePairStrategy()` 加权打分 A/B/C/D，`revalidateSavedStrategy()` 重拉 K 刷新活战绩 + live 信号；`/arb` 校准表「沉淀为策略」按钮 + `/strategies`「我的沉淀策略」区（复检/导出/导入/删除）+ `GET/POST/DELETE /api/strategies/saved`。
+
+### 4.7 v0.48 产品化改版（国际化审美 / IA / 设计系统，五阶段收官）
+> 目标：在不改任何计算口径的前提下，把工具升级为「有信息架构、统一视觉语言、可达性达标」的专业投研台。完整设计文档见 [`docs/`](.)（`v0.48-redesign-overview` / `-information-architecture` / `-design-system` / `-homepage-redesign` / `-task-checklist`）。五阶段均独立可交付、可回滚，零 / 轻新依赖。
+- [x] **v0.48.0** **设计系统地基（无可见破坏）**：`globals.css` 在现有 5 主题 × 明暗语义色上**只追加不重写**——间距（8pt）/ 圆角 / 阴影 / 字阶 / 层级 / 动效 token + 全局 `:focus-visible` 焦点环 + `.tnum` 等宽数字；自托管 Noto Sans SC（`next/font`，零外链）；新建 `src/components/ui/`（`PageHeader`/`Card`/`SectionTitle`/`Badge`/`Button`/`KPIStat`/`DataTable` 等），仅新增文件不影响现有页面。
+- [x] **v0.48.1** **导航外壳重构（首个可见改版）**：顶栏 17 个扁平入口 → 5 大分组可折叠侧边栏（发现 / 分析 / 策略与回测 / 交易与监控 / 系统）+ 精简顶栏 + 面包屑 + 窄屏抽屉；单一数据源 `src/lib/navConfig.ts`；`/chart` 首次进入主导航；引入 `lucide-react@1.20.0`，退役旧 `Nav.tsx`。
+- [x] **v0.48.2** **全局命令面板（⌘K）**：`Cmd/Ctrl+K` 或顶栏搜索框唤起；页面模糊跳转（中 / 英 / 拼音全拼 + 首字母）；6 位代码 → 个股分析 / K 线两动作（新开页）；最近访问（localStorage）+ 键盘可达；纯前端零新依赖。
+- [x] **v0.48.3** **首页改版为仪表盘**：`/`（工作台）从静态介绍页升级为投研仪表盘——市场快照 / 我的自选 / 今日热门 / 最近告警 / 快捷入口 / 板块热力 mini（`src/components/home/*`，各模块独立 fetch + Skeleton + 失败降级），五因子 / 知识库下沉保留；响应式 3→2→1；纯前端零新依赖。
+- [x] **v0.48.4** **全站页头统一 + 视觉收尾 + a11y（收官）**：全站 18 页手写页头收敛到统一 `PageHeader`（语义化 `<header>`），按 5 大导航分组分批落地；`/scanner`、`/sectors` 由旧 mono 终端式页头换为统一样式，动作按钮 / 子标签行 / 富文本副标题保留；首页 Hero 与 `/chart` 全屏终端有意豁免；键盘 `:focus-visible` 焦点环可见，暗 / 亮双模对比度抽检正常；零新依赖、不改业务逻辑。
 
 ---
 

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { readNdjson } from "@/lib/stream-client";
 import { NFA } from "@/lib/disclaimers";
+import { PageHeader } from "@/components/ui";
 
 type LogLevel = "info" | "success" | "warn" | "error" | "debug";
 interface LogEntry {
@@ -356,12 +357,10 @@ export default function MiningPage() {
 
   return (
     <main className="w-full">
-      <div className="mb-5">
-        <h1 className="text-xl font-semibold tracking-tight">智能挖掘 · 形态扫描</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          高并发扫描股票池，复用个股图表同源算法筛出「底部企稳 + 上升通道 + B 买入信号」形态，并给出预期收益率 / 目标止盈 / 安全止损。
-        </p>
-      </div>
+      <PageHeader
+        title="智能挖掘 · 形态扫描"
+        subtitle="高并发扫描股票池，复用个股图表同源算法筛出「底部企稳 + 上升通道 + B 买入信号」形态，并给出预期收益率 / 目标止盈 / 安全止损。"
+      />
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">

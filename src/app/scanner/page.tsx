@@ -8,6 +8,7 @@ import RadarChart from "@/components/RadarChart";
 import QuantChart from "@/components/QuantChart";
 import FavoriteButton from "@/components/FavoriteButton";
 import Disclaimer from "@/components/Disclaimer";
+import { PageHeader } from "@/components/ui";
 
 interface HotStockItem {
   rank: number;
@@ -401,18 +402,18 @@ function ScannerContent() {
     <div className="space-y-6">
       
       {/* 头部标题区域 */}
-      <div className="border-b border-[var(--border)] pb-3">
-        <h1 className="text-xl font-bold tracking-wider font-mono">
-          {isCustomMode 
+      <PageHeader
+        title={
+          isCustomMode
             ? `[自定股票池 · ${customTitle || "未命名"}] 策略扫描器`
-            : "SERENITY MARKET SCANNER / 热门股策略扫描器"}
-        </h1>
-        <p className="mt-1 text-xs text-[var(--muted)]">
-          {isCustomMode 
+            : "SERENITY MARKET SCANNER / 热门股策略扫描器"
+        }
+        subtitle={
+          isCustomMode
             ? `当前导入自定股票池（共 ${list.length} 只股票），支持一键开启 AI 多因子并发打分与突破股识别诊断。`
-            : "实时监控东方财富股吧人气前 100 个股，多因子并行打分与突破股识别，快速挑选进入跟踪股票池。"}
-        </p>
-      </div>
+            : "实时监控东方财富股吧人气前 100 个股，多因子并行打分与突破股识别，快速挑选进入跟踪股票池。"
+        }
+      />
 
       {/* 控制台与筛选选项卡 (直角扁平底板) */}
       <div className="flex flex-wrap items-center justify-between gap-4 border border-[var(--border)] bg-[var(--surface)] p-4 rounded-[2px]">

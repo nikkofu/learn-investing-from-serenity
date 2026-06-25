@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/ui";
 
 const PRESETS: Record<string, { baseURL: string; model: string }> = {
   OpenAI: { baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini" },
@@ -441,12 +442,14 @@ export default function SettingsPage() {
 
   return (
     <div className="w-full space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">设置 · 多账户 LLM 接入</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          配置并保存多个 OpenAI 兼容账号，您可以在顶栏随时零感热切换。配置仅存在服务端本地 <code className="font-mono text-xs">.data/llm-config.json</code> 中。
-        </p>
-      </div>
+      <PageHeader
+        title="设置 · 多账户 LLM 接入"
+        subtitle={
+          <>
+            配置并保存多个 OpenAI 兼容账号，您可以在顶栏随时零感热切换。配置仅存在服务端本地 <code className="font-mono text-xs">.data/llm-config.json</code> 中。
+          </>
+        }
+      />
 
       <div className="space-y-3">
         <span className="text-[11px] font-bold tracking-wider text-[var(--faint)] uppercase block px-0.5 select-none">

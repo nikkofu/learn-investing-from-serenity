@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import StockLink from "@/components/StockLink";
 import { NFA } from "@/lib/disclaimers";
+import { PageHeader } from "@/components/ui";
 
 // ── 类型（与 src/lib/paperTrades.ts 对齐） ─────────────────────────────────────
 
@@ -351,23 +352,21 @@ export default function PaperTradingPage() {
   const closedList = positions.filter((p) => p.status === "closed");
 
   return (
-    <main className="w-full px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">配对纸面交易 / 持仓跟踪</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            把沉淀策略 / 套利配对的当前开口一键建成纸面仓，前向盯市看「价差回归是否真的兑现」· 开平流水 / 实时盈亏 / 回归达成率
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => setFormOpen((v) => !v)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
-            {formOpen ? "收起手动建仓" : "手动建仓"}
-          </button>
-          <button onClick={() => load(true)} disabled={refreshing || loading} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50">
-            {refreshing ? "盯市中…" : "刷新盯市（拉最新 K + 实时价）"}
-          </button>
-        </div>
-      </div>
+    <div className="w-full">
+      <PageHeader
+        title="配对纸面交易 / 持仓跟踪"
+        subtitle="把沉淀策略 / 套利配对的当前开口一键建成纸面仓，前向盯市看「价差回归是否真的兑现」· 开平流水 / 实时盈亏 / 回归达成率"
+        actions={
+          <>
+            <button onClick={() => setFormOpen((v) => !v)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
+              {formOpen ? "收起手动建仓" : "手动建仓"}
+            </button>
+            <button onClick={() => load(true)} disabled={refreshing || loading} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50">
+              {refreshing ? "盯市中…" : "刷新盯市（拉最新 K + 实时价）"}
+            </button>
+          </>
+        }
+      />
 
       {summary && (
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
@@ -436,6 +435,6 @@ export default function PaperTradingPage() {
         命中回归（|z|≤exitZ）/ 止损（|z|≥stopZ）/ 超时（持有≥最长天数）自动平仓。盈亏走 A 股成本模型（佣金/印花税/过户费/滑点）。
         <span className="text-rose-500">盈红</span> / <span className="text-emerald-500">亏绿</span>。回归达成率 = 已平仓中由「价差回归」兑现的占比。{NFA}
       </div>
-    </main>
+    </div>
   );
 }

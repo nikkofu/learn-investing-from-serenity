@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
 import { NFA } from "@/lib/disclaimers";
+import { PageHeader } from "@/components/ui";
 
 interface StrategyMeta {
   id: string;
@@ -414,10 +415,13 @@ function StrategyBacktestInner() {
             配对交易(统计套利)
           </Link>
         </div>
-        <h1 className="text-xl font-semibold text-[var(--text)]">建议忠实回测 · 胜率证明</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          选定一个策略，在股票池上逐只独立重放它与个股看盘页**完全同一套**的买卖规则，信号**只用当日之前数据**（无未来函数），含 A 股涨跌停撮合（涨停买不进、跌停卖不出顺延）与双边手续费。把所有完成交易**汇总**，对比「同持有期买入持有」基线并做 z 检验，诚实回答「照该策略买卖到底有没有较大胜率」。池内不带逐股基本面分（给中性瓶颈点分），故不触发依赖高基本面分的「强势起爆」信号。{NFA}
-        </p>
+        <PageHeader
+          className="mb-0"
+          title="建议忠实回测 · 胜率证明"
+          subtitle={
+            <>选定一个策略，在股票池上逐只独立重放它与个股看盘页**完全同一套**的买卖规则，信号**只用当日之前数据**（无未来函数），含 A 股涨跌停撮合（涨停买不进、跌停卖不出顺延）与双边手续费。把所有完成交易**汇总**，对比「同持有期买入持有」基线并做 z 检验，诚实回答「照该策略买卖到底有没有较大胜率」。池内不带逐股基本面分（给中性瓶颈点分），故不触发依赖高基本面分的「强势起爆」信号。{NFA}</>
+          }
+        />
       </div>
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">

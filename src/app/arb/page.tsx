@@ -7,6 +7,7 @@ import StockLink from "@/components/StockLink";
 import PoolControls from "@/components/PoolControls";
 import RobustnessPanel from "@/components/RobustnessPanel";
 import { ARB_BOUNDARY, NFA } from "@/lib/disclaimers";
+import { PageHeader } from "@/components/ui";
 
 interface PairCandidate {
   a: string;
@@ -322,12 +323,17 @@ function ArbRadarInner() {
             配对回测（样本内外）
           </Link>
         </div>
-        <h1 className="text-xl font-semibold text-[var(--text)]">统计套利雷达 · 单边可执行择时</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          候选池（已按设置页<strong>股票池纯净化</strong>口径剔除科创/北交所/B 股等）内全两两做 Engle-Granger 协整检验，只捕捉<strong>当前价差已开口</strong>（|z|≥入场阈）的机会，
-          按 <strong>|z|×协整强度</strong>排序。每条直接落到<strong>单边动作</strong>：相对被低估的那一只 → <span className="text-emerald-500 font-semibold">逢低分批布局</span>（买入择时）；相对被高估的那一只 → <span className="text-rose-500 font-semibold">减仓/规避</span>。
-          {ARB_BOUNDARY}
-        </p>
+        <PageHeader
+          className="mb-0"
+          title="统计套利雷达 · 单边可执行择时"
+          subtitle={
+            <>
+              候选池（已按设置页<strong>股票池纯净化</strong>口径剔除科创/北交所/B 股等）内全两两做 Engle-Granger 协整检验，只捕捉<strong>当前价差已开口</strong>（|z|≥入场阈）的机会，
+              按 <strong>|z|×协整强度</strong>排序。每条直接落到<strong>单边动作</strong>：相对被低估的那一只 → <span className="text-emerald-500 font-semibold">逢低分批布局</span>（买入择时）；相对被高估的那一只 → <span className="text-rose-500 font-semibold">减仓/规避</span>。
+              {ARB_BOUNDARY}
+            </>
+          }
+        />
       </div>
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">

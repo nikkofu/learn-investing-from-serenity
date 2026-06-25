@@ -9,6 +9,7 @@ import QuantChart from "@/components/QuantChart";
 import { readNdjson } from "@/lib/stream-client";
 import SharingCard from "@/components/SharingCard";
 import Disclaimer from "@/components/Disclaimer";
+import { PageHeader } from "@/components/ui";
 
 const FACTOR_LABELS: Record<string, string> = {
   demand: "确定需求",
@@ -244,12 +245,10 @@ function AnalyzeInner() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">个股瓶颈点分析</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          搜索 A 股（名称 / 代码 / 拼音），AI 按 Serenity 五因子打分并生成瓶颈点论述与风险。
-        </p>
-      </div>
+      <PageHeader
+        title="个股瓶颈点分析"
+        subtitle="搜索 A 股（名称 / 代码 / 拼音），AI 按 Serenity 五因子打分并生成瓶颈点论述与风险。"
+      />
 
       <div className="relative">
         <div className="flex gap-3">

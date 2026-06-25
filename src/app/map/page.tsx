@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import type { SupplyChainMap } from "@/lib/types";
 import { ProgressTrace, applyStageEvent, type Stage } from "@/components/ProgressTrace";
 import { readNdjson } from "@/lib/stream-client";
+import { PageHeader } from "@/components/ui";
 
 const SUGGESTIONS = ["AI 算力 / 光模块", "人形机器人", "半导体国产替代", "CPO / 硅光", "稀土永磁", "液冷数据中心"];
 
@@ -119,12 +120,10 @@ function MapPageInner() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">趋势 → 产业链瓶颈点拆解</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          输入一个确定性趋势，AI 按 Serenity 瓶颈点方法拆出产业链分层，并标注 A 股“卡脖子”环节。
-        </p>
-      </div>
+      <PageHeader
+        title="趋势 → 产业链瓶颈点拆解"
+        subtitle="输入一个确定性趋势，AI 按 Serenity 瓶颈点方法拆出产业链分层，并标注 A 股“卡脖子”环节。"
+      />
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <input

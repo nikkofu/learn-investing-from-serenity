@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import RadarChart from "@/components/RadarChart";
 import { readNdjson } from "@/lib/stream-client";
+import { PageHeader } from "@/components/ui";
 
 interface SectorItem {
   code: string;
@@ -366,14 +367,10 @@ export default function SectorsPage() {
   return (
     <div className="space-y-6">
       {/* 头部标题区 */}
-      <div className="border-b border-[var(--border)] pb-3">
-        <h1 className="text-xl font-bold tracking-wider font-mono">
-          SERENITY SECTOR HEATMAP / 行业板块热力评估系统
-        </h1>
-        <p className="mt-1 text-xs text-[var(--muted)]">
-          自底向上穿透：以红绿冷暖色标绘 A 股 100 个核心行业，结合 Serenity 瓶颈点多因子理论，透视成分股，实现板块级 AI 研判。
-        </p>
-      </div>
+      <PageHeader
+        title="SERENITY SECTOR HEATMAP / 行业板块热力评估系统"
+        subtitle="自底向上穿透：以红绿冷暖色标绘 A 股 100 个核心行业，结合 Serenity 瓶颈点多因子理论，透视成分股，实现板块级 AI 研判。"
+      />
 
       {/* 核心控制栏 */}
       <div className="flex flex-wrap items-center justify-between gap-4 border border-[var(--border)] bg-[var(--surface)] p-3 rounded-[2px]">

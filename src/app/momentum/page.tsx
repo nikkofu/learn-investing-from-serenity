@@ -6,6 +6,7 @@ import StockLink from "@/components/StockLink";
 import FavoriteButton from "@/components/FavoriteButton";
 import PoolControls from "@/components/PoolControls";
 import { NFA } from "@/lib/disclaimers";
+import { PageHeader } from "@/components/ui";
 
 // ── 类型（与 /api/momentum/* 返回对齐）──────────────────────────────────────
 interface MomentumFactors {
@@ -182,10 +183,13 @@ function MomentumInner() {
             </button>
           ))}
         </div>
-        <h1 className="text-xl font-semibold text-[var(--text)]">横截面动量 / 行业轮动</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          主板个股多因子动量打分（近 1/3/6 月收益、12-1 动量、风险调整、趋势）、行业轮动信号、以及按动量截面排名轮动的<strong>纯多头</strong>组合回测（只买不做空，含手续费与 A 股涨跌停撮合约束）。{NFA}
-        </p>
+        <PageHeader
+          className="mb-0"
+          title="横截面动量 / 行业轮动"
+          subtitle={
+            <>主板个股多因子动量打分（近 1/3/6 月收益、12-1 动量、风险调整、趋势）、行业轮动信号、以及按动量截面排名轮动的<strong>纯多头</strong>组合回测（只买不做空，含手续费与 A 股涨跌停撮合约束）。{NFA}</>
+          }
+        />
       </div>
 
       {tab === "rank" && <RankTab initialCodes={initialCodes} initialLimit={initialLimit} />}

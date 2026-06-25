@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import StockLink from "@/components/StockLink";
+import { PageHeader } from "@/components/ui";
 
 interface StrategyMeta {
   id: string;
@@ -496,22 +497,20 @@ export default function StrategyMarketPage() {
   }, [load]);
 
   return (
-    <main className="w-full px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">策略市场</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            所有已登记策略在同一代表性 A 股篮子上的真实战绩榜单 · 客观评级 · 一键切换实测
-          </p>
-        </div>
-        <button
-          onClick={() => load(true)}
-          disabled={loading}
-          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)] disabled:opacity-50"
-        >
-          {loading ? "回测中…" : "重新回测"}
-        </button>
-      </div>
+    <div className="w-full">
+      <PageHeader
+        title="策略市场"
+        subtitle="所有已登记策略在同一代表性 A 股篮子上的真实战绩榜单 · 客观评级 · 一键切换实测"
+        actions={
+          <button
+            onClick={() => load(true)}
+            disabled={loading}
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)] disabled:opacity-50"
+          >
+            {loading ? "回测中…" : "重新回测"}
+          </button>
+        }
+      />
 
       {board && (
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
@@ -562,6 +561,6 @@ export default function StrategyMarketPage() {
           </div>
         </>
       )}
-    </main>
+    </div>
   );
 }

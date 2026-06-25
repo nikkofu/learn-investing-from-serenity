@@ -1,5 +1,6 @@
 import { loadCurated, loadPostsDigest } from "@/lib/knowledge";
 import { mapPostToSectors } from "@/lib/postMapping";
+import { PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +17,11 @@ export default async function MethodologyPage() {
   return (
     <div className="space-y-8">
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6">
-        <h1 className="text-2xl font-semibold tracking-tight">方法论 / 知识库</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          {curated.profile.alias} · {curated.profile.handle} · Reddit {curated.profile.reddit}
-        </p>
+        <PageHeader
+          className="mb-0"
+          title="方法论 / 知识库"
+          subtitle={`${curated.profile.alias} · ${curated.profile.handle} · Reddit ${curated.profile.reddit}`}
+        />
         <p className="mt-3 text-sm leading-6 text-[var(--text)]">{curated.profile.bio}</p>
         <p className="mt-2 text-sm leading-6 text-[var(--text)]">{curated.method.summary}</p>
         <p className="mt-2 text-xs text-[var(--warn)]">{curated.profile.selfReportedReturns}</p>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/ui";
 
 type SyncSourceId = "serenity" | "hotRank" | "industrySectors" | "sectorStocks" | "hotSectors";
 
@@ -108,23 +109,25 @@ export default function SyncCenterPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-[var(--text)]">数据同步中心</h1>
-          <p className="mt-0.5 text-xs leading-5 text-[var(--muted)]">
+      <PageHeader
+        title="数据同步中心"
+        subtitle={
+          <>
             一键依次同步运营所需数据：Serenity 最新消息、热门股票排行、行业板块、个股清单、热门板块。
             数据落盘后可供选股/分析与已配置的 LLM 使用。也可由自有程序调用 <code className="text-[var(--accent)]">POST /api/sync</code>（<code>{`{ source: "all" | <id> }`}</code>）。
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleSyncAll}
-          disabled={runningAll || loading}
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-50 cursor-pointer select-none"
-        >
-          {runningAll ? "正在依次同步…" : "依次同步全部"}
-        </button>
-      </div>
+          </>
+        }
+        actions={
+          <button
+            type="button"
+            onClick={handleSyncAll}
+            disabled={runningAll || loading}
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-50 cursor-pointer select-none"
+          >
+            {runningAll ? "正在依次同步…" : "依次同步全部"}
+          </button>
+        }
+      />
 
       <div className="space-y-3">
         {loading && sources.length === 0 && (
