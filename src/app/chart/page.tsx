@@ -406,6 +406,48 @@ function ChartInner() {
     proStrategies.find((s) => s.meta.id === activeProStrategyId)?.result ?? data?.quant?.backtest ?? null;
   const proTrades: TradeAction[] = activeProResult?.trades ?? [];
 
+  // 图表引擎 + 买卖引擎控件：经典 SVG 模式下渲染在独立行；Pro 画布模式下注入到画布工具栏首行，
+  // 与策略图层/回放同处一行，省出一行高度给 K 线图。
+  const engineControls = (
+    <>
+      <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono mr-1">图表引擎</span>
+      <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px] font-mono">
+        {([["classic", "经典 SVG"], ["pro", "Pro 画布"]] as const).map(([m, label]) => (
+          <button
+            key={m}
+            onClick={() => setChartView(m)}
+            title={m === "classic" ? "自研 SVG：筹码分布 / 价格投影 / VRVP 原生叠加" : "lightweight-charts 画布：十字光标 / 多窗格副图 / 原生对数%轴 / 6000+ 根丝滑"}
+            className={`px-2.5 py-0.5 text-[10px] font-semibold cursor-pointer rounded-[1px] transition ${
+              chartView === m ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {chartView === "pro" && proStrategies.length > 0 && (
+        <div className="flex items-center gap-1 ml-1" title="Pro 画布买卖标记所用策略；切换即按该策略重画 B/S（默认旗舰 v7 趋势跟随：ATR 跟踪止盈，不再固定 35% 卖飞）">
+          <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono">买卖引擎</span>
+          <select
+            value={activeProStrategyId}
+            onChange={(e) => applyStrategyId(e.target.value)}
+            className="bg-[var(--inset)] border border-[var(--border)] text-[10px] font-bold tracking-wide text-[var(--text)] px-2 py-1 rounded-[1px] cursor-pointer focus:outline-none focus:border-[var(--accent)]"
+          >
+            {proStrategies.map((s) => (
+              <option key={s.meta.id} value={s.meta.id}>
+                {s.meta.name} v{s.meta.version}
+                {s.meta.id === data?.quant?.defaultStrategyId ? " · 默认" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {chartView === "pro" && (
+        <span className="text-[9px] font-mono text-[var(--faint)] ml-1">筹码/投影/VRVP 请切回「经典 SVG」</span>
+      )}
+    </>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[var(--bg)] text-[var(--text)] font-sans overflow-hidden select-none">
       
@@ -536,44 +578,12 @@ function ChartInner() {
             </div>
           ) : data && data.quant ? (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden" ref={containerRef}>
-              {/* 图表引擎切换：经典 SVG / Pro 画布(lightweight-charts) */}
-              <div className="flex items-center gap-1 mb-2 select-none shrink-0">
-                <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono mr-1">图表引擎</span>
-                <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px] font-mono">
-                  {([["classic", "经典 SVG"], ["pro", "Pro 画布"]] as const).map(([m, label]) => (
-                    <button
-                      key={m}
-                      onClick={() => setChartView(m)}
-                      title={m === "classic" ? "自研 SVG：筹码分布 / 价格投影 / VRVP 原生叠加" : "lightweight-charts 画布：十字光标 / 多窗格副图 / 原生对数%轴 / 6000+ 根丝滑"}
-                      className={`px-2.5 py-0.5 text-[10px] font-semibold cursor-pointer rounded-[1px] transition ${
-                        chartView === m ? "bg-[var(--hover)] text-[var(--text)]" : "text-[var(--faint)] hover:text-[var(--text)]"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+              {/* 图表引擎切换：经典 SVG 独立行；Pro 画布模式下控件注入画布工具栏，省出一行高度 */}
+              {chartView !== "pro" && (
+                <div className="flex flex-wrap items-center gap-1 mb-2 select-none shrink-0">
+                  {engineControls}
                 </div>
-                {chartView === "pro" && proStrategies.length > 0 && (
-                  <div className="flex items-center gap-1 ml-1" title="Pro 画布买卖标记所用策略；切换即按该策略重画 B/S（默认旗舰 v7 趋势跟随：ATR 跟踪止盈，不再固定 35% 卖飞）">
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono">买卖引擎</span>
-                    <select
-                      value={activeProStrategyId}
-                      onChange={(e) => applyStrategyId(e.target.value)}
-                      className="bg-[var(--inset)] border border-[var(--border)] text-[10px] font-bold tracking-wide text-[var(--text)] px-2 py-1 rounded-[1px] cursor-pointer focus:outline-none focus:border-[var(--accent)]"
-                    >
-                      {proStrategies.map((s) => (
-                        <option key={s.meta.id} value={s.meta.id}>
-                          {s.meta.name} v{s.meta.version}
-                          {s.meta.id === data.quant.defaultStrategyId ? " · 默认" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {chartView === "pro" && (
-                  <span className="text-[9px] font-mono text-[var(--faint)] ml-1">筹码/投影/VRVP 请切回「经典 SVG」</span>
-                )}
-              </div>
+              )}
               {/* P1-D LLM 交互式画图：按钮 + 对话驱动 AI 自动画线/标注，叠加到 Pro 画布 */}
               {chartView === "pro" && (
                 <div className="mb-2 border border-[var(--border)] rounded-[2px] bg-[var(--inset)]/40 p-2 space-y-1.5 shrink-0">
@@ -628,6 +638,7 @@ function ChartInner() {
                     fq={fq}
                     drawings={drawings}
                     initialTvStrategyId={layerId}
+                    engineSlot={engineControls}
                   />
                 </div>
               ) : (

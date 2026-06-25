@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createChart,
   CandlestickSeries,
@@ -37,6 +37,8 @@ interface LightweightChartProps {
   drawings?: ChartDrawing[];
   /** 初始策略图层 id（如从 ?layer= 进入时自动叠加 TV 复刻策略，""=关闭）。 */
   initialTvStrategyId?: string;
+  /** 引擎控件插槽：父级「图表引擎 / 买卖引擎」控件渲染进工具栏首行，与策略图层/回放同处一行，省出一行高度。 */
+  engineSlot?: ReactNode;
 }
 
 // AI 画图叠加层配色（语义色，与蜡烛涨跌色区分开）
@@ -199,7 +201,7 @@ function buildTradeZones(plan: TradePlan, anchorTime: Time): TradeZonesData {
   return { anchorTime, bands, levels };
 }
 
-export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], initialTvStrategyId = "" }: LightweightChartProps) {
+export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], initialTvStrategyId = "", engineSlot }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -744,6 +746,12 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     <div className="flex flex-col h-full min-h-0 gap-2">
       {/* 工具栏 */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[9.5px] font-mono text-[var(--muted)] select-none shrink-0">
+        {engineSlot && (
+          <div className="flex items-center gap-1">
+            {engineSlot}
+            <span className="w-px h-3.5 bg-[var(--border)] mx-0.5" />
+          </div>
+        )}
         <div className="flex items-center gap-2.5">
           {MA_DEFS.map((d) => (
             <label key={d.key} className="flex items-center gap-1 cursor-pointer hover:text-[var(--text)]">
@@ -877,7 +885,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           </div>
         )}
         {gbbStats && (
-          <div className="absolute right-2 top-1 z-20 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/95 backdrop-blur-sm border border-[var(--border)] shadow-md rounded-[2px] overflow-hidden min-w-[150px]">
+          <div className="absolute left-2 top-9 z-20 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/95 backdrop-blur-sm border border-[var(--border)] shadow-md rounded-[2px] overflow-hidden min-w-[150px]">
             <div className="px-2 py-0.5 bg-[var(--inset)] text-[var(--faint)] tracking-wide border-b border-[var(--border)]">GBB · {code ?? ""}</div>
             {[
               ["Trend", gbbStats.trend, gbbStats.trendUp ? UP : DOWN],
@@ -895,7 +903,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           </div>
         )}
         {navStats && (
-          <div className="absolute right-2 top-1 z-20 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/95 backdrop-blur-sm border border-[var(--border)] shadow-md rounded-[2px] overflow-hidden min-w-[150px]">
+          <div className="absolute left-2 top-9 z-20 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/95 backdrop-blur-sm border border-[var(--border)] shadow-md rounded-[2px] overflow-hidden min-w-[150px]">
             <div className="px-2 py-0.5 bg-[var(--inset)] text-[var(--faint)] tracking-wide border-b border-[var(--border)]">Navigator · {code ?? ""}</div>
             {([
               ["Bias", navStats.bias, navStats.dir === 1 ? UP : DOWN],
