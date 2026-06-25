@@ -349,6 +349,16 @@ function ChartInner() {
     router.replace(`/chart?code=${selectedCode}`);
   }
 
+  // 统一的买卖引擎切换入口：更新状态 + 记忆 localStorage + 同步 ?strategy= 进 URL，
+  // 使刷新/分享链接稳定带出当前策略（与「深链优先」规则一致）。
+  function applyStrategyId(id: string) {
+    setProStrategyId(id);
+    saveStrategyId(id);
+    const sp = new URLSearchParams(params.toString());
+    sp.set("strategy", id);
+    router.replace(`/chart?${sp.toString()}`);
+  }
+
   // 键盘快捷键监听：未处于输入状态时直接键入字符，自动聚焦搜索框
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -548,11 +558,7 @@ function ChartInner() {
                     <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono">买卖引擎</span>
                     <select
                       value={activeProStrategyId}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        setProStrategyId(id);
-                        saveStrategyId(id);
-                      }}
+                      onChange={(e) => applyStrategyId(e.target.value)}
                       className="bg-[var(--inset)] border border-[var(--border)] text-[10px] font-bold tracking-wide text-[var(--text)] px-2 py-1 rounded-[1px] cursor-pointer focus:outline-none focus:border-[var(--accent)]"
                     >
                       {proStrategies.map((s) => (
@@ -628,10 +634,7 @@ function ChartInner() {
                   currentPrice={data.quant.refPrice ?? data.quote.price}
                   height={chartHeight}
                   strategyId={activeProStrategyId}
-                  onStrategyChange={(id) => {
-                    setProStrategyId(id);
-                    saveStrategyId(id);
-                  }}
+                  onStrategyChange={applyStrategyId}
                 />
               )}
             </div>
