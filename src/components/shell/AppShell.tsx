@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import CommandPalette from "./CommandPalette";
+import { recordPageVisit } from "@/lib/recentVisits";
 
 const LS_KEY = "serenity-sidebar-collapsed";
 
@@ -19,12 +22,18 @@ export default function AppShell({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     try {
       if (localStorage.getItem(LS_KEY) === "1") setCollapsed(true);
     } catch {}
   }, []);
+
+  // 记录页面访问，供命令面板「最近访问」消费。
+  useEffect(() => {
+    recordPageVisit(pathname);
+  }, [pathname]);
 
   const toggleCollapse = () => {
     setCollapsed((v) => {
@@ -74,6 +83,8 @@ export default function AppShell({
           {footer}
         </div>
       </div>
+
+      <CommandPalette />
     </div>
   );
 }
