@@ -17,13 +17,13 @@ export default async function Home() {
           {curated.profile.coreIdea}
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
-          <Link href="/map" className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-fg)] hover:opacity-90">
+          <Link href="/map" target="_blank" rel="noopener noreferrer" className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-fg)] hover:opacity-90">
             趋势 → 产业链拆解
           </Link>
           <Link href="/analyze" target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]">
             个股瓶颈点评分
           </Link>
-          <Link href="/methodology" className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]">
+          <Link href="/methodology" target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]">
             方法论 / 知识库
           </Link>
         </div>
@@ -80,7 +80,7 @@ export default async function Home() {
               尚未抓取 X 发言。运行 <code className="rounded bg-[var(--hover)] px-1 font-mono text-xs">node scripts/scrape-x.mjs</code> 构建一手知识库。
             </p>
           )}
-          <Link href="/methodology" className="mt-4 inline-block text-sm text-[var(--accent)] hover:underline">
+          <Link href="/methodology" target="_blank" rel="noopener noreferrer" className="mt-4 inline-block text-sm text-[var(--accent)] hover:underline">
             查看完整方法论与主题映射 →
           </Link>
         </div>

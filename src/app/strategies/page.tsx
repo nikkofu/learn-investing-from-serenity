@@ -149,12 +149,16 @@ function StrategyCard({ r }: { r: TrackRecord }) {
       <div className="mt-4 flex flex-wrap gap-2">
         <Link
           href={`/backtest/strategy?strategy=${encodeURIComponent(r.meta.id)}`}
+          target="_blank"
+          rel="noopener noreferrer"
           className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
         >
           多股票池实测 →
         </Link>
         <Link
           href="/analyze"
+          target="_blank"
+          rel="noopener noreferrer"
           className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]"
         >
           单票分析切换此策略
@@ -279,7 +283,7 @@ function SavedStrategyCard({
         <button onClick={onPaper} disabled={busy} className="rounded-lg border border-[var(--accent)]/50 bg-[var(--accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--accent)] transition hover:opacity-90 disabled:opacity-50" title="按当前开口信号建纸面仓，前向跟踪是否回归">
           {busy ? "建仓中…" : "建纸面仓"}
         </button>
-        <Link href={`/arb?codes=${s.pair.a},${s.pair.b}&entryZ=${s.params.entryZ}&stopZ=${s.params.stopZ}`} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
+        <Link href={`/arb?codes=${s.pair.a},${s.pair.b}&entryZ=${s.params.entryZ}&stopZ=${s.params.stopZ}`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
           在套利雷达打开
         </Link>
         <button onClick={onExport} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
@@ -445,7 +449,7 @@ function SavedStrategiesSection() {
       {!loading && list.length === 0 ? (
         <div className="mt-3 rounded-xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
           还没有沉淀策略。去
-          <Link href="/arb" className="mx-1 text-[var(--accent)] underline">套利雷达</Link>
+          <Link href="/arb" target="_blank" rel="noopener noreferrer" className="mx-1 text-[var(--accent)] underline">套利雷达</Link>
           跑「信号回测校准」，在表里点「沉淀为策略」即可。
         </div>
       ) : (
@@ -550,7 +554,7 @@ export default function StrategyMarketPage() {
             <div className="mt-2">
               评级口径：综合分 = 胜率 28% + 盈亏比 27% + 夏普 20% + 平均收益 15% + 跑赢买入持有 10%；A≥62 / B≥50 / C≥38 / D&lt;38（侧重每次出手的质量，弱化受牛熊主导的跑赢买入持有项）。
               想用自定义股票池验证某策略「照建议买卖是否有较大胜率」，请到
-              <Link href="/backtest/strategy" className="mx-1 text-[var(--accent)] underline">
+              <Link href="/backtest/strategy" target="_blank" rel="noopener noreferrer" className="mx-1 text-[var(--accent)] underline">
                 建议忠实回测
               </Link>
               页跑多股票池 + 显著性检验。

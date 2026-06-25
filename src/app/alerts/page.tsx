@@ -519,7 +519,7 @@ function InboxSection({ events, unread, onChange }: { events: AlertEvent[]; unre
                   <span className="tabular-nums">{fmtDate(e.triggeredAt)}</span>
                   {e.channelsSent.includes("webhook") && <span className="rounded bg-[var(--hover)] px-1.5 py-0.5">webhook 已送</span>}
                   {href && (
-                    <Link href={href} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">查看</Link>
+                    <Link href={href} target="_blank" rel="noopener noreferrer" className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">查看</Link>
                   )}
                 </div>
               </div>

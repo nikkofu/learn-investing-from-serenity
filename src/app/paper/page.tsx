@@ -188,7 +188,7 @@ function PositionCard({ pos, busy, onClose, onDelete }: { pos: PaperPosition; bu
             {busy ? "处理中…" : "手动平仓（按现价）"}
           </button>
         )}
-        <Link href={`/arb?codes=${pos.pair.a},${pos.pair.b}&entryZ=${pos.params.entryZ}&stopZ=${pos.params.stopZ}`} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
+        <Link href={`/arb?codes=${pos.pair.a},${pos.pair.b}&entryZ=${pos.params.entryZ}&stopZ=${pos.params.stopZ}`} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]">
           在套利雷达打开
         </Link>
         <button onClick={onDelete} disabled={busy} className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-sm text-rose-500 transition hover:bg-rose-500/10 disabled:opacity-50">
@@ -396,7 +396,7 @@ export default function PaperTradingPage() {
       ) : positions.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted)]">
           还没有纸面仓。去
-          <Link href="/strategies" className="mx-1 text-[var(--accent)] underline">策略市场</Link>
+          <Link href="/strategies" target="_blank" rel="noopener noreferrer" className="mx-1 text-[var(--accent)] underline">策略市场</Link>
           的沉淀策略点「建纸面仓」，或在上方「手动建仓」按当前开口建一笔。
         </div>
       ) : (

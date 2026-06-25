@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import StockLink from "@/components/StockLink";
@@ -345,8 +346,20 @@ function CompareInner() {
       {/* 对比表 */}
       {resp && (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-[var(--text)]">横向对比表</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold text-[var(--text)]">横向对比表</h2>
+              {codes.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 text-xs">
+                  <span className="text-[var(--faint)]">用这 {codes.length} 只去</span>
+                  <Link href={`/momentum?codes=${codes.join(",")}`} target="_blank" rel="noopener noreferrer" className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] transition hover:border-[var(--accent-line)] hover:text-[var(--text)]">动量轮动 ↗</Link>
+                  <Link href={`/scanner?codes=${codes.join(",")}&title=${encodeURIComponent("横向对比标的")}`} target="_blank" rel="noopener noreferrer" className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] transition hover:border-[var(--accent-line)] hover:text-[var(--text)]">扫描诊断 ↗</Link>
+                  {codes.length >= 2 && (
+                    <Link href={`/arb?codes=${codes.join(",")}`} target="_blank" rel="noopener noreferrer" className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] transition hover:border-[var(--accent-line)] hover:text-[var(--text)]">套利配对 ↗</Link>
+                  )}
+                </div>
+              )}
+            </div>
             <span className="text-xs text-[var(--muted)]">{resp.asOf || "—"} · {sortedRows.length} 只 · 点表头排序</span>
           </div>
           <div className="overflow-auto">

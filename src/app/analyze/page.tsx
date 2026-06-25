@@ -324,7 +324,7 @@ function AnalyzeInner() {
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
           <p>{error}</p>
           {error.includes("未配置") && (
-            <a href="/settings" className="mt-1 inline-block text-[var(--accent)] underline">前往「设置」配置 LLM →</a>
+            <a href="/settings" target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[var(--accent)] underline">前往「设置」配置 LLM →</a>
           )}
         </div>
       )}

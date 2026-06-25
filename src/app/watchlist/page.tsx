@@ -183,10 +183,10 @@ function FavoritesSection({
         <button onClick={saveAllAsPool} disabled={busy} className="rounded-md border border-[var(--accent-line)] bg-[var(--accent-soft)] px-3 py-1 font-semibold text-[var(--accent)] hover:opacity-90 disabled:opacity-50">
           全部存为股票池
         </button>
-        <Link href={`/scanner?codes=${allCodes}&title=${encodeURIComponent("我的收藏")}`} className="rounded-md border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:text-[var(--text)]">
+        <Link href={`/scanner?codes=${allCodes}&title=${encodeURIComponent("我的收藏")}`} target="_blank" rel="noopener noreferrer" className="rounded-md border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:text-[var(--text)]">
           扫描全部收藏
         </Link>
-        <Link href={`/momentum?codes=${allCodes}`} className="rounded-md border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:text-[var(--text)]">
+        <Link href={`/momentum?codes=${allCodes}`} target="_blank" rel="noopener noreferrer" className="rounded-md border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:text-[var(--text)]">
           动量打分全部收藏
         </Link>
       </div>
@@ -325,9 +325,9 @@ function PoolsSection({ pools, onChange }: { pools: StockPool[]; onChange: (next
                     {p.name} <span className="ml-1 text-xs font-normal text-[var(--faint)]">{p.codes.length} 只 · 更新于 {fmtDate(p.updatedAt)}</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5 text-xs">
-                    <Link href={`/scanner?codes=${codesStr}&title=${encodeURIComponent(p.name)}`} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">扫描</Link>
-                    <Link href={`/momentum?codes=${codesStr}`} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">动量</Link>
-                    <Link href={`/arb?codes=${codesStr}`} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">套利</Link>
+                    <Link href={`/scanner?codes=${codesStr}&title=${encodeURIComponent(p.name)}`} target="_blank" rel="noopener noreferrer" className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">扫描</Link>
+                    <Link href={`/momentum?codes=${codesStr}`} target="_blank" rel="noopener noreferrer" className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">动量</Link>
+                    <Link href={`/arb?codes=${codesStr}`} target="_blank" rel="noopener noreferrer" className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">套利</Link>
                     <button onClick={() => { setEditId(editId === p.id ? null : p.id); setEditText(codesStr); }} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:text-[var(--text)]">编辑</button>
                     <button onClick={() => remove(p.id)} disabled={busy} className="rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] hover:border-red-500/40 hover:text-red-400 disabled:opacity-50">删除</button>
                   </div>
@@ -395,7 +395,7 @@ function ScreensSection({ screens, onChange }: { screens: SavedScreen[]; onChang
             </div>
           </div>
           <div className="flex gap-1.5 text-xs">
-            <Link href={screenHref(s)} className="rounded border border-[var(--accent-line)] bg-[var(--accent-soft)] px-2.5 py-1 font-semibold text-[var(--accent)] hover:opacity-90">应用</Link>
+            <Link href={screenHref(s)} target="_blank" rel="noopener noreferrer" className="rounded border border-[var(--accent-line)] bg-[var(--accent-soft)] px-2.5 py-1 font-semibold text-[var(--accent)] hover:opacity-90">应用</Link>
             <button onClick={() => remove(s.id)} disabled={busy} className="rounded border border-[var(--border)] px-2.5 py-1 text-[var(--muted)] hover:border-red-500/40 hover:text-red-400 disabled:opacity-50">删除</button>
           </div>
         </div>
