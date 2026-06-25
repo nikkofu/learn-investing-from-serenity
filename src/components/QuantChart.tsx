@@ -61,6 +61,30 @@ function positionActionLabel(t: TradeAction): string {
   if (t.type === "buy") return frac >= 0.999 ? "建仓 · 满仓(100%)" : `加/建仓 · ${pct}%`;
   return frac >= 0.999 ? "清仓 · 全部(100%)" : `减仓 · ${pct}%`;
 }
+/** 触发理由的极简标签：优先取【…】内的策略名，否则截取理由首段，用于在 BS 点旁常驻标注。 */
+function tradeReasonTag(t: TradeAction): string {
+  const reason = (t.reason || "").trim();
+  if (!reason) return "";
+  const bracket = reason.match(/[【\[]([^】\]]+)[】\]]/);
+  if (bracket) return bracket[1].trim();
+  const head = reason.split(/[，。；,;\s]/)[0] || reason;
+  return head.length > 10 ? `${head.slice(0, 10)}…` : head;
+}
+/** BS 点理由标签的字号与卖点盈亏文案，供宽度估算与渲染共用。 */
+const REASON_LABEL_FONT = 6.5;
+function tradeReasonPct(t: TradeAction): string {
+  return t.profitPct != null ? `${t.profitPct >= 0 ? "+" : ""}${t.profitPct.toFixed(1)}%` : "";
+}
+/** 粗算理由标签背景框宽度：中文按字号计、ASCII 按 0.62 字号计；用于自适应布局与横向避让。 */
+function tradeReasonBoxWidth(t: TradeAction): number {
+  const measure = (s: string) =>
+    [...s].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? REASON_LABEL_FONT : REASON_LABEL_FONT * 0.62), 0);
+  const tag = tradeReasonTag(t);
+  if (!tag) return 0;
+  const pctStr = tradeReasonPct(t);
+  const pctW = pctStr ? measure(pctStr) + 3 : 0;
+  return measure(tag) + pctW + 7;
+}
 
 // 辅助：获取自然周的分组键
 function getYearWeek(dateStr: string): string {
@@ -330,6 +354,8 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
   const [showMA120, setShowMA120] = useState(true);
   const [showMA250, setShowMA250] = useState(true);
   const [showChannel, setShowChannel] = useState(true);
+  // 是否在买卖 BS 点旁常驻显示触发理由标签（默认开启；点位密集时可关闭以减少遮挡）。
+  const [showTradeReasons, setShowTradeReasons] = useState(true);
   // 纵轴标度：linear 线性 / log 对数（贴合后复权长周期，低位不贴底）/ pct 百分比（相对首根收盘看相对涨跌）。
   const [yScaleMode, setYScaleMode] = useState<"linear" | "log" | "pct">("linear");
   // 布林带叠加在主图；副图振荡指标单选（无/MACD/RSI/KDJ）。
@@ -1362,6 +1388,11 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
             回归通道
           </label>
 
+          <label className="flex items-center gap-1 text-[9.5px] font-mono text-[var(--muted)] cursor-pointer hover:text-[var(--text)] select-none" title="在买卖 BS 标记旁常驻显示触发理由（策略名/盈亏）；点位密集时可关闭以减少遮挡。">
+            <input type="checkbox" checked={showTradeReasons} onChange={(e) => setShowTradeReasons(e.target.checked)} className="rounded-[1px] accent-[var(--accent)]" />
+            BS理由
+          </label>
+
           {/* 纵轴标度切换（对标 TradingView 线性/对数/百分比）：对数贴合后复权长周期，百分比看相对涨跌 */}
           {chartType === "kline" && (
             <div className="flex items-center gap-1" title="纵轴标度：线性 / 对数（贴合后复权长周期，低位不贴底）/ 百分比（相对首根收盘看相对涨跌）">
@@ -1979,7 +2010,30 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
               })()}
 
               {/* 共有：买卖标记点 */}
-              {chartParams.tradePoints.map((t, idx) => {
+              {(() => {
+                const pts = chartParams.tradePoints;
+                // 理由标签横向避让：买/卖各自一条 lane，自左向右贪心保留互不重叠的标签，
+                // 避免长周期密集成交时文字糊成一片；缩放后点位变疏时会自动显示更多。
+                const showReasonLabel = new Array(pts.length).fill(false);
+                if (showTradeReasons) {
+                  (["buy", "sell"] as const).forEach((side) => {
+                    let lastRight = -Infinity;
+                    pts
+                      .map((t, i) => ({ t, i }))
+                      .filter((o) => o.t.type === side)
+                      .sort((a, b) => a.t.x - b.t.x)
+                      .forEach(({ t, i }) => {
+                        const w = tradeReasonBoxWidth(t);
+                        if (w <= 0) return;
+                        const left = t.x - w / 2;
+                        if (left >= lastRight + 2) {
+                          showReasonLabel[i] = true;
+                          lastRight = t.x + w / 2;
+                        }
+                      });
+                  });
+                }
+                return pts.map((t, idx) => {
                 const isBuy = t.type === "buy";
                 const isHovered = hoveredTrade && hoveredTrade.date === t.date && hoveredTrade.type === t.type;
                 // 标记不透明度 = 本笔仓位比例（卖 1/2 → 50% 透明），角标显示分数。
@@ -2023,9 +2077,51 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                     >
                       {isBuy ? "B" : "S"}{badge}
                     </text>
+                    {/* BS 点旁常驻的触发理由标签（策略名 + 卖点本笔盈亏），密集时可在工具栏「BS理由」关闭 */}
+                    {showReasonLabel[idx] && (() => {
+                      const tag = tradeReasonTag(t);
+                      if (!tag) return null;
+                      const pctStr = tradeReasonPct(t);
+                      const fontSize = REASON_LABEL_FONT;
+                      const boxW = tradeReasonBoxWidth(t);
+                      const boxH = 10;
+                      const cx = Math.max(padding + boxW / 2, Math.min(mainChartWidth - padding - boxW / 2, t.x));
+                      const boxX = cx - boxW / 2;
+                      const boxY = isBuy ? t.y + 15 : t.y - 15 - boxH;
+                      const textY = boxY + boxH / 2 + fontSize * 0.36;
+                      return (
+                        <g className="pointer-events-none">
+                          <rect
+                            x={boxX}
+                            y={boxY}
+                            width={boxW}
+                            height={boxH}
+                            rx="1.5"
+                            fill="rgba(15,23,42,0.82)"
+                            fillOpacity={isHovered ? 0.96 : 0.82}
+                            stroke={isBuy ? "rgba(16,185,129,0.55)" : "rgba(239,68,68,0.55)"}
+                            strokeWidth="0.5"
+                          />
+                          <text
+                            x={boxX + 3.5}
+                            y={textY}
+                            fontSize={fontSize}
+                            fontFamily="monospace"
+                            fontWeight="bold"
+                            textAnchor="start"
+                          >
+                            <tspan fill={isBuy ? "#34d399" : "#f87171"}>{tag}</tspan>
+                            {pctStr && (
+                              <tspan dx="3" fill={t.profitPct! >= 0 ? "#34d399" : "#f87171"}>{pctStr}</tspan>
+                            )}
+                          </text>
+                        </g>
+                      );
+                    })()}
                   </g>
                 );
-              })}
+              });
+              })()}
 
               {/* SVG 内部的毛玻璃交易提示卡片 */}
               {hoveredTrade && (() => {
@@ -2411,7 +2507,8 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
               <p>• <b className="text-[var(--accent)]">B</b> 绿点=买入，<b className="text-red-400">S</b> 红点=卖出。</p>
               <p>• <b>点的透明度 = 本笔仓位比例</b>：满仓动作=实心，卖 1/2≈半透明(½)，卖 1/3≈更淡(⅓)。</p>
               <p>• 一个 B 常对应多个 S：分批止盈（+8% 减⅓ → +25% 再减 → 跟踪/支撑清仓），故 S 比 B 多。</p>
-              <p>• 悬浮任意标记或下方「交易明细」可见「操作仓位 + 本笔盈亏 + 触发理由」。</p>
+              <p>• B/S 点旁常驻标签显示「触发理由（策略名）+ 卖点本笔盈亏」，可在工具栏「BS理由」开关；点位密集时关闭可减少遮挡。</p>
+              <p>• 悬浮任意标记或下方「交易明细」可见完整的「操作仓位 + 本笔盈亏 + 触发理由」。</p>
             </div>
             <div className="border border-[var(--border)] p-2.5 bg-[var(--inset)] border-l-[3px] border-l-[var(--accent)]">
               <span className="text-[9px] uppercase tracking-wider text-[var(--accent)] font-bold block mb-1">【AI 交易优化建议】</span>

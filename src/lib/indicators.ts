@@ -138,10 +138,11 @@ export function computeBOLL(candles: Candle[], period = 20, mult = 2): BollResul
 export interface ResonancePoint {
   /** 共振首次成立的 K 线下标（episode 的起点；连续共振只取上升沿一次）。 */
   index: number;
-  dir: "bull" | "bear";
-  /** 命中同向指标数（2-5，含成交量确认）。 */
+  /** 方向：看多（bull）/ 看空（bear）/ 多空分歧（neutral，多空各 ≥minScore 同时成立）。 */
+  dir: "bull" | "bear" | "neutral";
+  /** 命中同向指标数（2-5，含成交量确认；中性时取多空两侧较大者）。 */
   score: number;
-  /** 命中的指标信号说明（用于悬停/依据）。 */
+  /** 命中的指标信号说明（用于悬停/依据；中性时含「看多 …」「看空 …」两组）。 */
   reasons: string[];
 }
 
@@ -156,6 +157,7 @@ export interface ResonancePoint {
  *   成交量：放量阳线（量 ≥ 1.5×近 5 日均量且收阳）做多确认 / 放量阴线做空确认——
  *           量是价的确认而非独立方向，放量印证同向指标，缩量背离则不计。
  * 用 2 根窗口聚合（信号很少恰好同根触发），并仅在 episode 上升沿输出一次，避免连续打标。
+ * 多空两侧同时达 minScore 时记为「分歧（中性）」，提示信号相互打架、需谨慎。
  */
 export function computeResonance(
   candles: Candle[],
@@ -217,7 +219,7 @@ export function computeResonance(
 
   const fired = (ev: boolean[], i: number) => ev[i] || (i > 0 && ev[i - 1]);
   const out: ResonancePoint[] = [];
-  let prevDir: "bull" | "bear" | null = null;
+  let prevDir: "bull" | "bear" | "neutral" | null = null;
   for (let i = 1; i < n; i++) {
     const bull: string[] = [];
     if (fired(macdBull, i)) bull.push("MACD金叉");
@@ -232,12 +234,16 @@ export function computeResonance(
     if (fired(bollBear, i)) bear.push("触上轨回落");
     if (fired(volBear, i)) bear.push("放量下跌");
 
-    let dir: "bull" | "bear" | null = null;
-    if (bull.length >= minScore && bull.length > bear.length) dir = "bull";
-    else if (bear.length >= minScore && bear.length > bull.length) dir = "bear";
+    // 好 / 坏 / 中性三分：多空两侧均达标 → 分歧（中性）；仅一侧达标 → 看多 / 看空。
+    let dir: "bull" | "bear" | "neutral" | null = null;
+    if (bull.length >= minScore && bear.length >= minScore) dir = "neutral";
+    else if (bull.length >= minScore) dir = "bull";
+    else if (bear.length >= minScore) dir = "bear";
 
     if (dir && dir !== prevDir) {
-      out.push({ index: i, dir, score: dir === "bull" ? bull.length : bear.length, reasons: dir === "bull" ? bull : bear });
+      const score = dir === "bull" ? bull.length : dir === "bear" ? bear.length : Math.max(bull.length, bear.length);
+      const reasons = dir === "neutral" ? [`看多 ${bull.join("/")}`, `看空 ${bear.join("/")}`] : dir === "bull" ? bull : bear;
+      out.push({ index: i, dir, score, reasons });
     }
     prevDir = dir;
   }

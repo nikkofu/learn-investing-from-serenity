@@ -1,0 +1,34 @@
+name: CI
+
+# 代码质量门禁：推送到 main 或提 PR 时自动跑 lint + type-check + build 三关。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: lint · type-check · build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: ESLint 代码规范检查
+        run: npm run lint
+
+      - name: TypeScript 类型检查
+        run: npm run type-check
+
+      - name: 生产构建
+        run: npm run build

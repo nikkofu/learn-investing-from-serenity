@@ -23,10 +23,11 @@ import {
 import type { Candle } from "@/lib/types";
 import { tradeSizeTag, type TradeAction } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
-import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance } from "@/lib/indicators";
+import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance, type ResonancePoint } from "@/lib/indicators";
 import type { ChartDrawing, MarkerDrawing, DrawingColor } from "@/lib/drawings";
 import { listTvStrategies, getTvStrategy, type TvStrategyLayers, type TradePlan } from "@/lib/tvStrategies";
 import { TradeZonesPrimitive, type TradeZonesData, type TradeZoneBand, type TradeZoneLevel } from "./tradeZonesPrimitive";
+import { TradeReasonsPrimitive, type TradeReasonLabel } from "./tradeReasonsPrimitive";
 
 interface LightweightChartProps {
   candles: Candle[];
@@ -61,7 +62,18 @@ const DAILY_TFS: Timeframe[] = ["1D", "1W", "1M"];
 
 const UP = "#ef4444"; // 阳（涨）红
 const DOWN = "#10b981"; // 阴（跌）绿
-const RESONANCE = "#e879f9"; // 共振标注色（紫粉，与涨跌/买卖标记区分）
+// 共振标注色：按方向分「好 / 坏 / 中性」上色（沿用本文件 DRAW_COLORS 语义色：看多绿、看空红、分歧灰），
+// 颜色 + ▲▼◆ 形状即可表意，故标记文案去掉「共振」二字。
+const RESO_BULL = "#10b981"; // 看多共振（利好 / 做多）
+const RESO_BEAR = "#ef4444"; // 看空共振（利空 / 做空）
+const RESO_NEUTRAL = "#94a3b8"; // 多空分歧（中性 / 信号打架）
+const resoColor = (d: ResonancePoint["dir"]) => (d === "bull" ? RESO_BULL : d === "bear" ? RESO_BEAR : RESO_NEUTRAL);
+const resoGlyph = (d: ResonancePoint["dir"]) => (d === "bull" ? "▲" : d === "bear" ? "▼" : "◆");
+// 读数条上的共振说明（标题 + 命中指标）：中性时含「看多 …」「看空 …」两组。
+function resoLegend(r: ResonancePoint): { text: string; color: string } {
+  const head = r.dir === "bull" ? "看多共振" : r.dir === "bear" ? "看空共振" : "多空分歧";
+  return { text: `${head}：${r.reasons.join(r.dir === "neutral" ? " · " : "+")}`, color: resoColor(r.dir) };
+}
 
 const MA_DEFS: { period: number; color: string; key: string }[] = [
   { period: 5, color: "#fef08a", key: "ma5" },
@@ -186,6 +198,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [indKdj, setIndKdj] = useState(true);
   const [showBoll, setShowBoll] = useState(true);
   const [showResonance, setShowResonance] = useState(true);
+  // BS 点旁是否常驻显示触发理由标签（默认开启；点位密集时可关闭以减少遮挡）。
+  const [showTradeReasons, setShowTradeReasons] = useState(true);
   // 策略图层：选中的 TradingView 复刻策略 id（""=关闭）
   const [tvStrategyId, setTvStrategyId] = useState(initialTvStrategyId);
   // 从 ?layer= 进入或外部切换标的时，跟随更新选中的策略图层（让「从回测页点进自动叠加」生效）。
@@ -193,7 +207,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     setTvStrategyId(initialTvStrategyId);
   }, [initialTvStrategyId]);
   const [maOn, setMaOn] = useState<Record<string, boolean>>({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma250: false });
-  const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string; st?: string } | null>(null);
+  const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string; resoColor?: string; st?: string } | null>(null);
 
   // 逐根回放：replayN = 当前显露的 K 线根数（null = 关闭，显示全部）
   const [replayN, setReplayN] = useState<number | null>(null);
@@ -227,6 +241,23 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     for (const t of trades) m.set(t.date, t);
     return m;
   }, [trades]);
+  // BS 理由标注层数据：买点锚当根最低价（标签落 K 线下方）、卖点锚最高价（落上方），
+  // 文案 = 策略简称（理由【…】）+ 卖点本笔盈亏；坐标在 primitive 内随平移/缩放实时换算。
+  const tradeReasonLabels = useMemo<TradeReasonLabel[]>(() => {
+    const byDate = new Map<string, Candle>();
+    for (const c of candles) byDate.set(c.date, c);
+    const labels: TradeReasonLabel[] = [];
+    for (const t of trades) {
+      const tag = reasonTag(t.reason);
+      if (!tag) continue;
+      const c = byDate.get(t.date);
+      const isBuy = t.type === "buy";
+      const anchorPrice = c ? (isBuy ? c.low : c.high) : t.price;
+      const pct = !isBuy && t.profitPct != null ? `${t.profitPct >= 0 ? "+" : ""}${t.profitPct.toFixed(1)}%` : undefined;
+      labels.push({ time: toTime(t.date), anchorPrice, isBuy, tag, pct });
+    }
+    return labels;
+  }, [trades, candles, toTime]);
   // 悬停在 BS 信号上的浮层（x/y 为图表容器内像素坐标）。
   const [signalTip, setSignalTip] = useState<{ x: number; y: number; cw: number; trade: TradeAction } | null>(null);
 
@@ -344,12 +375,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     const markers: SeriesMarker<Time>[] = trades
       .filter((t) => inRange.has(t.date))
       .map((t) => {
-        // 标记文案：B/S + 分批仓位（建仓/减仓/清仓 X%）+ 策略简称，鼠标悬停可见完整理由。
+        // 标记文案：B/S + 分批仓位（建仓/减仓/清仓 X%）。触发理由（策略简称）+ 卖点盈亏由
+        // TradeReasonsPrimitive 常驻标注层呈现（可经「BS理由」开关切换），此处不再重复以免拥挤。
         const parts = [t.type === "buy" ? "B" : "S"];
         const sizeTag = tradeSizeTag(t.type, t.sizePct);
         if (sizeTag) parts.push(sizeTag);
-        const rt = reasonTag(t.reason);
-        if (rt) parts.push(rt);
         return {
           time: toTime(t.date),
           position: t.type === "buy" ? "belowBar" : "aboveBar",
@@ -383,9 +413,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             return {
               time: toTime(c.date),
               position: r.dir === "bull" ? "belowBar" : "aboveBar",
-              color: RESONANCE,
+              color: resoColor(r.dir),
               shape: "circle" as const,
-              text: `共振${r.dir === "bull" ? "▲" : "▼"}×${r.score}`,
+              text: `${resoGlyph(r.dir)}×${r.score}`,
             };
           })
       : [];
@@ -396,7 +426,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     const last = vc[vc.length - 1];
     if (last) {
       const r = resoByDate.get(last.date);
-      setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0, reso: r ? `${r.dir === "bull" ? "看多共振" : "看空共振"}：${r.reasons.join("+")}` : undefined, st: tvReadout(vc.length - 1) });
+      const rl = r ? resoLegend(r) : undefined;
+      setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0, reso: rl?.text, resoColor: rl?.color, st: tvReadout(vc.length - 1) });
     }
   }, [trades, toTime, drawings, intraday, showResonance, resonance, candles, resoByDate, tvLayers, tvReadout]);
 
@@ -516,6 +547,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       candleSeries.attachPrimitive(new TradeZonesPrimitive(zones));
     }
 
+    // BS 触发理由常驻标注层：在每个买卖点旁画策略简称 + 卖点盈亏，横向避让，随平移/缩放重排。
+    candleSeries.attachPrimitive(new TradeReasonsPrimitive({ labels: tradeReasonLabels, enabled: showTradeReasons }));
+
     // 副图振荡指标：各占独立窗格（分开显示，量纲互不干扰）
     let paneIdx = 1;
     const lineP = (vals: number[], color: string, pane: number) => {
@@ -581,7 +615,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       const match = matchIdx >= 0 ? candles[matchIdx] : undefined;
       const dateStr = match?.date ?? String(param.time);
       const r = resoByDate.get(dateStr);
-      setLegend({ date: dateStr, o: cd.open, h: cd.high, l: cd.low, c: cd.close, v: match?.volume || 0, chg: match?.changePct ?? 0, reso: r ? `${r.dir === "bull" ? "看多共振" : "看空共振"}：${r.reasons.join("+")}` : undefined, st: tvReadout(matchIdx) });
+      const rl = r ? resoLegend(r) : undefined;
+      setLegend({ date: dateStr, o: cd.open, h: cd.high, l: cd.low, c: cd.close, v: match?.volume || 0, chg: match?.changePct ?? 0, reso: rl?.text, resoColor: rl?.color, st: tvReadout(matchIdx) });
       // 悬停到含 BS 信号的交易日时，弹出该笔买卖的完整理由浮层。
       const trade = tradeByDate.get(dateStr);
       if (trade && param.point) setSignalTip({ x: param.point.x, y: param.point.y, cw: containerRef.current?.clientWidth ?? 0, trade });
@@ -598,7 +633,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     };
     // 故意不依赖 viewCandles：回放游标变化由下方数据层处理，避免重建图表导致闪烁。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, macd, rsi, kdj, boll, resoByDate, maOn, showBoll, indMacd, indRsi, indKdj, yScaleMode, intraday, drawings, toTime, paint, tvLayers]);
+  }, [candles, macd, rsi, kdj, boll, resoByDate, maOn, showBoll, indMacd, indRsi, indKdj, yScaleMode, intraday, drawings, toTime, paint, tvLayers, tradeReasonLabels, showTradeReasons]);
 
   // 数据层：回放游标（viewCandles）变化时仅重绘数据，并把最新显露的 K 线滚入视野。
   useEffect(() => {
@@ -685,9 +720,15 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           </div>
         </div>
 
-        <div className="flex items-center gap-1" title="共振：MACD/RSI/KDJ/BOLL ≥2 个同向信号时在主图打标（▲看多 / ▼看空），连续共振连成区域，悬停看命中指标">
+        <div className="flex items-center gap-1" title="共振：MACD/RSI/KDJ/BOLL ≥2 个同向信号时在主图打标——▲看多(绿) / ▼看空(红) / ◆多空分歧(灰)，颜色即表意；悬停看命中指标">
           <button onClick={() => setShowResonance((v) => !v)} className={`flex items-center gap-1 px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] border border-[var(--border)] ${showResonance ? "bg-[var(--hover)] text-[var(--text)]" : "bg-[var(--inset)] text-[var(--faint)] hover:text-[var(--text)]"}`}>
-            <span style={{ color: RESONANCE }}>●</span> 共振{resonance.length > 0 ? `(${resonance.length})` : ""}
+            <span className="inline-flex items-center" style={{ letterSpacing: "-1px" }}><span style={{ color: RESO_BULL }}>▲</span><span style={{ color: RESO_NEUTRAL }}>◆</span><span style={{ color: RESO_BEAR }}>▼</span></span> 共振{resonance.length > 0 ? `(${resonance.length})` : ""}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1" title="BS理由：在每个买卖点旁常驻显示触发理由（策略简称）与卖点本笔盈亏；点位密集时可关闭以减少遮挡，悬停标记仍可见完整理由。">
+          <button onClick={() => setShowTradeReasons((v) => !v)} className={`flex items-center gap-1 px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] border border-[var(--border)] ${showTradeReasons ? "bg-[var(--hover)] text-[var(--text)]" : "bg-[var(--inset)] text-[var(--faint)] hover:text-[var(--text)]"}`}>
+            <span style={{ color: DOWN }}>B</span>/<span style={{ color: UP }}>S</span>理由
           </button>
         </div>
 
@@ -746,7 +787,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             <span style={{ color: chgColor }}>{legend.chg >= 0 ? "+" : ""}{legend.chg.toFixed(2)}%</span>
             <span className="text-[var(--faint)]">量 {(legend.v / 100).toFixed(0)} 手</span>
             {replayOn && <span className="text-[var(--accent)]">● 回放中</span>}
-            {legend.reso && <span style={{ color: RESONANCE }}>● {legend.reso}</span>}
+            {legend.reso && <span style={{ color: legend.resoColor ?? RESO_NEUTRAL }}>● {legend.reso}</span>}
             {legend.st && <span className="text-[var(--accent)]">▣ 策略 {legend.st}</span>}
           </div>
         )}
