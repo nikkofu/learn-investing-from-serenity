@@ -339,11 +339,91 @@
   --warn-line: rgba(234, 179, 8, 0.35);
 }
 
+/* ============================================================
+   v0.48 设计 token（主题无关，全主题共享）
+   只追加、不改既有颜色语义；新组件一律消费这些 token，
+   终结圆角/间距/阴影散用，统一国际化视觉节奏。
+   ============================================================ */
+:root {
+  /* 间距 — 8pt 基准 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* 圆角 — 收敛 md/lg/xl 混用 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* 阴影 / 高度 — 克制，仅浮层用 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.36);
+
+  /* 字阶（size/line-height） */
+  --text-display: 32px;
+  --lh-display: 40px;
+  --text-h1: 24px;
+  --lh-h1: 32px;
+  --text-h2: 18px;
+  --lh-h2: 26px;
+  --text-h3: 15px;
+  --lh-h3: 22px;
+  --text-body: 14px;
+  --lh-body: 21px;
+  --text-sm: 13px;
+  --lh-sm: 18px;
+  --text-xs: 12px;
+  --lh-xs: 16px;
+
+  /* 层级 */
+  --z-sidebar: 30;
+  --z-topbar: 40;
+  --z-dropdown: 50;
+  --z-overlay: 60;
+  --z-modal: 70;
+
+  /* 动效 */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 150ms;
+  --dur: 220ms;
+}
+
+/* 亮色模式阴影更轻，避免暗影压住浅底 */
+[data-mode="light"] {
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.1);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.14);
+}
+
 @theme inline {
   --color-background: var(--bg);
   --color-foreground: var(--text);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist-sans), var(--font-noto-sans-sc), ui-sans-serif,
+    system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+}
+
+/* 可访问焦点环（a11y）：所有可交互元素键盘聚焦可见 */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent-line);
+  border-radius: var(--radius-sm);
+}
+
+/* 数字等宽工具：财务数据对齐 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 html,
@@ -355,8 +435,10 @@ body {
 }
 
 body {
-  font-family: var(--font-geist-sans), -apple-system, "PingFang SC", "Microsoft YaHei",
-    Arial, sans-serif;
+  font-family: var(--font-geist-sans), var(--font-noto-sans-sc), -apple-system,
+    "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  font-size: var(--text-body);
+  line-height: var(--lh-body);
 }
 
 /* Glassmorphism panel styling */

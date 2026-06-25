@@ -14,7 +14,15 @@
 
 ---
 
-## 🆕 v0.47.1 亮点
+## 🆕 v0.48.0 亮点
+
+*   **v0.48 产品化改版第一阶段 · 设计系统地基（无可见破坏）**：深入研究项目后，先把「国际化审美 / 视觉 / UX」落到一套可复用的设计基建上——为后续导航重构、首页改版、全站页头统一铺路。完整设计文档与分阶段路线图见 [`docs/`](docs/)（`v0.48-redesign-overview` / `-information-architecture` / `-design-system` / `-homepage-redesign` / `-task-checklist`）。
+    *   **设计 token 扩展**：在现有 5 主题 × 明暗的语义色体系上**只追加不重写**——新增间距（8pt 基准）/ 圆角 / 阴影 / 字阶 / 层级 / 动效 token，并补**全局键盘焦点环**（a11y）与 `.tnum` 数字等宽工具。
+    *   **简体中文字体自托管**：引入 `next/font` 的 **Noto Sans SC**（零外链、子集化），中文渲染不再依赖系统回退，跨平台一致。
+    *   **基础组件库 `src/components/ui/`**：新增 `Card / Badge / Button / KPIStat / SectionTitle / EmptyState / Skeleton / PageHeader / Tabs / DataTable` 共 10 个纯展示/交互壳，统一消费设计 token；`DataTable` 提炼自 v0.46 回测表（粘性表头 + 可排序 + 行 hover + 等宽对齐），供全站复用。
+    *   **零口径改动**：不动任何回测/套利/打分/复权计算口径，不改业务逻辑；本版仅新增 token 与组件文件，现有页面外观不变。
+
+## v0.47.1 亮点
 
 *   **全站链接体检 + 交叉访问优化（补丁版）**：扫描全站页面链接，统一站内「跨页 / 跨工具」研究链路为**新开页**（`target="_blank" rel="noopener noreferrer"`），点击深链不再丢失当前列表/筛选/分析上下文。
     *   **统一新开页**：首页 CTA（趋势→产业链 / 个股评分 / 方法论）、`/watchlist`（扫描/动量/套利/应用筛选）、`/strategies`（多股票池实测 / 单票切换 / 套利雷达 / 忠实回测）、`/paper`（套利雷达 / 策略市场）、`/alerts`（告警「查看」）、`/map` 与 `/analyze` 的「前往设置」等，全部补齐 `_blank`。

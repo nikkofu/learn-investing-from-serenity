@@ -4,6 +4,34 @@
 
 ---
 
+## [0.48.0] - 2026-06-24
+
+> **v0.48 产品化改版 · 第一阶段：设计系统地基（无可见破坏）**。深入研究项目后，按用户要求「整理优化框架结构/布局/菜单 + 首页改版 + 全局国际化审美/视觉/UX」先落档详细设计文档与分阶段任务清单，评审通过后启动实现。本版（v0.48.0）只铺地基：扩展设计 token + 自托管中文字体 + 基础组件库，**不改任何计算口径与业务逻辑**，现有页面外观不变，**零运行时新依赖**（仅新增字体）。
+
+### 设计文档落档 `docs/`
+- `docs/v0.48-redesign-overview.md`：总览、现状盘点、8 条设计原则、In/Out 范围。
+- `docs/v0.48-information-architecture.md`：IA / 菜单重构（17 扁平入口 → 5 大分组可折叠侧边栏 + 精简顶栏 + 面包屑 + ⌘K 命令面板）。
+- `docs/v0.48-design-system.md`：设计 token 扩展规范 + 基础组件库清单。
+- `docs/v0.48-homepage-redesign.md`：首页改版为仪表盘（市场快照 / 我的自选 / 今日热门 / 最近告警 / 快捷入口）。
+- `docs/v0.48-task-checklist.md`：分 v0.48.0→.4 五个小版本的任务清单与决策点。
+
+### 设计 token 扩展（`src/app/globals.css`，只追加不重写）
+- 新增主题无关 token：间距 `--space-1..16`（8pt 基准）、圆角 `--radius-sm..xl/full`、阴影 `--shadow-sm/md/lg`（明暗各一档）、字阶 `--text-*`/`--lh-*`、层级 `--z-*`、动效 `--ease`/`--dur*`。
+- 新增全局 `:focus-visible` 焦点环（a11y，所有可交互元素键盘聚焦可见）与 `.tnum` 数字等宽工具类。
+- 既有 5 主题 × 明暗的语义色 token（`--bg`/`--surface`/`--accent` 等）与 A 股红涨绿跌热力图配色**完全不动**。
+
+### 简体中文字体自托管（`src/app/layout.tsx`）
+- 引入 `next/font/google` 的 **Noto Sans SC**（weight 400/500/700，`display: swap`，变量 `--font-noto-sans-sc`，自托管零外链），并接入 `body` 与 `@theme inline` 的 `--font-sans` 字栈；中文渲染不再依赖系统回退，跨平台一致。
+
+### 基础组件库（新增 `src/components/ui/`，纯展示/交互壳，统一消费 token）
+- `Card`（标准卡片容器，可 interactive 抬升）、`Badge`（语义徽章 6 色调）、`Button`（primary/secondary/ghost/danger × sm/md）、`KPIStat`（指标卡，A 股红涨绿跌）、`SectionTitle`（区块标题 + 操作）、`EmptyState`（空/失败占位）、`Skeleton`（加载骨架）、`PageHeader`（统一页头 + 面包屑挂点）、`Tabs`（受控分段切换）、`DataTable`（通用数据表：粘性表头 + 可排序 + 行 hover + 等宽对齐，提炼自 v0.46 回测表）。
+- 统一出口 `src/components/ui/index.ts`。本版仅提供组件，未改动现有页面引用（v0.48.1+ 渐进接入）。
+
+### 质量门禁
+- `tsc --noEmit` 0 error；改动文件 `eslint` 0 error；`next build` 通过（Noto 字体构建期自托管成功，路由清单不变）。
+
+---
+
 ## [0.47.1] - 2026-06-24
 
 > **全站链接体检 + 交叉访问优化（补丁版）**。回应用户：「全站点扫描，看看哪些页面链接不合理，或者可以做交叉访问优化的，打个补丁版本，记得链接都是新开页面 target _blank」。纯前端 + 链路增强，**不改数据/接口/口径**，**零新依赖**。
