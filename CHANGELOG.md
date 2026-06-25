@@ -4,6 +4,32 @@
 
 ---
 
+## [0.49.0] - 2026-06-25
+
+> **TradingView 热门策略发现同步（合规·元数据·参考）**。在「策略市场 `/strategies`」新增 **「TradingView 热门策略（参考）」** 区，一键同步 `https://cn.tradingview.com/scripts/?script_type=strategies` **第一页热门**策略的**公开元数据**，建立「值得复刻」清单。**只抓公开元信息、不抓脚本源码、不绕付费墙、保留原作者署名 + 回链**；版权归 TradingView 与各原作者。**零新依赖、不改任何计算口径**。
+
+### 合规与范围
+- **只做发现 + 展示，不做自动复刻**：社区脚本自动复刻按字面不可行——版权（大量 invite-only/protected 闭源拿不到源码）、技术（无可靠通用 Pine→TS 转译）、规模（数万脚本且每日新增）三道硬墙。本版仅抓**公开元数据**作外链参考，复刻仍走既有「逐个、具名、原作链接 + 差异说明、人工 + `/backtest/strategy` 回测双校验」路线，不自动登记进 `STRATEGIES`。
+- **合规边界**：仅作外链参考与署名跳转，**不在本站复刻或宣称等价**；每张卡片点击直达原 TradingView 脚本页（`target="_blank"`）。
+
+### 抓取解析库（`src/lib/tvScripts.ts`，新增）
+- `fetchTopTvStrategies()` 抓列表页（20s 超时 + 浏览器 UA），`parseTvScriptsHtml()` 解析服务端直出的内嵌 JSON（`"ideas":{"data":{"items":[...]}}`，括号平衡子串提取、尊重字符串字面量转义）。
+- 每条 `TvScriptRef` 提取：名称 / 作者(+主页) / 链接 / 点赞 / 评论 / 访问级别（`mapAccess` 把数字 1/2/3 → 开源·受保护·邀请制）/ 缩略图 / 标的 / Pine 版本 / 创建·更新时间 / 摘要（`toExcerpt` 扁平化 markdown，≤180 字）。
+- 落盘 `.data/tv-strategies.json`（`TvStrategiesFile`：source/version/syncedAt/count/list）。
+
+### 接入数据同步框架（`src/lib/sync.ts`）
+- 新增 `tvStrategies` 源（`SYNC_SOURCES` 项 + `syncTvStrategies()` 运行器 + `RUNNERS`/`readCount`/`FILE_BY_ID` 接入）：版本化 + 快照（保留 5 份）+ **防缩水校验**（返回 <5 条、或有效 URL 占比 <80%、或 `guardShrink` minRatio 0.5 触发即拒绝写入），哈希仅取稳定子集（`id+updatedAt+likes`）判变更。
+- `/sync` 数据同步中心新增一行「TradingView 热门策略（参考）」，支持「单独同步」/「依次同步全部」。
+- 读取接口 `GET /api/tv-scripts`（`src/app/api/tv-scripts/route.ts`，新增）：未同步时返回空壳。
+
+### UI（`src/app/strategies/page.tsx`）
+- 新增 `TvStrategiesSection`：进站拉 `/api/tv-scripts`；卡片网格（桌面 3 列 → 平板 2 列 → 手机 1 列），每卡缩略图 + 名称 + 访问徽章（开源绿 / 受保护琥珀 / 邀请制灰）+ 摘要 + 作者 / 点赞 / 评论 / Pine 版本 / 标的；「同步第一页热门」按钮触发 `POST /api/sync { source:"tvStrategies" }`，展示版本 / 同步时间 / 条数；加载骨架 + 空态。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint` 改动文件 0 error · `next build` 通过 27/27 页；dev 实测同步（24 条）/ 读取 / UI 展示 + 数据同步中心 + 录屏。**零新依赖、不改任何回测/套利/打分/复权计算口径。**
+
+---
+
 ## [0.48.4] - 2026-06-25
 
 > **v0.48 产品化改版 · 第五阶段（收官）：全站页头统一 + 视觉收尾 + a11y**。把全站 18 个页面各自手写的 `<h1>+副标题` 页头收敛到统一的 `PageHeader` 组件（语义化 `<header>`），观感与间距一致、复用 v0.48 设计 token。**不动任何页面内业务逻辑与计算口径、零新依赖**。

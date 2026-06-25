@@ -113,7 +113,7 @@ export default function SyncCenterPage() {
         title="数据同步中心"
         subtitle={
           <>
-            一键依次同步运营所需数据：Serenity 最新消息、热门股票排行、行业板块、个股清单、热门板块。
+            一键依次同步运营所需数据：Serenity 最新消息、热门股票排行、行业板块、个股清单、热门板块、TradingView 热门策略（参考）。
             数据落盘后可供选股/分析与已配置的 LLM 使用。也可由自有程序调用 <code className="text-[var(--accent)]">POST /api/sync</code>（<code>{`{ source: "all" | <id> }`}</code>）。
           </>
         }
