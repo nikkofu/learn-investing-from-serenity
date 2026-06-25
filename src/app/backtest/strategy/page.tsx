@@ -166,6 +166,75 @@ function VerdictBanner({ s }: { s: Stats }) {
   );
 }
 
+type SymKey = "code" | "trades" | "winRatePct" | "avgReturnPct" | "buyHoldPct";
+type TradeKey = "code" | "buyDate" | "returnPct" | "holdDays";
+type SortState<K> = { key: K; dir: "asc" | "desc" };
+
+/** 可排序表头：点击切换升/降序，带 ▲▼/↕ 指示（对标 TradingView 列头）。 */
+function SortTh({
+  label,
+  sortKey,
+  active,
+  dir,
+  onSort,
+  align = "left",
+}: {
+  label: string;
+  sortKey: string;
+  active: boolean;
+  dir: "asc" | "desc";
+  onSort: (k: string) => void;
+  align?: "left" | "right";
+}) {
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className={`cursor-pointer select-none px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)] transition-colors hover:text-[var(--text)] ${align === "right" ? "text-right" : "text-left"}`}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}>
+        {label}
+        <span className={`text-[9px] leading-none ${active ? "text-[var(--accent)]" : "text-[var(--faint)] opacity-40"}`}>
+          {active ? (dir === "asc" ? "▲" : "▼") : "↕"}
+        </span>
+      </span>
+    </th>
+  );
+}
+
+/** 行内强弱条：按 |value|/max 占比着色（红正/绿负，A 股口径）。 */
+function MiniBar({ value, max, width = "w-full" }: { value: number; max: number; width?: string }) {
+  const pct = max > 0 ? Math.min(100, (Math.abs(value) / max) * 100) : 0;
+  return (
+    <div className={`mt-1 ml-auto h-1 ${width} overflow-hidden rounded-full bg-[var(--border)]`}>
+      <div
+        className={`h-full rounded-full ${value > 0.0001 ? "bg-rose-500/70" : value < -0.0001 ? "bg-emerald-500/70" : "bg-[var(--faint)]"}`}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+/** 胜率单元格：数字 + 迷你进度条（≥50% 红、否则绿）。 */
+function WinRateCell({ pct, trades }: { pct: number; trades: number }) {
+  if (!trades) return <span className="text-[var(--faint)]">—</span>;
+  return (
+    <div className="ml-auto flex w-16 flex-col items-end gap-0.5">
+      <span className="tabular-nums">{pct.toFixed(0)}%</span>
+      <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
+        <div className={`h-full rounded-full ${pct >= 50 ? "bg-rose-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** 离场原因徽章配色：止盈绿 / 止损琥珀 / 信号蓝 / 强制平仓灰。 */
+function exitBadgeCls(reason: string): string {
+  if (/止盈|目标|获利|TP/i.test(reason)) return "border-emerald-500/30 bg-emerald-500/10 text-emerald-500";
+  if (/止损|跌破|回撤|吊灯/i.test(reason)) return "border-amber-500/30 bg-amber-500/10 text-amber-500";
+  if (/翻空|信号|金叉|死叉|MA|均线|穿/i.test(reason)) return "border-sky-500/30 bg-sky-500/10 text-sky-500";
+  return "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)]";
+}
+
 function StrategyBacktestInner() {
   const [codesText, setCodesText] = useState(PRESET);
   const [feeBps, setFeeBps] = useState(30);
@@ -178,6 +247,12 @@ function StrategyBacktestInner() {
   const [strategies, setStrategies] = useState<StrategyMeta[]>([]);
   const [strategyId, setStrategyId] = useState<string>("");
   const [hotLoading, setHotLoading] = useState(false);
+
+  // 表格交互：排序 / 过滤 / 搜索（TradingView 风格增强，不改回测口径）
+  const [symSort, setSymSort] = useState<SortState<SymKey>>({ key: "avgReturnPct", dir: "desc" });
+  const [symQuery, setSymQuery] = useState("");
+  const [tradeSort, setTradeSort] = useState<SortState<TradeKey> | null>(null);
+  const [tradeFilter, setTradeFilter] = useState<"all" | "win" | "loss">("all");
 
   // 从 /strategies 「多股票池实测」跳转携带的策略 id（?strategy=<id>）。
   const search = useSearchParams();
@@ -267,6 +342,61 @@ function StrategyBacktestInner() {
       setHotLoading(false);
     }
   }
+
+  const sortSym = (k: string) =>
+    setSymSort((prev) => ({ key: k as SymKey, dir: prev.key === k && prev.dir === "desc" ? "asc" : "desc" }));
+  const sortTrade = (k: string) =>
+    setTradeSort((prev) =>
+      prev && prev.key === k ? { key: k as TradeKey, dir: prev.dir === "desc" ? "asc" : "desc" } : { key: k as TradeKey, dir: "desc" },
+    );
+
+  const sortedSymbols = useMemo(() => {
+    if (!result) return [];
+    const q = symQuery.trim();
+    const arr = result.perSymbol.filter((s) => !q || s.code.includes(q) || (s.name ?? "").includes(q));
+    const { key, dir } = symSort;
+    const mul = dir === "asc" ? 1 : -1;
+    return [...arr].sort((a, b) =>
+      key === "code" ? a.code.localeCompare(b.code) * mul : ((a[key] as number) - (b[key] as number)) * mul,
+    );
+  }, [result, symSort, symQuery]);
+
+  const symAvgMax = useMemo(() => sortedSymbols.reduce((m, s) => Math.max(m, Math.abs(s.avgReturnPct)), 1), [sortedSymbols]);
+  const symBhMax = useMemo(() => sortedSymbols.reduce((m, s) => Math.max(m, Math.abs(s.buyHoldPct)), 1), [sortedSymbols]);
+
+  const symSummary = useMemo(() => {
+    let winners = 0,
+      losers = 0,
+      beat = 0;
+    for (const s of result?.perSymbol ?? []) {
+      if (!s.trades) continue;
+      if (s.avgReturnPct > 0) winners++;
+      else if (s.avgReturnPct < 0) losers++;
+      if (s.avgReturnPct > s.buyHoldPct) beat++;
+    }
+    return { winners, losers, beat };
+  }, [result]);
+
+  const viewTrades = useMemo(() => {
+    if (!result) return [];
+    let arr = result.trades.slice(0, 200);
+    if (tradeFilter === "win") arr = arr.filter((t) => t.returnPct > 0);
+    else if (tradeFilter === "loss") arr = arr.filter((t) => t.returnPct <= 0);
+    if (tradeSort) {
+      const { key, dir } = tradeSort;
+      const mul = dir === "asc" ? 1 : -1;
+      arr = [...arr].sort((a, b) =>
+        key === "code"
+          ? a.code.localeCompare(b.code) * mul
+          : key === "buyDate"
+            ? a.buyDate.localeCompare(b.buyDate) * mul
+            : ((a[key] as number) - (b[key] as number)) * mul,
+      );
+    }
+    return arr;
+  }, [result, tradeFilter, tradeSort]);
+
+  const tradeMaxAbs = useMemo(() => viewTrades.reduce((m, t) => Math.max(m, Math.abs(t.returnPct)), 1), [viewTrades]);
 
   const inputCls = "rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm tabular-nums";
 
@@ -500,61 +630,131 @@ function StrategyBacktestInner() {
           </div>
 
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-            <h2 className="mb-2 text-sm font-semibold text-[var(--text)]">分股票表现（{result.perSymbol.length} 只）</h2>
-            <div className="max-h-72 overflow-auto">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-[var(--text)]">
+                分股票表现 <span className="text-[var(--muted)]">（{result.perSymbol.length} 只）</span>
+              </h2>
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-rose-500">盈利 {symSummary.winners}</span>
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-500">亏损 {symSummary.losers}</span>
+                <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[var(--muted)]">跑赢持有 {symSummary.beat}</span>
+                <input
+                  value={symQuery}
+                  onChange={(e) => setSymQuery(e.target.value)}
+                  placeholder="搜代码/名称"
+                  className="w-28 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
+                />
+              </div>
+            </div>
+            <div className="max-h-72 overflow-auto rounded-lg border border-[var(--border)]">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
+                <thead className="sticky top-0 z-10 bg-[var(--surface)] shadow-[0_1px_0_var(--border)]">
                   <tr>
-                    <th className="px-3 py-2 font-medium">代码</th>
-                    <th className="px-3 py-2 text-right font-medium">交易</th>
-                    <th className="px-3 py-2 text-right font-medium">胜率</th>
-                    <th className="px-3 py-2 text-right font-medium">每笔均值</th>
-                    <th className="px-3 py-2 text-right font-medium">全程买入持有</th>
+                    <SortTh label="代码" sortKey="code" active={symSort.key === "code"} dir={symSort.dir} onSort={sortSym} />
+                    <SortTh label="交易" sortKey="trades" active={symSort.key === "trades"} dir={symSort.dir} onSort={sortSym} align="right" />
+                    <SortTh label="胜率" sortKey="winRatePct" active={symSort.key === "winRatePct"} dir={symSort.dir} onSort={sortSym} align="right" />
+                    <SortTh label="每笔均值" sortKey="avgReturnPct" active={symSort.key === "avgReturnPct"} dir={symSort.dir} onSort={sortSym} align="right" />
+                    <SortTh label="全程买入持有" sortKey="buyHoldPct" active={symSort.key === "buyHoldPct"} dir={symSort.dir} onSort={sortSym} align="right" />
                   </tr>
                 </thead>
                 <tbody>
-                  {result.perSymbol.map((s, i) => (
-                    <tr key={i} className="border-t border-[var(--border)]">
-                      <td className="px-3 py-1.5 font-mono"><StockLink code={s.code} newTab chartStrategyId={result.config.strategyId || undefined} chartLayerId={result.config.strategyId.startsWith("tv-") ? result.config.strategyId : undefined} /></td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{s.trades}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{s.trades ? `${s.winRatePct.toFixed(0)}%` : "—"}</td>
-                      <td className={`px-3 py-1.5 text-right tabular-nums ${signClass(s.avgReturnPct)}`}>{s.trades ? fmtPct(s.avgReturnPct) : "—"}</td>
-                      <td className={`px-3 py-1.5 text-right tabular-nums ${signClass(s.buyHoldPct)}`}>{fmtPct(s.buyHoldPct)}</td>
+                  {sortedSymbols.map((s, i) => (
+                    <tr key={i} className="border-t border-[var(--border)] transition-colors hover:bg-[var(--bg)]">
+                      <td className="px-3 py-2 font-mono">
+                        <StockLink code={s.code} newTab chartStrategyId={result.config.strategyId || undefined} chartLayerId={result.config.strategyId.startsWith("tv-") ? result.config.strategyId : undefined} />
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-[var(--muted)]">{s.trades}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex justify-end">
+                          <WinRateCell pct={s.winRatePct} trades={s.trades} />
+                        </div>
+                      </td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${signClass(s.avgReturnPct)}`}>
+                        {s.trades ? fmtPct(s.avgReturnPct) : "—"}
+                        {s.trades ? <MiniBar value={s.avgReturnPct} max={symAvgMax} width="w-20" /> : null}
+                      </td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${signClass(s.buyHoldPct)}`}>
+                        {fmtPct(s.buyHoldPct)}
+                        <MiniBar value={s.buyHoldPct} max={symBhMax} width="w-20" />
+                      </td>
                     </tr>
                   ))}
+                  {sortedSymbols.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-6 text-center text-xs text-[var(--muted)]">无匹配股票</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
 
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-[var(--text)]">交易流水</h2>
-              <span className="text-xs text-[var(--muted)]">共 {result.trades.length} 笔（最新在前，最多 200）</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex overflow-hidden rounded-md border border-[var(--border)] text-[11px]">
+                  {([["all", "全部"], ["win", "盈利"], ["loss", "亏损"]] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setTradeFilter(k)}
+                      className={`px-2.5 py-1 transition-colors ${tradeFilter === k ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:bg-[var(--bg)]"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-xs text-[var(--muted)]">显示 {viewTrades.length} / 共 {result.trades.length} 笔（最多 200）</span>
+              </div>
             </div>
-            <div className="max-h-80 overflow-auto">
+            <div className="max-h-80 overflow-auto rounded-lg border border-[var(--border)]">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-[var(--surface)] text-[var(--muted)]">
+                <thead className="sticky top-0 z-10 bg-[var(--surface)] shadow-[0_1px_0_var(--border)]">
                   <tr>
-                    <th className="px-3 py-2 font-medium">代码</th>
-                    <th className="px-3 py-2 font-medium">买入</th>
-                    <th className="px-3 py-2 font-medium">卖出</th>
-                    <th className="px-3 py-2 text-right font-medium">收益</th>
-                    <th className="px-3 py-2 text-right font-medium">持有</th>
-                    <th className="px-3 py-2 font-medium">离场原因</th>
+                    <SortTh label="代码" sortKey="code" active={tradeSort?.key === "code"} dir={tradeSort?.dir ?? "desc"} onSort={sortTrade} />
+                    <SortTh label="买入" sortKey="buyDate" active={tradeSort?.key === "buyDate"} dir={tradeSort?.dir ?? "desc"} onSort={sortTrade} />
+                    <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">卖出</th>
+                    <SortTh label="收益" sortKey="returnPct" active={tradeSort?.key === "returnPct"} dir={tradeSort?.dir ?? "desc"} onSort={sortTrade} align="right" />
+                    <SortTh label="持有" sortKey="holdDays" active={tradeSort?.key === "holdDays"} dir={tradeSort?.dir ?? "desc"} onSort={sortTrade} align="right" />
+                    <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">离场原因</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {result.trades.slice(0, 200).map((t, i) => (
-                    <tr key={i} className="border-t border-[var(--border)]">
-                      <td className="px-3 py-1.5 font-mono"><StockLink code={t.code} newTab chartStrategyId={result.config.strategyId || undefined} chartLayerId={result.config.strategyId.startsWith("tv-") ? result.config.strategyId : undefined} /></td>
-                      <td className="px-3 py-1.5 tabular-nums text-[var(--faint)]">{t.buyDate}@{t.buyPrice.toFixed(2)}</td>
-                      <td className="px-3 py-1.5 tabular-nums text-[var(--faint)]">{t.sellDate}@{t.sellPrice.toFixed(2)}</td>
-                      <td className={`px-3 py-1.5 text-right tabular-nums ${signClass(t.returnPct)}`}>{fmtPct(t.returnPct)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{t.holdDays}日</td>
-                      <td className="px-3 py-1.5 text-xs text-[var(--muted)]">{t.exitReason}</td>
+                  {viewTrades.map((t, i) => {
+                    const win = t.returnPct > 0.0001;
+                    const loss = t.returnPct < -0.0001;
+                    return (
+                      <tr key={i} className="border-t border-[var(--border)] transition-colors hover:bg-[var(--bg)]">
+                        <td className={`px-3 py-2 font-mono border-l-2 ${win ? "border-rose-500" : loss ? "border-emerald-500" : "border-transparent"}`}>
+                          <StockLink code={t.code} newTab chartStrategyId={result.config.strategyId || undefined} chartLayerId={result.config.strategyId.startsWith("tv-") ? result.config.strategyId : undefined} />
+                        </td>
+                        <td className="px-3 py-2 tabular-nums">
+                          <span className="text-rose-500">▲</span> <span className="text-[var(--faint)]">{t.buyDate}</span> <span className="text-[var(--muted)]">@{t.buyPrice.toFixed(2)}</span>
+                        </td>
+                        <td className="px-3 py-2 tabular-nums">
+                          <span className="text-emerald-500">▼</span> <span className="text-[var(--faint)]">{t.sellDate}</span> <span className="text-[var(--muted)]">@{t.sellPrice.toFixed(2)}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex flex-col items-end">
+                            <span className={`rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums ${win ? "bg-rose-500/10 text-rose-500" : loss ? "bg-emerald-500/10 text-emerald-500" : "text-[var(--muted)]"}`}>
+                              {fmtPct(t.returnPct)}
+                            </span>
+                            <MiniBar value={t.returnPct} max={tradeMaxAbs} width="w-16" />
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-[var(--muted)]">{t.holdDays}日</td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-block rounded border px-1.5 py-0.5 text-[11px] ${exitBadgeCls(t.exitReason)}`}>{t.exitReason}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {viewTrades.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-6 text-center text-xs text-[var(--muted)]">无匹配交易</td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
