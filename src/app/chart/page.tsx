@@ -627,6 +627,11 @@ function ChartInner() {
                   quantData={data.quant}
                   currentPrice={data.quant.refPrice ?? data.quote.price}
                   height={chartHeight}
+                  strategyId={activeProStrategyId}
+                  onStrategyChange={(id) => {
+                    setProStrategyId(id);
+                    saveStrategyId(id);
+                  }}
                 />
               )}
             </div>

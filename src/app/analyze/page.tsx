@@ -434,6 +434,7 @@ function Result({ data }: { data: AnalyzeResponse }) {
   const { quote, stats, assessment, matchedKnowledge, calibration } = data;
   const up = quote.changePct >= 0;
   const [showPoster, setShowPoster] = useState(false);
+  const params = useSearchParams();
   return (
     <div className="space-y-5">
       <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5">
@@ -655,6 +656,7 @@ function Result({ data }: { data: AnalyzeResponse }) {
           <QuantChart
             quantData={data.quant}
             currentPrice={quote.price}
+            urlStrategyId={params.get("strategy")?.trim() || undefined}
           />
         </div>
       )}

@@ -856,6 +856,7 @@ function ScannerContent() {
                                     <QuantChart
                                       quantData={state.data.quant}
                                       currentPrice={state.data.quote.price}
+                                      urlStrategyId={searchParams.get("strategy")?.trim() || undefined}
                                     />
                                   </div>
                                 )}
