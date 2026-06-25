@@ -23,7 +23,7 @@ import {
 import type { Candle } from "@/lib/types";
 import { tradeSizeTag, type TradeAction } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
-import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance, type ResonancePoint } from "@/lib/indicators";
+import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance, computePatternSignals, type ResonancePoint, type PatternSignal } from "@/lib/indicators";
 import type { ChartDrawing, MarkerDrawing, DrawingColor } from "@/lib/drawings";
 import { listTvStrategies, getTvStrategy, type TvStrategyLayers, type TradePlan } from "@/lib/tvStrategies";
 import { TradeZonesPrimitive, type TradeZonesData, type TradeZoneBand, type TradeZoneLevel } from "./tradeZonesPrimitive";
@@ -73,6 +73,23 @@ const resoGlyph = (d: ResonancePoint["dir"]) => (d === "bull" ? "▲" : d === "b
 function resoLegend(r: ResonancePoint): { text: string; color: string } {
   const head = r.dir === "bull" ? "看多共振" : r.dir === "bear" ? "看空共振" : "多空分歧";
   return { text: `${head}：${r.reasons.join(r.dir === "neutral" ? " · " : "+")}`, color: resoColor(r.dir) };
+}
+
+// 通用形态标记配色（顶/底背离按方向遵循 A 股红涨绿跌；量能极值为中性，用橙/蓝区分）：
+const PAT_TOP = RESO_BEAR; // 顶背离（看空）— 绿
+const PAT_BOTTOM = RESO_BULL; // 底背离（看多）— 红
+const PAT_CLIMAX = "#f59e0b"; // 天量（放量高潮）— 橙
+const PAT_DRY = "#38bdf8"; // 地量（极度缩量）— 蓝
+const patColor = (k: PatternSignal["kind"]) =>
+  k === "topDivergence" ? PAT_TOP : k === "bottomDivergence" ? PAT_BOTTOM : k === "volumeClimax" ? PAT_CLIMAX : PAT_DRY;
+
+// 默认可视范围 ≈ 近 6 个月（按周期换算的 K 线根数）；右侧再留若干根空白便于看清最新走势与标签。
+const RIGHT_MARGIN_BARS = 8;
+function defaultVisibleBars(tf: Timeframe): number {
+  if (tf === "1W") return 28; // ≈半年周线
+  if (tf === "1M") return 8; // ≈半年月线
+  if (tf.endsWith("m")) return 96; // 分时：显示最近若干根
+  return 126; // 日线 ≈ 6 个月交易日
 }
 
 const MA_DEFS: { period: number; color: string; key: string }[] = [
@@ -189,6 +206,12 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const markersApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   // 每个序列携带自己的「按可见 K 线重绘」闭包，回放时仅重绘数据、不重建图表。
   const paintersRef = useRef<((vc: Candle[]) => void)[]>([]);
+  // 均线序列引用（按 key），勾选 MA 时仅切换其可见性、不重建图表，避免重置缩放/平移/时间位置。
+  const maSeriesRef = useRef<Record<string, ISeriesApi<"Line">>>({});
+  // 记忆当前可视逻辑范围：切换指标/形态等触发重建时还原它，避免布局被重置（切换标的/周期才清空）。
+  const savedRangeRef = useRef<{ from: number; to: number } | null>(null);
+  // 数据标识：candles 引用变化（切换标的/周期/回测）时视为新数据，清空记忆范围并回到默认近 6 个月视图。
+  const dataKeyRef = useRef<Candle[] | null>(null);
 
   const [period, setPeriod] = useState<Timeframe>("1D");
   const [yScaleMode, setYScaleMode] = useState<"linear" | "log" | "pct">("linear");
@@ -198,6 +221,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [indKdj, setIndKdj] = useState(true);
   const [showBoll, setShowBoll] = useState(true);
   const [showResonance, setShowResonance] = useState(true);
+  // 通用形态标记（顶背离/底背离/天量/地量）默认开启，可单独关闭。
+  const [showPatterns, setShowPatterns] = useState(true);
   // BS 点旁是否常驻显示触发理由标签（默认开启；点位密集时可关闭以减少遮挡）。
   const [showTradeReasons, setShowTradeReasons] = useState(true);
   // 策略图层：选中的 TradingView 复刻策略 id（""=关闭）
@@ -206,8 +231,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   useEffect(() => {
     setTvStrategyId(initialTvStrategyId);
   }, [initialTvStrategyId]);
-  const [maOn, setMaOn] = useState<Record<string, boolean>>({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma250: false });
-  const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string; resoColor?: string; st?: string } | null>(null);
+  const [maOn, setMaOn] = useState<Record<string, boolean>>({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: true, ma250: true });
+  const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string; resoColor?: string; st?: string; pat?: string; patColor?: string } | null>(null);
 
   // 逐根回放：replayN = 当前显露的 K 线根数（null = 关闭，显示全部）
   const [replayN, setReplayN] = useState<number | null>(null);
@@ -235,6 +260,13 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     for (const r of resonance) { const c = candles[r.index]; if (c) m.set(c.date, r); }
     return m;
   }, [resonance, candles]);
+  // 通用形态信号：顶背离 / 底背离 / 天量 / 地量（带判断说明），用于主图打标 + 读数条说明。
+  const patterns = useMemo(() => computePatternSignals(candles, rsi), [candles, rsi]);
+  const patternByDate = useMemo(() => {
+    const m = new Map<string, PatternSignal>();
+    for (const p of patterns) { const c = candles[p.index]; if (c) m.set(c.date, p); }
+    return m;
+  }, [patterns, candles]);
   // 交易按日期索引：用于鼠标悬停 BS 标记时弹出该笔买卖的完整理由 / 分批比例 / 盈亏。
   const tradeByDate = useMemo(() => {
     const m = new Map<string, TradeAction>();
@@ -419,7 +451,23 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             };
           })
       : [];
-    const all = [...markers, ...drawMarkers, ...resoMarkers, ...stFlipMarkers].sort((a, b) =>
+    // 通用形态标记：顶背离(绿▼) / 底背离(红▲) 落价格高低点外侧；天量(橙) / 地量(蓝) 落 K 线下方。
+    const patternMarkers: SeriesMarker<Time>[] = showPatterns
+      ? patterns
+          .filter((p) => p.index <= vc.length - 1)
+          .map((p) => {
+            const c = candles[p.index];
+            const isVol = p.kind === "volumeClimax" || p.kind === "volumeDry";
+            return {
+              time: toTime(c.date),
+              position: (p.dir === "bear" ? "aboveBar" : "belowBar") as "aboveBar" | "belowBar",
+              color: patColor(p.kind),
+              shape: (isVol ? "circle" : "square") as "circle" | "square",
+              text: p.label,
+            };
+          })
+      : [];
+    const all = [...markers, ...drawMarkers, ...resoMarkers, ...patternMarkers, ...stFlipMarkers].sort((a, b) =>
       typeof a.time === "number" && typeof b.time === "number" ? a.time - b.time : String(a.time).localeCompare(String(b.time))
     );
     markersApiRef.current?.setMarkers(all);
@@ -427,9 +475,10 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     if (last) {
       const r = resoByDate.get(last.date);
       const rl = r ? resoLegend(r) : undefined;
-      setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0, reso: rl?.text, resoColor: rl?.color, st: tvReadout(vc.length - 1) });
+      const pat = patternByDate.get(last.date);
+      setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0, reso: rl?.text, resoColor: rl?.color, st: tvReadout(vc.length - 1), pat: pat ? `${pat.label}：${pat.detail}` : undefined, patColor: pat ? patColor(pat.kind) : undefined });
     }
-  }, [trades, toTime, drawings, intraday, showResonance, resonance, candles, resoByDate, tvLayers, tvReadout]);
+  }, [trades, toTime, drawings, intraday, showResonance, resonance, showPatterns, patterns, candles, resoByDate, patternByDate, tvLayers, tvReadout]);
 
   // 结构层：仅在「指标/周期/纵轴/副图」变化时重建图表与序列（不随回放游标变动）
   useEffect(() => {
@@ -446,10 +495,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       grid: { vertLines: { color: borderColor, style: LineStyle.Dotted }, horzLines: { color: borderColor, style: LineStyle.Dotted } },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor, mode: yScaleMode === "log" ? PriceScaleMode.Logarithmic : yScaleMode === "pct" ? PriceScaleMode.Percentage : PriceScaleMode.Normal },
-      timeScale: { borderColor, timeVisible: intraday, secondsVisible: false, rightOffset: 4 },
+      timeScale: { borderColor, timeVisible: intraday, secondsVisible: false, rightOffset: RIGHT_MARGIN_BARS },
     });
     chartRef.current = chart;
     paintersRef.current = [];
+    maSeriesRef.current = {};
 
     const candleSeries = chart.addSeries(CandlestickSeries, { upColor: UP, downColor: DOWN, borderVisible: false, wickUpColor: UP, wickDownColor: DOWN });
     candleSeriesRef.current = candleSeries;
@@ -463,10 +513,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     paintersRef.current.push((vc) => volSeries.setData(vc.map((c) => ({ time: toTime(c.date), value: c.volume || 0, color: (c.close >= c.open ? UP : DOWN) + "66" }))));
     chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
 
-    // 均线
+    // 均线：始终创建全部 MA 序列并存引用，仅按 maOn 切换 visible。
+    // 这样勾选/取消 MA 只切换该线可见性（见下方独立 effect），不触发图表重建，避免布局（缩放/平移/时间位置）被重置。
     for (const def of MA_DEFS) {
-      if (!maOn[def.key]) continue;
-      const s = chart.addSeries(LineSeries, { color: def.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+      const s = chart.addSeries(LineSeries, { color: def.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: maOn[def.key] });
+      maSeriesRef.current[def.key] = s;
       paintersRef.current.push((vc) => {
         const arr = maOf(vc, def.period);
         s.setData(vc.map((c, i) => (arr[i] != null ? { time: toTime(c.date), value: arr[i] as number } : null)).filter((p): p is { time: Time; value: number } => p !== null));
@@ -582,8 +633,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       guide(s, 20);
     }
     const panes = chart.panes();
+    // 主图相对更高更大；副图（量价/MACD/RSI/KDJ）高度较此前缩小约 25%（1.4→1.05）。
     if (panes[0]) panes[0].setStretchFactor(4);
-    for (let pi = 1; pi < panes.length; pi++) panes[pi]?.setStretchFactor(1.4);
+    for (let pi = 1; pi < panes.length; pi++) panes[pi]?.setStretchFactor(1.05);
 
     // AI 画图叠加层（仅日线口径；横线/区间走价格线，趋势线走两点序列，标注走 marker）
     if (!intraday && drawings.length > 0) {
@@ -605,7 +657,26 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     }
 
     paint(viewCandles);
-    chart.timeScale().fitContent();
+
+    // 可视范围：新数据 → 默认近 6 个月 + 右侧留白；非新数据（仅切指标/形态/MA 等触发重建）→ 还原上次范围，布局不被重置。
+    const ts = chart.timeScale();
+    const isNewData = dataKeyRef.current !== candles;
+    dataKeyRef.current = candles;
+    if (!isNewData && savedRangeRef.current) {
+      ts.setVisibleLogicalRange(savedRangeRef.current);
+    } else {
+      savedRangeRef.current = null;
+      const total = viewCandles.length;
+      const bars = defaultVisibleBars(period);
+      if (total > bars) {
+        ts.setVisibleLogicalRange({ from: total - bars, to: total - 1 + RIGHT_MARGIN_BARS });
+      } else {
+        ts.fitContent();
+      }
+    }
+    // 记忆用户后续的缩放/平移，供下次重建时还原。
+    const onRange = ts.subscribeVisibleLogicalRangeChange((r) => { if (r) savedRangeRef.current = { from: r.from, to: r.to }; });
+    void onRange;
 
     const onMove = chart.subscribeCrosshairMove((param) => {
       if (!param.time) { setSignalTip(null); return; }
@@ -616,7 +687,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       const dateStr = match?.date ?? String(param.time);
       const r = resoByDate.get(dateStr);
       const rl = r ? resoLegend(r) : undefined;
-      setLegend({ date: dateStr, o: cd.open, h: cd.high, l: cd.low, c: cd.close, v: match?.volume || 0, chg: match?.changePct ?? 0, reso: rl?.text, resoColor: rl?.color, st: tvReadout(matchIdx) });
+      const pat = patternByDate.get(dateStr);
+      setLegend({ date: dateStr, o: cd.open, h: cd.high, l: cd.low, c: cd.close, v: match?.volume || 0, chg: match?.changePct ?? 0, reso: rl?.text, resoColor: rl?.color, st: tvReadout(matchIdx), pat: pat ? `${pat.label}：${pat.detail}` : undefined, patColor: pat ? patColor(pat.kind) : undefined });
       // 悬停到含 BS 信号的交易日时，弹出该笔买卖的完整理由浮层。
       const trade = tradeByDate.get(dateStr);
       if (trade && param.point) setSignalTip({ x: param.point.x, y: param.point.y, cw: containerRef.current?.clientWidth ?? 0, trade });
@@ -632,8 +704,14 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       paintersRef.current = [];
     };
     // 故意不依赖 viewCandles：回放游标变化由下方数据层处理，避免重建图表导致闪烁。
+    // 故意不依赖 maOn：MA 勾选只切换序列可见性（见下方独立 effect），不重建图表，避免布局被重置。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, macd, rsi, kdj, boll, resoByDate, maOn, showBoll, indMacd, indRsi, indKdj, yScaleMode, intraday, drawings, toTime, paint, tvLayers, tradeReasonLabels, showTradeReasons]);
+  }, [candles, macd, rsi, kdj, boll, resoByDate, showBoll, indMacd, indRsi, indKdj, yScaleMode, intraday, drawings, toTime, paint, tvLayers, tradeReasonLabels, showTradeReasons]);
+
+  // MA 勾选切换：仅改对应序列可见性，不触发图表重建（避免缩放/平移/时间位置被重置）。
+  useEffect(() => {
+    for (const def of MA_DEFS) maSeriesRef.current[def.key]?.applyOptions({ visible: maOn[def.key] });
+  }, [maOn]);
 
   // 数据层：回放游标（viewCandles）变化时仅重绘数据，并把最新显露的 K 线滚入视野。
   useEffect(() => {
@@ -663,9 +741,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const reset = () => { setReplayN(startN); setPlaying(false); };
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col h-full min-h-0 gap-2">
       {/* 工具栏 */}
-      <div className="flex flex-wrap items-center gap-3 text-[9.5px] font-mono text-[var(--muted)] select-none">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[9.5px] font-mono text-[var(--muted)] select-none shrink-0">
         <div className="flex items-center gap-2.5">
           {MA_DEFS.map((d) => (
             <label key={d.key} className="flex items-center gap-1 cursor-pointer hover:text-[var(--text)]">
@@ -726,6 +804,12 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           </button>
         </div>
 
+        <div className="flex items-center gap-1" title="通用形态：自动标注顶背离(绿▼,价新高量价/动能不配合,警惕回落) / 底背离(红▲,价新低动能转强,反弹将至) / 天量(橙●,异常放量,见顶或主力换手) / 地量(蓝●,极度缩量,抛压衰竭关注变盘)；悬停标记看判断说明。">
+          <button onClick={() => setShowPatterns((v) => !v)} className={`flex items-center gap-1 px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] border border-[var(--border)] ${showPatterns ? "bg-[var(--hover)] text-[var(--text)]" : "bg-[var(--inset)] text-[var(--faint)] hover:text-[var(--text)]"}`}>
+            <span className="inline-flex items-center" style={{ letterSpacing: "-1px" }}><span style={{ color: PAT_BOTTOM }}>▲</span><span style={{ color: PAT_CLIMAX }}>●</span><span style={{ color: PAT_TOP }}>▼</span></span> 形态{patterns.length > 0 ? `(${patterns.length})` : ""}
+          </button>
+        </div>
+
         <div className="flex items-center gap-1" title="BS理由：在每个买卖点旁常驻显示触发理由（策略简称）与卖点本笔盈亏；点位密集时可关闭以减少遮挡，悬停标记仍可见完整理由。">
           <button onClick={() => setShowTradeReasons((v) => !v)} className={`flex items-center gap-1 px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] border border-[var(--border)] ${showTradeReasons ? "bg-[var(--hover)] text-[var(--text)]" : "bg-[var(--inset)] text-[var(--faint)] hover:text-[var(--text)]"}`}>
             <span style={{ color: DOWN }}>B</span>/<span style={{ color: UP }}>S</span>理由
@@ -775,10 +859,10 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
         </div>
       </div>
 
-      {/* 图表容器 + OHLCV 读数条（高度随副图窗格数自适应） */}
-      <div className="relative w-full" style={{ height: 360 + ((indMacd ? 1 : 0) + (indRsi ? 1 : 0) + (indKdj ? 1 : 0)) * 90 }}>
+      {/* 图表容器 + OHLCV 读数条：填满可用高度（全屏自适应，底部日期不再被裁切），autoSize 让画布跟随容器 */}
+      <div className="relative w-full flex-1 min-h-[320px]">
         {legend && (
-          <div className="absolute left-2 top-1 z-10 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono pointer-events-none bg-[var(--surface)]/70 px-1.5 py-0.5 rounded-[1px]">
+          <div className="absolute left-2 top-1 z-10 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono pointer-events-none bg-[var(--surface)]/90 backdrop-blur-sm px-1.5 py-0.5 rounded-[1px] max-w-[70%]">
             <span className="text-[var(--faint)]">{legend.date}</span>
             <span>开 <span style={{ color: chgColor }}>{fmt(legend.o)}</span></span>
             <span>高 <span style={{ color: chgColor }}>{fmt(legend.h)}</span></span>
@@ -788,11 +872,12 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             <span className="text-[var(--faint)]">量 {(legend.v / 100).toFixed(0)} 手</span>
             {replayOn && <span className="text-[var(--accent)]">● 回放中</span>}
             {legend.reso && <span style={{ color: legend.resoColor ?? RESO_NEUTRAL }}>● {legend.reso}</span>}
+            {legend.pat && <span style={{ color: legend.patColor ?? RESO_NEUTRAL }}>◆ {legend.pat}</span>}
             {legend.st && <span className="text-[var(--accent)]">▣ 策略 {legend.st}</span>}
           </div>
         )}
         {gbbStats && (
-          <div className="absolute right-2 top-1 z-10 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/85 border border-[var(--border)] rounded-[2px] overflow-hidden min-w-[150px]">
+          <div className="absolute right-2 top-1 z-20 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/95 backdrop-blur-sm border border-[var(--border)] shadow-md rounded-[2px] overflow-hidden min-w-[150px]">
             <div className="px-2 py-0.5 bg-[var(--inset)] text-[var(--faint)] tracking-wide border-b border-[var(--border)]">GBB · {code ?? ""}</div>
             {[
               ["Trend", gbbStats.trend, gbbStats.trendUp ? UP : DOWN],
@@ -810,7 +895,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           </div>
         )}
         {navStats && (
-          <div className="absolute right-2 top-1 z-10 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/85 border border-[var(--border)] rounded-[2px] overflow-hidden min-w-[150px]">
+          <div className="absolute right-2 top-1 z-20 pointer-events-none font-mono text-[9.5px] bg-[var(--surface)]/95 backdrop-blur-sm border border-[var(--border)] shadow-md rounded-[2px] overflow-hidden min-w-[150px]">
             <div className="px-2 py-0.5 bg-[var(--inset)] text-[var(--faint)] tracking-wide border-b border-[var(--border)]">Navigator · {code ?? ""}</div>
             {([
               ["Bias", navStats.bias, navStats.dir === 1 ? UP : DOWN],

@@ -249,3 +249,138 @@ export function computeResonance(
   }
   return out;
 }
+
+export interface PatternSignal {
+  /** 信号所在 K 线下标。 */
+  index: number;
+  /** 类别：顶背离 / 底背离 / 天量 / 地量。 */
+  kind: "topDivergence" | "bottomDivergence" | "volumeClimax" | "volumeDry";
+  /** 方向语义：看多（bull）/ 看空（bear）/ 中性（neutral，量能极值需结合价位判断）。 */
+  dir: "bull" | "bear" | "neutral";
+  /** 简短标签（标记文案，如「顶背离」「天量」）。 */
+  label: string;
+  /** 判断说明（悬停/读数条展示，解释信号含义与操作含义）。 */
+  detail: string;
+}
+
+/** 摆动高点下标：high[i] 严格不低于左右各 k 根（i±k 范围内的最大值）。需未来 k 根确认。 */
+function pivotHighIndices(highs: number[], k: number): number[] {
+  const out: number[] = [];
+  for (let i = k; i < highs.length - k; i++) {
+    let isPivot = true;
+    for (let w = i - k; w <= i + k; w++) {
+      if (w === i) continue;
+      if (highs[w] > highs[i]) { isPivot = false; break; }
+    }
+    if (isPivot) out.push(i);
+  }
+  return out;
+}
+
+/** 摆动低点下标：low[i] 严格不高于左右各 k 根（i±k 范围内的最小值）。需未来 k 根确认。 */
+function pivotLowIndices(lows: number[], k: number): number[] {
+  const out: number[] = [];
+  for (let i = k; i < lows.length - k; i++) {
+    let isPivot = true;
+    for (let w = i - k; w <= i + k; w++) {
+      if (w === i) continue;
+      if (lows[w] < lows[i]) { isPivot = false; break; }
+    }
+    if (isPivot) out.push(i);
+  }
+  return out;
+}
+
+/**
+ * 通用形态扫描：顶背离 / 底背离 / 天量 / 地量，做标记 + 判断说明。
+ *   顶背离：相邻摆动高点「价创新高、RSI 走低」——上涨动能衰竭，看空。
+ *   底背离：相邻摆动低点「价创新低、RSI 抬高」——下跌动能衰竭，看多。
+ *   天量　：成交量 ≥ N 日均量的 climaxMult 倍且为局部峰值——剧烈换手/高潮，常见于转折，中性需结合价位。
+ *   地量　：成交量 ≤ N 日均量的 dryRatio 且为局部谷值——交投极清淡，地量后常酝酿变盘，中性。
+ * 口径与 A 股惯例一致：方向语义（看多/看空）用于配色（红涨绿跌），量能极值标中性（橙）。
+ */
+export function computePatternSignals(
+  candles: Candle[],
+  rsi: number[],
+  opts: { pivotK?: number; volMa?: number; climaxMult?: number; dryRatio?: number; maxGap?: number } = {}
+): PatternSignal[] {
+  const { pivotK = 4, volMa = 20, climaxMult = 2.8, dryRatio = 0.5, maxGap = 90 } = opts;
+  const n = candles.length;
+  const out: PatternSignal[] = [];
+  if (n < pivotK * 2 + 2) return out;
+  const fin = Number.isFinite;
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+
+  // —— 背离：相邻摆动高/低点对比价格与 RSI 走向 ——
+  const ph = pivotHighIndices(highs, pivotK);
+  for (let p = 1; p < ph.length; p++) {
+    const a = ph[p - 1], b = ph[p];
+    if (b - a > maxGap || b - a < pivotK) continue;
+    if (!fin(rsi[a]) || !fin(rsi[b])) continue;
+    if (highs[b] > highs[a] && rsi[b] < rsi[a] - 1) {
+      out.push({
+        index: b,
+        kind: "topDivergence",
+        dir: "bear",
+        label: "顶背离",
+        detail: `价创新高（${highs[a].toFixed(2)}→${highs[b].toFixed(2)}）但 RSI 走低（${rsi[a].toFixed(0)}→${rsi[b].toFixed(0)}）：上涨动能衰竭，警惕见顶回落`,
+      });
+    }
+  }
+  const pl = pivotLowIndices(lows, pivotK);
+  for (let p = 1; p < pl.length; p++) {
+    const a = pl[p - 1], b = pl[p];
+    if (b - a > maxGap || b - a < pivotK) continue;
+    if (!fin(rsi[a]) || !fin(rsi[b])) continue;
+    if (lows[b] < lows[a] && rsi[b] > rsi[a] + 1) {
+      out.push({
+        index: b,
+        kind: "bottomDivergence",
+        dir: "bull",
+        label: "底背离",
+        detail: `价创新低（${lows[a].toFixed(2)}→${lows[b].toFixed(2)}）但 RSI 抬高（${rsi[a].toFixed(0)}→${rsi[b].toFixed(0)}）：下跌动能衰竭，关注企稳反弹`,
+      });
+    }
+  }
+
+  // —— 量能极值：天量（局部峰值且远超均量）/ 地量（局部谷值且远低于均量） ——
+  const vols = candles.map((c) => (fin(c.volume) ? c.volume : 0));
+  const volMaArr = sma(vols, volMa);
+  const half = Math.max(2, Math.round(pivotK / 2));
+  for (let i = volMa; i < n; i++) {
+    const ma = volMaArr[i];
+    if (!fin(ma) || ma <= 0) continue;
+    const v = vols[i];
+    if (v <= 0) continue;
+    const ratio = v / ma;
+    // 局部窗口极值判定，避免连续打标
+    let isMax = true, isMin = true;
+    for (let w = Math.max(0, i - half); w <= Math.min(n - 1, i + half); w++) {
+      if (w === i) continue;
+      if (vols[w] >= v) isMax = false;
+      if (vols[w] <= v) isMin = false;
+    }
+    if (ratio >= climaxMult && isMax) {
+      const updown = candles[i].close >= candles[i].open ? "放量上攻" : "放量下杀";
+      out.push({
+        index: i,
+        kind: "volumeClimax",
+        dir: "neutral",
+        label: "天量",
+        detail: `成交量达 ${volMa} 日均量的 ${ratio.toFixed(1)} 倍（${updown}）：多空剧烈换手，天量常见于趋势高潮或转折，需结合价位研判`,
+      });
+    } else if (ratio <= dryRatio && isMin) {
+      out.push({
+        index: i,
+        kind: "volumeDry",
+        dir: "neutral",
+        label: "地量",
+        detail: `成交量仅为 ${volMa} 日均量的 ${(ratio * 100).toFixed(0)}%：交投极清淡，地量见地价，缩量后常酝酿变盘`,
+      });
+    }
+  }
+
+  out.sort((x, y) => x.index - y.index);
+  return out;
+}

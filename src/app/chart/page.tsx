@@ -535,9 +535,9 @@ function ChartInner() {
               </button>
             </div>
           ) : data && data.quant ? (
-            <div className="flex-1 overflow-auto" ref={containerRef}>
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden" ref={containerRef}>
               {/* 图表引擎切换：经典 SVG / Pro 画布(lightweight-charts) */}
-              <div className="flex items-center gap-1 mb-2 select-none">
+              <div className="flex items-center gap-1 mb-2 select-none shrink-0">
                 <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono mr-1">图表引擎</span>
                 <div className="flex bg-[var(--inset)] border border-[var(--border)] p-0.5 rounded-[1px] font-mono">
                   {([["classic", "经典 SVG"], ["pro", "Pro 画布"]] as const).map(([m, label]) => (
@@ -576,7 +576,7 @@ function ChartInner() {
               </div>
               {/* P1-D LLM 交互式画图：按钮 + 对话驱动 AI 自动画线/标注，叠加到 Pro 画布 */}
               {chartView === "pro" && (
-                <div className="mb-2 border border-[var(--border)] rounded-[2px] bg-[var(--inset)]/40 p-2 space-y-1.5">
+                <div className="mb-2 border border-[var(--border)] rounded-[2px] bg-[var(--inset)]/40 p-2 space-y-1.5 shrink-0">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[9px] uppercase tracking-wider text-[var(--faint)] font-mono mr-0.5">AI 画图</span>
                     {DRAW_PRESETS.map((p) => (
@@ -620,22 +620,26 @@ function ChartInner() {
                 </div>
               )}
               {chartView === "pro" ? (
-                <LightweightChart
-                  candles={data.quant.candles ?? []}
-                  trades={proTrades}
-                  code={data.quote.code}
-                  fq={fq}
-                  drawings={drawings}
-                  initialTvStrategyId={layerId}
-                />
+                <div className="flex-1 min-h-0">
+                  <LightweightChart
+                    candles={data.quant.candles ?? []}
+                    trades={proTrades}
+                    code={data.quote.code}
+                    fq={fq}
+                    drawings={drawings}
+                    initialTvStrategyId={layerId}
+                  />
+                </div>
               ) : (
-                <QuantChart
-                  quantData={data.quant}
-                  currentPrice={data.quant.refPrice ?? data.quote.price}
-                  height={chartHeight}
-                  strategyId={activeProStrategyId}
-                  onStrategyChange={applyStrategyId}
-                />
+                <div className="flex-1 min-h-0 overflow-auto">
+                  <QuantChart
+                    quantData={data.quant}
+                    currentPrice={data.quant.refPrice ?? data.quote.price}
+                    height={chartHeight}
+                    strategyId={activeProStrategyId}
+                    onStrategyChange={applyStrategyId}
+                  />
+                </div>
               )}
             </div>
           ) : (
