@@ -21,7 +21,7 @@ import {
   type WhitespaceData,
 } from "lightweight-charts";
 import type { Candle } from "@/lib/types";
-import type { TradeAction } from "@/lib/quant";
+import { tradeSizeTag, type TradeAction } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance } from "@/lib/indicators";
 import type { ChartDrawing, MarkerDrawing, DrawingColor } from "@/lib/drawings";
@@ -47,6 +47,13 @@ const DRAW_COLORS: Record<DrawingColor, string> = {
   bear: "#ef4444",
 };
 const drawColor = (c?: DrawingColor) => DRAW_COLORS[c ?? "neutral"];
+
+// 从交易理由首部的「【…】」中提取简短策略标签（去掉版本号如 -v7），用于 BS 标记角标 / 浮层标题。
+function reasonTag(reason: string): string | null {
+  const m = reason.match(/^\s*【([^】]+)】/);
+  if (!m) return null;
+  return m[1].replace(/[-_ ]?v\d+$/i, "").trim() || null;
+}
 
 type Timeframe = "5m" | "15m" | "30m" | "60m" | "1D" | "1W" | "1M";
 const INTRADAY_TFS: Timeframe[] = ["5m", "15m", "30m", "60m"];
@@ -214,6 +221,14 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     for (const r of resonance) { const c = candles[r.index]; if (c) m.set(c.date, r); }
     return m;
   }, [resonance, candles]);
+  // 交易按日期索引：用于鼠标悬停 BS 标记时弹出该笔买卖的完整理由 / 分批比例 / 盈亏。
+  const tradeByDate = useMemo(() => {
+    const m = new Map<string, TradeAction>();
+    for (const t of trades) m.set(t.date, t);
+    return m;
+  }, [trades]);
+  // 悬停在 BS 信号上的浮层（x/y 为图表容器内像素坐标）。
+  const [signalTip, setSignalTip] = useState<{ x: number; y: number; cw: number; trade: TradeAction } | null>(null);
 
   // 策略图层：已复刻的 TV 策略列表 + 当前选中策略算出的图层（方向线/翻转点/regime）
   const tvMetas = useMemo(() => listTvStrategies(), []);
@@ -328,13 +343,21 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     const inRange = new Set(vc.map((c) => c.date));
     const markers: SeriesMarker<Time>[] = trades
       .filter((t) => inRange.has(t.date))
-      .map((t) => ({
-        time: toTime(t.date),
-        position: t.type === "buy" ? "belowBar" : "aboveBar",
-        color: t.type === "buy" ? DOWN : UP,
-        shape: t.type === "buy" ? "arrowUp" : "arrowDown",
-        text: t.type === "buy" ? "B" : "S",
-      }));
+      .map((t) => {
+        // 标记文案：B/S + 分批仓位（建仓/减仓/清仓 X%）+ 策略简称，鼠标悬停可见完整理由。
+        const parts = [t.type === "buy" ? "B" : "S"];
+        const sizeTag = tradeSizeTag(t.type, t.sizePct);
+        if (sizeTag) parts.push(sizeTag);
+        const rt = reasonTag(t.reason);
+        if (rt) parts.push(rt);
+        return {
+          time: toTime(t.date),
+          position: t.type === "buy" ? "belowBar" : "aboveBar",
+          color: t.type === "buy" ? DOWN : UP,
+          shape: t.type === "buy" ? "arrowUp" : "arrowDown",
+          text: parts.join(" "),
+        };
+      });
     const drawMarkers: SeriesMarker<Time>[] = (intraday ? [] : drawings)
       .filter((d): d is MarkerDrawing => d.type === "marker")
       .map((d) => ({ time: toTime(d.date), position: "aboveBar", color: drawColor(d.color), shape: "circle", text: d.text }));
@@ -551,14 +574,18 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     chart.timeScale().fitContent();
 
     const onMove = chart.subscribeCrosshairMove((param) => {
-      if (!param.time) return;
+      if (!param.time) { setSignalTip(null); return; }
       const cd = param.seriesData.get(candleSeries) as CandlestickData | undefined;
-      if (!cd) return;
+      if (!cd) { setSignalTip(null); return; }
       const matchIdx = candles.findIndex((c) => toTime(c.date) === param.time);
       const match = matchIdx >= 0 ? candles[matchIdx] : undefined;
       const dateStr = match?.date ?? String(param.time);
       const r = resoByDate.get(dateStr);
       setLegend({ date: dateStr, o: cd.open, h: cd.high, l: cd.low, c: cd.close, v: match?.volume || 0, chg: match?.changePct ?? 0, reso: r ? `${r.dir === "bull" ? "看多共振" : "看空共振"}：${r.reasons.join("+")}` : undefined, st: tvReadout(matchIdx) });
+      // 悬停到含 BS 信号的交易日时，弹出该笔买卖的完整理由浮层。
+      const trade = tradeByDate.get(dateStr);
+      if (trade && param.point) setSignalTip({ x: param.point.x, y: param.point.y, cw: containerRef.current?.clientWidth ?? 0, trade });
+      else setSignalTip(null);
     });
     void onMove;
 
@@ -759,6 +786,43 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             ))}
           </div>
         )}
+        {signalTip && (() => {
+          const t = signalTip.trade;
+          const isBuy = t.type === "buy";
+          const sizeTag = tradeSizeTag(t.type, t.sizePct);
+          const flip = signalTip.cw > 0 && signalTip.x > signalTip.cw - 248;
+          return (
+            <div
+              className="absolute z-20 pointer-events-none font-mono text-[10px] bg-[var(--surface)]/95 border border-[var(--border)] rounded-[2px] shadow-lg overflow-hidden w-[230px]"
+              style={{ left: flip ? signalTip.x - 242 : signalTip.x + 14, top: Math.max(4, signalTip.y - 12) }}
+            >
+              <div className={`flex items-center justify-between gap-2 px-2 py-1 border-b border-[var(--border)] ${isBuy ? "bg-red-500/10" : "bg-emerald-500/10"}`}>
+                <span className="flex items-center gap-1.5">
+                  <span className={`px-1 py-0.5 rounded-[1px] font-bold text-[8px] leading-none ${isBuy ? "bg-red-500/15 text-red-400 border border-red-500/25" : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25"}`}>
+                    {isBuy ? "BUY 买入" : "SELL 卖出"}
+                  </span>
+                  {sizeTag && <span className="text-[8.5px] font-bold text-[var(--accent)]">{sizeTag}</span>}
+                </span>
+                <span className="text-[var(--faint)] tabular-nums">{t.date}</span>
+              </div>
+              <div className="px-2 py-1 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-[var(--faint)]">成交价</span>
+                  <span className="font-semibold tabular-nums text-[var(--text)]">{t.price.toFixed(2)} 元</span>
+                </div>
+                {!isBuy && t.profitPct != null && (
+                  <div className="flex justify-between">
+                    <span className="text-[var(--faint)]">单笔盈亏</span>
+                    <span className={`font-bold tabular-nums ${t.profitPct >= 0 ? "text-red-400" : "text-emerald-400"}`}>
+                      {t.profitPct >= 0 ? "+" : ""}{t.profitPct.toFixed(2)}%
+                    </span>
+                  </div>
+                )}
+                <p className="text-[9.5px] text-[var(--muted)] leading-relaxed pt-0.5 border-t border-[var(--border)]/40">{t.reason}</p>
+              </div>
+            </div>
+          );
+        })()}
         <div ref={containerRef} className="w-full h-full" />
       </div>
     </div>

@@ -30,6 +30,19 @@ export interface TradeAction {
   sizePct?: number;
 }
 
+/**
+ * 分批仓位的简短中文标签（用于图表 BS 标记角标 / 交易信号卡片）。
+ * - 整仓（未设置 sizePct）返回 null，沿用旧策略「不显示百分比」的行为；
+ * - buy：本次建/加仓占满仓资金的比例，记作「建仓 X%」；
+ * - sell：本次卖出占当前持仓的比例，满仓清空记作「清仓」，否则「减仓 X%」。
+ */
+export function tradeSizeTag(type: "buy" | "sell", sizePct?: number): string | null {
+  if (sizePct == null || !Number.isFinite(sizePct)) return null;
+  const pct = Math.round(Math.max(0, Math.min(1, sizePct)) * 100);
+  if (type === "buy") return `建仓 ${pct}%`;
+  return pct >= 100 ? "清仓" : `减仓 ${pct}%`;
+}
+
 export interface BacktestResult {
   winRate: number;        // 胜率 %
   sharpe: number;         // 夏普比率（按 252 交易日年化，无风险利率取 0）

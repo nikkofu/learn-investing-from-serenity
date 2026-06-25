@@ -8,7 +8,7 @@ import QuantChart from "@/components/QuantChart";
 import LightweightChart from "@/components/LightweightChart";
 import RadarChart from "@/components/RadarChart";
 import BacktestReport from "@/components/BacktestReport";
-import { DEFAULT_MA_PARAMS, type MaStrategyParams, type BacktestResult, type TradeAction } from "@/lib/quant";
+import { DEFAULT_MA_PARAMS, tradeSizeTag, type MaStrategyParams, type BacktestResult, type TradeAction } from "@/lib/quant";
 import type { StrategyBacktest } from "@/lib/strategies";
 import type { PerformanceReport } from "@/lib/performance";
 import { DRAW_PRESETS, type ChartDrawing } from "@/lib/drawings";
@@ -887,6 +887,11 @@ function ChartInner() {
                                         {isBuy ? "BUY 买入" : "SELL 卖出"}
                                       </span>
                                       <span className="text-[var(--text)] font-semibold">{t.date}</span>
+                                      {tradeSizeTag(t.type, t.sizePct) && (
+                                        <span className="px-1 py-0.5 rounded-[1px] font-bold text-[8px] leading-none bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20">
+                                          {tradeSizeTag(t.type, t.sizePct)}
+                                        </span>
+                                      )}
                                     </div>
                                     <div className="font-bold">
                                       成交: <span className="text-[var(--text)]">{t.price.toFixed(2)} 元</span>
