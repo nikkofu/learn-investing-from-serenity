@@ -62,10 +62,10 @@ const DAILY_TFS: Timeframe[] = ["1D", "1W", "1M"];
 
 const UP = "#ef4444"; // 阳（涨）红
 const DOWN = "#10b981"; // 阴（跌）绿
-// 共振标注色：按方向分「好 / 坏 / 中性」上色（沿用本文件 DRAW_COLORS 语义色：看多绿、看空红、分歧灰），
+// 共振标注色：按方向分「好 / 坏 / 中性」上色（遵循 A 股市场惯例「红涨绿跌」：看多红、看空绿、分歧灰），
 // 颜色 + ▲▼◆ 形状即可表意，故标记文案去掉「共振」二字。
-const RESO_BULL = "#10b981"; // 看多共振（利好 / 做多）
-const RESO_BEAR = "#ef4444"; // 看空共振（利空 / 做空）
+const RESO_BULL = "#ef4444"; // 看多共振（利好 / 做多）— 红（A股涨色）
+const RESO_BEAR = "#10b981"; // 看空共振（利空 / 做空）— 绿（A股跌色）
 const RESO_NEUTRAL = "#94a3b8"; // 多空分歧（中性 / 信号打架）
 const resoColor = (d: ResonancePoint["dir"]) => (d === "bull" ? RESO_BULL : d === "bear" ? RESO_BEAR : RESO_NEUTRAL);
 const resoGlyph = (d: ResonancePoint["dir"]) => (d === "bull" ? "▲" : d === "bear" ? "▼" : "◆");
@@ -383,7 +383,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
         return {
           time: toTime(t.date),
           position: t.type === "buy" ? "belowBar" : "aboveBar",
-          color: t.type === "buy" ? DOWN : UP,
+          color: t.type === "buy" ? UP : DOWN,
           shape: t.type === "buy" ? "arrowUp" : "arrowDown",
           text: parts.join(" "),
         };
@@ -720,7 +720,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           </div>
         </div>
 
-        <div className="flex items-center gap-1" title="共振：MACD/RSI/KDJ/BOLL ≥2 个同向信号时在主图打标——▲看多(绿) / ▼看空(红) / ◆多空分歧(灰)，颜色即表意；悬停看命中指标">
+        <div className="flex items-center gap-1" title="共振：MACD/RSI/KDJ/BOLL ≥2 个同向信号时在主图打标——▲看多(红) / ▼看空(绿) / ◆多空分歧(灰)，遵循A股红涨绿跌惯例，颜色即表意；悬停看命中指标">
           <button onClick={() => setShowResonance((v) => !v)} className={`flex items-center gap-1 px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer rounded-[1px] border border-[var(--border)] ${showResonance ? "bg-[var(--hover)] text-[var(--text)]" : "bg-[var(--inset)] text-[var(--faint)] hover:text-[var(--text)]"}`}>
             <span className="inline-flex items-center" style={{ letterSpacing: "-1px" }}><span style={{ color: RESO_BULL }}>▲</span><span style={{ color: RESO_NEUTRAL }}>◆</span><span style={{ color: RESO_BEAR }}>▼</span></span> 共振{resonance.length > 0 ? `(${resonance.length})` : ""}
           </button>

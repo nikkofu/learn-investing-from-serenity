@@ -1162,9 +1162,9 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
         return (
           <div className="text-[10px] font-mono text-[var(--text)] flex flex-wrap gap-x-4 gap-y-1 py-1 px-2.5 bg-[var(--inset)] border border-blue-500/30 rounded-[2px] select-none">
             <span className="text-blue-400 font-bold">[走势预测] {p.date}</span>
-            <span>乐观目标: <b className="font-semibold text-emerald-400">{p.bull.toFixed(2)} 元</b></span>
+            <span>乐观目标: <b className="font-semibold text-red-400">{p.bull.toFixed(2)} 元</b></span>
             <span>基准期望: <b className="font-semibold text-blue-400">{p.base.toFixed(2)} 元</b></span>
-            <span>悲观底线: <b className="font-semibold text-red-400">{p.bear.toFixed(2)} 元</b></span>
+            <span>悲观底线: <b className="font-semibold text-emerald-400">{p.bear.toFixed(2)} 元</b></span>
           </div>
         );
       }
@@ -1988,8 +1988,8 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       
                       return (
                         <g>
-                          <circle cx={xProjEnd} cy={yBull} r="2" fill="#10b981" />
-                          <text x={xProjEnd + 4} y={yBull + 2.5} fill="#10b981" fontSize="7.5" fontFamily="monospace" fontWeight="bold">
+                          <circle cx={xProjEnd} cy={yBull} r="2" fill="#ef4444" />
+                          <text x={xProjEnd + 4} y={yBull + 2.5} fill="#ef4444" fontSize="7.5" fontFamily="monospace" fontWeight="bold">
                             乐观路径 (Bull)
                           </text>
                           
@@ -1998,8 +1998,8 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                             基准路径 (Base)
                           </text>
                           
-                          <circle cx={xProjEnd} cy={yBear} r="2" fill="#ef4444" />
-                          <text x={xProjEnd + 4} y={yBear + 2.5} fill="#ef4444" fontSize="7.5" fontFamily="monospace" fontWeight="bold">
+                          <circle cx={xProjEnd} cy={yBear} r="2" fill="#10b981" />
+                          <text x={xProjEnd + 4} y={yBear + 2.5} fill="#10b981" fontSize="7.5" fontFamily="monospace" fontWeight="bold">
                             悲观路径 (Bear)
                           </text>
                         </g>
@@ -2051,7 +2051,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       cx={t.x}
                       cy={t.y}
                       r={isHovered ? 7 : 5}
-                      fill={isBuy ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)"}
+                      fill={isBuy ? "rgba(239,68,68,0.18)" : "rgba(16,185,129,0.18)"}
                       fillOpacity={op}
                       style={{ transition: "all 0.15s ease" }}
                     />
@@ -2059,7 +2059,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       cx={t.x}
                       cy={t.y}
                       r="3"
-                      fill={isBuy ? "var(--accent)" : "#ef4444"}
+                      fill={isBuy ? "#ef4444" : "#10b981"}
                       fillOpacity={op}
                       stroke="var(--surface)"
                       strokeWidth="1"
@@ -2067,7 +2067,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                     <text
                       x={t.x}
                       y={isBuy ? t.y + 11 : t.y - 7}
-                      fill={isBuy ? "var(--accent)" : "#f87171"}
+                      fill={isBuy ? "#f87171" : "#34d399"}
                       fillOpacity={op}
                       fontSize={isHovered ? 8.5 : 7.5}
                       fontWeight="bold"
@@ -2099,7 +2099,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                             rx="1.5"
                             fill="rgba(15,23,42,0.82)"
                             fillOpacity={isHovered ? 0.96 : 0.82}
-                            stroke={isBuy ? "rgba(16,185,129,0.55)" : "rgba(239,68,68,0.55)"}
+                            stroke={isBuy ? "rgba(239,68,68,0.55)" : "rgba(16,185,129,0.55)"}
                             strokeWidth="0.5"
                           />
                           <text
@@ -2110,7 +2110,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                             fontWeight="bold"
                             textAnchor="start"
                           >
-                            <tspan fill={isBuy ? "#34d399" : "#f87171"}>{tag}</tspan>
+                            <tspan fill={isBuy ? "#f87171" : "#34d399"}>{tag}</tspan>
                             {pctStr && (
                               <tspan dx="3" fill={t.profitPct! >= 0 ? "#34d399" : "#f87171"}>{pctStr}</tspan>
                             )}
@@ -2143,8 +2143,8 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       className="p-2.5 rounded-[1px] text-[9px] font-mono text-white select-none border"
                       style={{
                         backgroundColor: "rgba(15, 23, 42, 0.95)",
-                        borderColor: isBuy ? "rgba(16, 185, 129, 0.6)" : "rgba(239, 68, 68, 0.6)",
-                        boxShadow: isBuy ? "0 4px 15px rgba(16, 185, 129, 0.2)" : "0 4px 15px rgba(239, 68, 68, 0.2)",
+                        borderColor: isBuy ? "rgba(239, 68, 68, 0.6)" : "rgba(16, 185, 129, 0.6)",
+                        boxShadow: isBuy ? "0 4px 15px rgba(239, 68, 68, 0.2)" : "0 4px 15px rgba(16, 185, 129, 0.2)",
                         height: "100%",
                         display: "flex",
                         flexDirection: "column",
@@ -2154,7 +2154,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                       <div>
                         <div className="flex items-center justify-between border-b border-slate-800 pb-1 mb-1.5">
                           <span className={`px-1 py-0.5 text-[7px] font-black rounded-[1px] uppercase tracking-wide ${
-                            isBuy ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                            isBuy ? "bg-red-500/20 text-red-400" : "bg-emerald-500/20 text-emerald-400"
                           }`}>
                             {isBuy ? "BUY / 买入信号" : "SELL / 卖出信号"}
                           </span>
@@ -2504,7 +2504,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
             </div>
             <div className="border border-[var(--border)] p-2.5 bg-[var(--inset)]">
               <span className="text-[9px] uppercase tracking-wider text-red-500 font-bold block mb-1">【标记图例 · 怎么读 B/S】</span>
-              <p>• <b className="text-[var(--accent)]">B</b> 绿点=买入，<b className="text-red-400">S</b> 红点=卖出。</p>
+              <p>• <b className="text-red-400">B</b> 红点=买入，<b className="text-emerald-400">S</b> 绿点=卖出（A股惯例：红涨绿跌）。</p>
               <p>• <b>点的透明度 = 本笔仓位比例</b>：满仓动作=实心，卖 1/2≈半透明(½)，卖 1/3≈更淡(⅓)。</p>
               <p>• 一个 B 常对应多个 S：分批止盈（+8% 减⅓ → +25% 再减 → 跟踪/支撑清仓），故 S 比 B 多。</p>
               <p>• B/S 点旁常驻标签显示「触发理由（策略名）+ 卖点本笔盈亏」，可在工具栏「BS理由」开关；点位密集时关闭可减少遮挡。</p>
@@ -2525,7 +2525,7 @@ export default function QuantChart({ quantData, currentPrice, height: _height, e
                 return (
                   <div key={idx} className="flex justify-between items-center gap-2 py-2 px-3 hover:bg-[var(--hover)]">
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className={`px-1 py-0.5 text-[8px] font-bold rounded-[1px] uppercase ${isBuy ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "bg-red-500/10 text-red-400"}`}>
+                      <span className={`px-1 py-0.5 text-[8px] font-bold rounded-[1px] uppercase ${isBuy ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
                         {isBuy ? "BUY" : "SELL"}
                       </span>
                       <span className="text-[var(--text)] font-semibold">{t.date}</span>

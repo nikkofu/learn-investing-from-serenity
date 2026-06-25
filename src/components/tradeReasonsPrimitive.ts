@@ -40,8 +40,8 @@ export interface TradeReasonsData {
   enabled: boolean;
 }
 
-const BUY_COLOR = "#10b981"; // 买（A股跌色绿）
-const SELL_COLOR = "#ef4444"; // 卖（A股涨色红）
+const BUY_COLOR = "#ef4444"; // 买 / 看多（A股涨色红）
+const SELL_COLOR = "#10b981"; // 卖 / 看空（A股跌色绿）
 const PROFIT_UP = "#f87171"; // 盈（红）
 const PROFIT_DN = "#34d399"; // 亏（绿）
 const FONT_SIZE = 10;
