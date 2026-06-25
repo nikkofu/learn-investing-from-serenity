@@ -41,7 +41,15 @@ export default async function MethodologyPage() {
         <p className="-mt-3 text-xs text-[var(--faint)]">
           他做美股，但每个主题在 A 股都有对应的“瓶颈点”环节。代码均经东方财富接口校验。
         </p>
-        {curated.themes.map((t) => (
+        {curated.themes.map((t) => {
+          const themeCodes = Array.from(
+            new Set(
+              t.aShareMapping
+                .flatMap((seg) => seg.companies.map((c) => c.code))
+                .filter((code) => /^\d{6}$/.test(code)),
+            ),
+          );
+          return (
           <div key={t.name} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-base font-semibold">{t.name}</h3>
@@ -54,24 +62,68 @@ export default async function MethodologyPage() {
               </div>
             </div>
             <p className="mt-2 text-sm leading-6 text-[var(--text)]">{t.thesis}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <a
+                href={`/map?trend=${encodeURIComponent(t.name)}&auto=1`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="按 Serenity 瓶颈点方法 AI 拆解该主题的产业链分层与卡脖子环节"
+                className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent-line)] bg-[var(--accent-soft)] px-2.5 py-1 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v12"/><path d="M6 12h12"/></svg>
+                拆解产业链瓶颈点 →
+              </a>
+              {themeCodes.length > 0 && (
+                <a
+                  href={`/scanner?codes=${themeCodes.join(",")}&title=${encodeURIComponent(t.name + " 瓶颈点个股")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="在热门股扫描器并发诊断该主题下的全部 A 股"
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--inset)] px-2.5 py-1 text-xs font-medium text-[var(--muted)] transition hover:border-[var(--accent-line)] hover:text-[var(--text)]"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  批量诊断 {themeCodes.length} 只 →
+                </a>
+              )}
+            </div>
             <div className="mt-4 space-y-3">
               {t.aShareMapping.map((seg) => (
                 <div key={seg.segment}>
                   <p className="mb-1.5 text-xs font-medium text-[var(--accent)]">{seg.segment}</p>
                   <div className="flex flex-wrap gap-2">
-                    {seg.companies.map((c) => (
-                      <div key={c.code} className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs">
-                        <span className="font-medium text-[var(--text)]">{c.name}</span>{" "}
-                        <span className="font-mono text-[var(--faint)]">{c.code}</span>
-                        <p className="mt-0.5 max-w-[16rem] text-[11px] leading-4 text-[var(--muted)]">{c.note}</p>
-                      </div>
-                    ))}
+                    {seg.companies.map((c) => {
+                      const isA = /^\d{6}$/.test(c.code);
+                      const inner = (
+                        <>
+                          <span className="font-medium text-[var(--text)]">{c.name}</span>{" "}
+                          <span className="font-mono text-[var(--faint)]">{c.code}</span>
+                          <p className="mt-0.5 max-w-[16rem] text-[11px] leading-4 text-[var(--muted)]">{c.note}</p>
+                        </>
+                      );
+                      return isA ? (
+                        <a
+                          key={c.code}
+                          href={`/analyze?code=${c.code}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={`个股诊断分析 · ${c.note}`}
+                          className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs transition hover:border-[var(--accent-line)] hover:bg-[var(--hover)]"
+                        >
+                          {inner}
+                        </a>
+                      ) : (
+                        <div key={c.code} className="rounded-lg border border-[var(--border)] bg-[var(--inset)] px-3 py-1.5 text-xs">
+                          {inner}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
       </section>
 
       {posts.available && (
@@ -118,12 +170,17 @@ export default async function MethodologyPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-medium text-[var(--accent)]">相关 A 股板块</span>
                         {mapping.themes.map((t) => (
-                          <span
+                          <a
                             key={t.name}
-                            className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] text-[var(--accent)]"
+                            href={`/map?trend=${encodeURIComponent(t.name)}&auto=1`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="拆解该板块的产业链瓶颈点 →"
+                            className="inline-flex items-center gap-0.5 rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] text-[var(--accent)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
                           >
                             {t.name}
-                          </span>
+                            <span className="text-[9px] opacity-70">↗</span>
+                          </a>
                         ))}
                       </div>
                       <div className="flex flex-wrap gap-2">

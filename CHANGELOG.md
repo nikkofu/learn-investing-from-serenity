@@ -4,6 +4,26 @@
 
 ---
 
+## [0.47.0] - 2026-06-24
+
+> **方法论 → 站内深度研究 链路打通**。回应用户：「在 `/methodology` 页面，增加对『相关 A 股板块 半导体自主可控 / 国产替代』这类信息的链接，链接到站内相关 `/map` 趋势 → 产业链瓶颈点拆解 页面……设计比较好的链路，来支持更深入的研究」。纯前端 + 链路增强，**不改数据/接口/口径**，**零新依赖**。
+
+### `/map` 支持 URL 预填与自动拆解（`src/app/map/page.tsx`）
+- 新增 `?trend=<主题>&auto=1` 支持：用 `useSearchParams` 读取，进页面自动把主题填入输入框；带 `auto=1` 时自动触发 AI 产业链瓶颈点拆解，不带则仅预填等用户手动点「拆解」。
+- 组件拆成 `MapPageInner` + 外层 `<Suspense>` 包裹（与 `/scanner` 同款写法，满足 Next.js `useSearchParams` 的 CSR bailout 要求）；`autoRan` ref 防止重复触发。
+
+### `/methodology` 研究链路（`src/app/methodology/page.tsx`）
+- **主题卡（主题 → A 股瓶颈点映射）**：每个主题名旁新增两枚研究链路按钮——
+  - 「拆解产业链瓶颈点 →」→ `/map?trend=<主题名>&auto=1`，一键带入该主题的 AI 产业链拆解。
+  - 「批量诊断 N 只 →」→ `/scanner?codes=<该主题全部 A 股代码>&title=<主题名>`（仅在有有效 6 位 A 股代码时显示，自动去重）。
+- **主题下个股卡片**：原纯展示 `div` 改为可点链接，A 股代码直达 `/analyze?code=<code>` 个股诊断（非 A 股代码保持不可点）。
+- **近期发言「相关 A 股板块」标签**：原纯色块 `span` 改为链接 `a`，点击直达 `/map?trend=<板块名>&auto=1`，带 ↗ 角标提示可跳转。
+
+### 质量门禁
+- `npm run type-check`、`npm run lint`（0 error）、`npm run build` 三关全绿；浏览器实测：主题卡按钮 / 个股链接 / 发言板块标签均渲染正常，`/map?trend=&auto=1` 进页即自动拆解，仅带 `trend` 时只预填。
+
+---
+
 ## [0.46.0] - 2026-06-24
 
 > **回测结果表格 TradingView 化改造**。回应用户：「`/backtest/strategy?strategy=…` 这类页面，交易流水、分股票表现等，UI/UX 需要增强，现在太简陋了，多学学 TradingView 的 UI/UX 吧」。纯前端增强，**不改任何回测口径/数据/字段**，**零新依赖**。

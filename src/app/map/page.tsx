@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { SupplyChainMap } from "@/lib/types";
 import { ProgressTrace, applyStageEvent, type Stage } from "@/components/ProgressTrace";
 import { readNdjson } from "@/lib/stream-client";
@@ -13,7 +14,8 @@ const MAP_STAGES: { key: string; label: string }[] = [
   { key: "summary", label: "整理产业链节点" },
 ];
 
-export default function MapPage() {
+function MapPageInner() {
+  const searchParams = useSearchParams();
   const [trend, setTrend] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -24,6 +26,7 @@ export default function MapPage() {
   const [structured, setStructured] = useState("");
   const [retryCount, setRetryCount] = useState(1);
   const [viewMode, setViewMode] = useState<"mindmap" | "list">("mindmap");
+  const autoRan = useRef(false);
 
   // 提取当前图谱中的所有有效A股股票代码
   const allStockCodes = map
@@ -102,6 +105,17 @@ export default function MapPage() {
       }
     }
   }
+
+  // 支持从其他页面（如 /methodology）通过 ?trend=<主题>&auto=1 预填并自动拆解
+  useEffect(() => {
+    if (autoRan.current) return;
+    const t = (searchParams.get("trend") || "").trim();
+    if (!t) return;
+    autoRan.current = true;
+    setTrend(t);
+    if (searchParams.get("auto") === "1") void run(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   return (
     <div className="space-y-6">
@@ -358,5 +372,13 @@ export default function MapPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function MapPage() {
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-xs font-mono text-[var(--muted)]">LOADING PAGE CONTEXT...</div>}>
+      <MapPageInner />
+    </Suspense>
   );
 }
