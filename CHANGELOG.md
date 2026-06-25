@@ -4,6 +4,24 @@
 
 ---
 
+## [0.49.2] - 2026-06-25
+
+> **下线「📡 TradingView 热门策略（参考）」发现板块**。v0.49.0 引入的该板块只能抓取 TradingView 脚本列表的**公开元数据**作外链引用——这些社区策略**无法在本项目内直接使用**（闭源拿不到源码 / 无可靠 Pine→TS 转译），仅提供外链跳转，价值有限，故按用户要求整体移除。**真正可用的复刻库 `tvStrategies.ts`（GBB / Cardwell / KAMA 策略）完全不受影响**，照旧运行。
+
+### 移除内容
+- 删除发现抓取解析库 `src/lib/tvScripts.ts` 与读取接口 `src/app/api/tv-scripts/route.ts`（整个路由目录）。
+- `src/lib/sync.ts`：移除 `tvStrategies` 同步源（`SyncSourceId` 联合类型项 + `SYNC_SOURCES` 配置 + `syncTvStrategies()` 运行器 + `RUNNERS`/`readCount`/`FILE_BY_ID` 接入 + `tvScripts` 导入）。
+- `src/app/strategies/page.tsx`：删除 `TvStrategiesSection` 组件、`TvScriptRef`/`TvStrategiesData` 接口、`TV_ACCESS_STYLE` 常量及其页面挂载。
+- `src/app/sync/page.tsx`：数据同步中心副标题去掉「TradingView 热门策略（参考）」，对应行随同步源移除而自动消失（剩 5 个源）。
+
+### 不受影响
+- 复刻策略 `tv-supertrend-adaptive-v1`（GBB）/ `tv-cardwell-rsi-navigator-v1` / `tv-kama-momentum-v1`（KAMA）均在 `tvStrategies.ts`，照旧接入 `/analyze`、`/backtest/strategy`、`/chart` 策略图层、UI 下拉。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint` 改动文件 0 error · `next build` 通过 27/27 页；dev 实测 `/strategies` 已无该板块、`/sync` 仅剩 5 源、`GET /api/tv-scripts` 返回 404。**零新依赖、不改任何既有计算口径。**
+
+---
+
 ## [0.49.1] - 2026-06-25
 
 > **复刻 TradingView 开源策略：Kaufman Moving Average Adaptive Strategy [MKB]**。继 v0.49.0 的「发现同步」之后，走既有「逐个、具名、原作链接 + 差异说明、人工 + 回测双校验」路线，复刻 muratkbesiroglu(MKB) 的开源脚本 **KAMA Momentum Strategy**（`qgTc4zie`）。登记进策略注册表后**自动接入** `/analyze`、`/backtest/strategy`、`/chart` 策略图层、UI 下拉，无需改 UI。**零新依赖、不改任何既有计算口径。**

@@ -4,7 +4,6 @@ import crypto from "crypto";
 import { globalCache } from "./cache";
 import { syncPostsWithRemote, fetchSerenityJson } from "./knowledge";
 import { emClist, getStockRankList, getQuotesFailover } from "./sources";
-import { fetchTopTvStrategies, TV_STRATEGIES_PATH, type TvStrategiesFile } from "./tvScripts";
 
 /**
  * 统一数据同步编排：把分散的同步能力收编为一处，供「数据同步中心」页面与自有程序统一调用。
@@ -31,7 +30,7 @@ const HOT_SECTORS_PATH = path.join(DATA_DIR, "hot_sectors.json");
 const SECTORS_META_PATH = path.join(DATA_DIR, "sectors_metadata.json");
 const SECTOR_STOCKS_PATH = path.join(DATA_DIR, "sector_stocks_map.json");
 
-export type SyncSourceId = "serenity" | "hotRank" | "industrySectors" | "sectorStocks" | "hotSectors" | "tvStrategies";
+export type SyncSourceId = "serenity" | "hotRank" | "industrySectors" | "sectorStocks" | "hotSectors";
 
 export interface SyncSourceMeta {
   id: SyncSourceId;
@@ -87,14 +86,6 @@ export const SYNC_SOURCES: SyncSourceMeta[] = [
     label: "热门板块（概念）",
     description: "东方财富概念板块按当日涨幅排序的热门榜 Top60。",
     file: "data/hot_sectors.json",
-    minRatio: 0.5,
-    snapshotKeep: 5,
-  },
-  {
-    id: "tvStrategies",
-    label: "TradingView 热门策略（参考）",
-    description: "抓取 TradingView 策略脚本列表第一页的公开元数据（名称/作者/链接/点赞/访问级别），建立可复刻清单。仅作外链参考，不抓源码、保留原作者署名。",
-    file: ".data/tv-strategies.json",
     minRatio: 0.5,
     snapshotKeep: 5,
   },
@@ -490,38 +481,6 @@ interface HotSectorItem {
   leadStockChangePct: number;
 }
 
-async function syncTvStrategies(): Promise<{ count: number; message: string; version: number; changed: boolean }> {
-  const list = await fetchTopTvStrategies();
-  if (!Array.isArray(list) || list.length < 5) {
-    throw new Error(`TradingView 策略列表返回异常（仅 ${Array.isArray(list) ? list.length : 0} 条），拒绝写入`);
-  }
-  // 校验：带链接的占比需达标，避免落入残缺数据。
-  const withUrl = list.filter((x) => x.url && x.name).length;
-  if (withUrl < list.length * 0.8) {
-    throw new Error(`TV 策略数据校验失败：有效条目仅 ${withUrl}/${list.length}，拒绝写入`);
-  }
-
-  await guardShrink("tvStrategies", list.length);
-  // 哈希仅取「会随脚本变化」的稳定子集（id+更新时间+点赞），避免无意义版本跳动。
-  const hashSource = JSON.stringify(list.map((x) => [x.id, x.updatedAt, x.likes]));
-  const { version, changed } = await commitVersion({
-    id: "tvStrategies",
-    count: list.length,
-    hashSource,
-    buildFiles: (v, ts) => [
-      {
-        path: TV_STRATEGIES_PATH,
-        content: JSON.stringify(
-          { source: "tvStrategies", version: v, syncedAt: ts, count: list.length, list } satisfies TvStrategiesFile,
-          null,
-          2
-        ),
-      },
-    ],
-  });
-  return { count: list.length, message: `已同步 TradingView 热门策略 ${list.length} 条`, version, changed };
-}
-
 async function syncHotSectors(): Promise<{ count: number; message: string; version: number; changed: boolean }> {
   // 统一 clist（push2→push2delay 兜底 + 限流）。fs 用空格分隔。
   const raw = (await emClist({
@@ -563,7 +522,6 @@ const RUNNERS: Record<SyncSourceId, SourceRunner> = {
   industrySectors: () => syncIndustrySectors(),
   sectorStocks: () => syncSectorStocks(),
   hotSectors: () => syncHotSectors(),
-  tvStrategies: () => syncTvStrategies(),
 };
 
 /**
@@ -640,10 +598,6 @@ async function readCount(meta: SyncSourceMeta): Promise<{ available: boolean; co
       const d = await tryJson<{ list?: unknown[] }>(HOT_SECTORS_PATH);
       return { available: !!d, count: d?.list?.length ?? 0 };
     }
-    case "tvStrategies": {
-      const d = await tryJson<{ list?: unknown[] }>(TV_STRATEGIES_PATH);
-      return { available: !!d, count: d?.list?.length ?? 0 };
-    }
   }
 }
 
@@ -653,7 +607,6 @@ const FILE_BY_ID: Record<SyncSourceId, string> = {
   industrySectors: SECTORS_META_PATH,
   sectorStocks: SECTOR_STOCKS_PATH,
   hotSectors: HOT_SECTORS_PATH,
-  tvStrategies: TV_STRATEGIES_PATH,
 };
 
 /** 返回所有数据源的当前落盘状态（数量 + 上次同步时间 + 版本号）。 */

@@ -14,7 +14,11 @@
 
 ---
 
-## 🆕 v0.49.1 亮点
+## 🆕 v0.49.2 亮点
+
+*   **下线「📡 TradingView 热门策略（参考）」发现板块**：v0.49.0 引入的该板块只能抓取 TradingView 脚本列表的**公开元数据**作外链引用，策略**无法在本项目内直接使用**，价值有限，故整体移除。删除 `src/lib/tvScripts.ts`、`/api/tv-scripts` 路由、`sync.ts` 的 `tvStrategies` 同步源，以及 `/strategies` 卡片区与 `/sync` 中心对应行。**真正可用的复刻库 `tvStrategies.ts`（GBB / Cardwell / KAMA 策略）完全不受影响**，照旧在 `/analyze`、`/backtest/strategy`、`/chart` 策略图层运行。零新依赖、不改任何既有计算口径；三关全绿（tsc 0 / eslint 0 / build 27/27）。
+
+## v0.49.1 亮点
 
 *   **复刻 TradingView 开源策略：Kaufman Moving Average Adaptive Strategy [MKB]**：继 v0.49.0「发现同步」之后落地首个具名复刻——走既有「逐个、具名、原作链接 + 差异说明、人工 + 回测双校验」路线，复刻 [muratkbesiroglu(MKB) 的 KAMA Momentum Strategy](https://cn.tradingview.com/script/qgTc4zie-Kaufman-Moving-Average-Adaptive-Strategy-by-MKB/)。新增策略 `tv-kama-momentum-v1`，登记进注册表后**自动接入** `/analyze`、`/backtest/strategy`、`/chart` 策略图层与 UI 下拉。**零新依赖、不改任何既有计算口径。**
     *   **原作逻辑**：基于 **KAMA（Kaufman 自适应均线）**——用效率比 ER 在快(2)/慢(30) 平滑常数间插值，趋势强时贴快线灵敏、震荡时贴慢线抗洗。**入场** = 收盘上穿「KAMA + 0.5×标准差(20)」上带（波动率带过滤弱信号/噪声）；**出场** = 收盘跌破 KAMA，纪律化离场。纯多头、单仓位、不加仓（KAMA 长度 21 / 标准差 20 / 倍数 0.5）。
@@ -22,7 +26,7 @@
     *   **诚实口径**：Pine 内 KAMA 首根种子细节不公开，本复刻用前一根收盘播种（差异数根内收敛）；标准差用总体口径对齐 Pine `ta.stdev` 默认。原作面向加密日线、A 股主板日线同样适用；入场带=动量确认而非择时——**实测小样本(300750+000001)胜率 22.6% 未跑赢买入持有(+78%)，证明引擎诚实标注 `z=-3.05` 不显著**，价值在过滤弱信号、吃干净单边动量。
     *   **质量门禁**：`tsc` 0 error · `eslint` 0 error · `build` 通过 27/27 页；合成数据断言 + 真实 A 股跨股票跑通 + dev 浏览器实测（/chart 图层 + /backtest 证明引擎）+ 标注录屏。
 
-## v0.49.0 亮点
+## v0.49.0 亮点（该发现板块已于 v0.49.2 下线）
 
 *   **TradingView 热门策略发现同步（合规·元数据·参考）**：在「策略市场 `/strategies`」新增 **「TradingView 热门策略（参考）」** 区，一键同步 [`/scripts/?script_type=strategies`](https://cn.tradingview.com/scripts/?script_type=strategies) **第一页热门**策略的**公开元数据**，建立「值得复刻」清单。**只抓公开元信息、不抓脚本源码、不绕付费墙、保留原作者署名 + 回链**，版权归 TradingView 与各原作者。**零新依赖、不改任何计算口径**。
     *   **合规边界**：仅作外链参考与署名跳转，**不在本站复刻或宣称等价**；卡片点击直达原 TradingView 脚本页（新开页）。社区脚本自动复刻不可行（版权 / 闭源 / 无可靠 Pine→TS 转译），故本版仅做「发现 + 展示」，复刻仍走既有「逐个、具名、人工 + 回测双校验」路线。
