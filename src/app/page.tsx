@@ -1,5 +1,12 @@
 import Link from "next/link";
 import { loadCurated, loadPostsDigest } from "@/lib/knowledge";
+import { Card, SectionTitle } from "@/components/ui";
+import MarketSnapshot from "@/components/home/MarketSnapshot";
+import WatchlistSnapshot from "@/components/home/WatchlistSnapshot";
+import HotList from "@/components/home/HotList";
+import RecentAlerts from "@/components/home/RecentAlerts";
+import QuickLinks from "@/components/home/QuickLinks";
+import SectorMini from "@/components/home/SectorMini";
 
 export const dynamic = "force-dynamic";
 
@@ -7,82 +14,96 @@ export default async function Home() {
   const [curated, posts] = await Promise.all([loadCurated(), loadPostsDigest()]);
 
   return (
-    <div className="space-y-8">
-      <section className="rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] to-transparent p-6 sm:p-8">
-        <p className="text-sm text-[var(--accent)]">学习 Serenity · 白毛股神 · 瓶颈点投资法</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-          用 AI 把「瓶颈点投资法」落到 A 股
-        </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--text)]">
-          {curated.profile.coreIdea}
-        </p>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Link href="/map" target="_blank" rel="noopener noreferrer" className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-fg)] hover:opacity-90">
+    <div className="space-y-6">
+      {/* Hero（紧凑）：品牌定位 + 主 CTA + ⌘K 提示 */}
+      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-gradient-to-br from-[var(--accent-soft)] to-transparent p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[var(--text-sm)] text-[var(--accent)]">学习 Serenity · 白毛股神 · 瓶颈点投资法</p>
+            <h1 className="mt-1.5 text-[var(--text-h1)] font-semibold leading-[var(--lh-h1)] tracking-tight">
+              用 AI 把「瓶颈点投资法」落到 A 股
+            </h1>
+            <p className="mt-2 max-w-2xl text-[var(--text-sm)] leading-[var(--lh-sm)] text-[var(--muted)]">
+              {curated.profile.coreIdea}
+            </p>
+          </div>
+          <span className="hidden shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--border)] px-2.5 py-1 text-[var(--text-xs)] text-[var(--muted)] sm:inline-flex">
+            按
+            <kbd className="rounded-[var(--radius-sm)] border border-[var(--border)] px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+            全局搜索
+          </span>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2.5">
+          <Link href="/map" target="_blank" rel="noopener noreferrer" className="rounded-[var(--radius-md)] bg-[var(--accent)] px-4 py-2 text-[var(--text-sm)] font-medium text-[var(--accent-fg)] hover:opacity-90">
             趋势 → 产业链拆解
           </Link>
-          <Link href="/analyze" target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]">
+          <Link href="/analyze" target="_blank" rel="noopener noreferrer" className="rounded-[var(--radius-md)] border border-[var(--border)] px-4 py-2 text-[var(--text-sm)] hover:bg-[var(--hover)]">
             个股瓶颈点评分
           </Link>
-          <Link href="/methodology" target="_blank" rel="noopener noreferrer" className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]">
+          <Link href="/methodology" target="_blank" rel="noopener noreferrer" className="rounded-[var(--radius-md)] border border-[var(--border)] px-4 py-2 text-[var(--text-sm)] hover:bg-[var(--hover)]">
             方法论 / 知识库
           </Link>
         </div>
       </section>
 
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">瓶颈点五因子</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {curated.method.factors.map((f) => (
-            <div key={f.key} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
-              <div className="flex items-baseline justify-between">
-                <span className="font-medium">{f.zh}</span>
-                <span className="text-xs text-[var(--accent)]">{Math.round(f.weight * 100)}%</span>
-              </div>
-              <p className="mt-1 text-[11px] uppercase tracking-wide text-[var(--faint)]">{f.en}</p>
-              <p className="mt-2 text-xs leading-5 text-[var(--muted)]">{f.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      {/* 仪表盘：各模块独立 fetch + Skeleton + 失败降级，任一挂掉不阻断整页 */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-6">
+        <div className="md:col-span-1 lg:col-span-2"><MarketSnapshot /></div>
+        <div className="md:col-span-1 lg:col-span-2"><WatchlistSnapshot /></div>
+        <div className="md:col-span-2 lg:col-span-2"><HotList /></div>
+        <div className="md:col-span-1 lg:col-span-4"><RecentAlerts /></div>
+        <div className="md:col-span-1 lg:col-span-2"><QuickLinks /></div>
+        <div className="md:col-span-2 lg:col-span-6"><SectorMini /></div>
+      </div>
 
-      <section className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
-          <h2 className="mb-3 text-lg font-semibold">六步工作流</h2>
-          <ol className="space-y-2">
-            {curated.method.workflow.map((w, i) => (
-              <li key={i} className="flex gap-3 text-sm text-[var(--text)]">
-                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--accent-soft)] text-xs text-[var(--accent)]">
-                  {i + 1}
-                </span>
-                <span className="leading-6">{w}</span>
-              </li>
+      {/* 品牌下沉：瓶颈点方法论 + 知识库 */}
+      <section className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <SectionTitle title="瓶颈点五因子" desc="押注被忽视、不可替代、供给受限的上游环节" className="mb-3" />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {curated.method.factors.map((f) => (
+              <Card key={f.key} padding="md">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[var(--text-sm)] font-medium text-[var(--text)]">{f.zh}</span>
+                  <span className="text-[var(--text-xs)] text-[var(--accent)]">{Math.round(f.weight * 100)}%</span>
+                </div>
+                <p className="mt-1 text-[10px] uppercase tracking-wide text-[var(--faint)]">{f.en}</p>
+                <p className="mt-2 text-[var(--text-xs)] leading-[var(--lh-xs)] text-[var(--muted)]">{f.desc}</p>
+              </Card>
             ))}
-          </ol>
+          </div>
         </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5">
-          <h2 className="mb-3 text-lg font-semibold">知识库</h2>
-          {posts.available ? (
-            <>
-              <p className="text-sm text-[var(--text)]">
-                已收录 <span className="font-semibold text-[var(--accent)]">{posts.count}</span> 条 Serenity X 发言
+        <div>
+          <SectionTitle
+            title="知识库"
+            action={
+              <Link href="/methodology" target="_blank" rel="noopener noreferrer" className="text-[var(--text-sm)] text-[var(--accent)] hover:underline">
+                方法论 →
+              </Link>
+            }
+            className="mb-3"
+          />
+          <Card className="h-[calc(100%-2.75rem)]">
+            {posts.available ? (
+              <>
+                <p className="text-[var(--text-sm)] text-[var(--text)]">
+                  已收录 <span className="font-semibold text-[var(--accent)]">{posts.count}</span> 条 Serenity X 发言
+                </p>
+                <p className="mt-3 mb-2 text-[var(--text-xs)] text-[var(--faint)]">他最常提及（美股）</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {posts.topTickers.slice(0, 12).map((t) => (
+                    <span key={t.ticker} className="rounded-[var(--radius-sm)] bg-[var(--hover)] px-2 py-0.5 font-mono text-[var(--text-xs)] text-[var(--text)]">
+                      ${t.ticker} <span className="text-[var(--faint)]">{t.count}</span>
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="text-[var(--text-sm)] text-[var(--muted)]">
+                尚未抓取 X 发言。运行 <code className="rounded bg-[var(--hover)] px-1 font-mono text-[var(--text-xs)]">node scripts/scrape-x.mjs</code> 构建一手知识库。
               </p>
-              <p className="mt-3 mb-2 text-xs text-[var(--faint)]">他最常提及（美股）</p>
-              <div className="flex flex-wrap gap-1.5">
-                {posts.topTickers.slice(0, 12).map((t) => (
-                  <span key={t.ticker} className="rounded-md bg-[var(--hover)] px-2 py-0.5 font-mono text-xs text-[var(--text)]">
-                    ${t.ticker} <span className="text-[var(--faint)]">{t.count}</span>
-                  </span>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p className="text-sm text-[var(--muted)]">
-              尚未抓取 X 发言。运行 <code className="rounded bg-[var(--hover)] px-1 font-mono text-xs">node scripts/scrape-x.mjs</code> 构建一手知识库。
-            </p>
-          )}
-          <Link href="/methodology" target="_blank" rel="noopener noreferrer" className="mt-4 inline-block text-sm text-[var(--accent)] hover:underline">
-            查看完整方法论与主题映射 →
-          </Link>
+            )}
+          </Card>
         </div>
       </section>
     </div>
