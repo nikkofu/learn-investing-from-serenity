@@ -16,6 +16,7 @@ import {
   Wallet,
   Bell,
   RefreshCw,
+  Database,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -177,6 +178,12 @@ export const NAV_GROUPS: NavGroup[] = [
         keywords: "shuju tongbu sync data sjtb",
       },
       {
+        href: "/market",
+        label: "数据接口调试台",
+        icon: Database,
+        keywords: "shuju jiekou tiaoshi market data inspector debug api sjjk ts",
+      },
+      {
         href: "/settings",
         label: "设置",
         icon: Settings,
@@ -227,6 +234,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   "/paper": { group: "交易与监控", title: "纸面交易" },
   "/alerts": { group: "交易与监控", title: "盘中盯盘" },
   "/sync": { group: "系统", title: "数据同步" },
+  "/market": { group: "系统", title: "数据接口调试台" },
   "/settings": { group: "系统", title: "设置" },
 };
 
