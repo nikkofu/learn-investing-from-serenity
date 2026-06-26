@@ -198,6 +198,30 @@ export function applyPrefilter(
   return kept;
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * 拉取候选池单页（clist）。单页偶发失败（网络抖动 / host 短暂不可达）不应让整轮
+ * 候选池拉取直接挂掉——经限流重试至多 3 次（仍走 emScheduler 单并发限流，零额外
+ * 封 IP 风险），自愈瞬时故障；3 次仍失败才抛出（含页号，便于定位）。
+ */
+async function fetchUniversePage(pn: number, pz: number, segments: string): Promise<ClistRow[]> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return (await emClist({
+        pn, pz, po: 1, np: 1, fltt: 2, invt: 2, fid: "f6",
+        fs: segments, fields: "f12,f14,f2,f3,f6,f8,f10",
+      })) as unknown as ClistRow[];
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 2) await sleep(800 * (attempt + 1));
+    }
+  }
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(`候选池第 ${pn} 页拉取失败（已重试 3 次）：${msg}`);
+}
+
 /**
  * 全量全市场候选池：板块范围由「股票池纯净化」配置决定（设置页可调），
  * 默认沪深主板 + 创业板、剔除科创板/北交所，ST/*ST/退/B 股再由 filterUniverse 统一剔除。
@@ -244,10 +268,7 @@ async function fetchFullUniverse(
   const qualifiedSeen = new Set<string>();
   let qualified = 0;
   for (let pn = 1; pn <= MAX_PAGES; pn++) {
-    const diff = (await emClist({
-      pn, pz: PAGE, po: 1, np: 1, fltt: 2, invt: 2, fid: "f6",
-      fs: segments, fields: "f12,f14,f2,f3,f6,f8,f10",
-    })) as unknown as ClistRow[];
+    const diff = await fetchUniversePage(pn, PAGE, segments);
     if (!diff || diff.length === 0) { reachedEnd = true; break; }
     rows.push(...diff);
     pages = pn;

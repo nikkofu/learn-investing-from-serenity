@@ -144,11 +144,16 @@ export async function push2Json<T = unknown>(
   let lastErr: unknown;
   for (let i = 0; i < hosts.length; i++) {
     const isLast = i === hosts.length - 1;
+    // 「快速失败」（短超时 + 不重试，尽快降级到下一个）只用于实时探针主站
+    // push2.eastmoney.com：交易时段它能给实时行情，但境外/数据中心 IP 常 502。
+    // push2delay.eastmoney.com（实测全球可达）无论排第几都给完整超时 + 重试预算——
+    // 否则非交易时段它被排在首位却只有 2.5s/0 重试，一有瞬时抖动就直接跌穿到只会
+    // 502 的主站，整轮请求失败（详见非交易时段 host 兜底顺序 push2Hosts）。
+    const fastFail = !isLast && hosts[i] === PUSH2_PRIMARY;
     try {
       const url = `https://${hosts[i]}${path}?${qs(params)}`;
       const res = await emFetch(url, {
-        // 非末位 host：短超时、不重试 → 尽快降级；末位 host 用调用方/默认超时。
-        ...(isLast ? {} : { timeoutMs: 2500, retries: 0 }),
+        ...(fastFail ? { timeoutMs: 2500, retries: 0 } : {}),
         headers: { Referer: "https://quote.eastmoney.com/", ...(init.headers ?? {}) },
         ...init,
       });
