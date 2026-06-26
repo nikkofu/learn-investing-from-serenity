@@ -37,6 +37,9 @@ interface ScanData {
     technical?: any;
     candles?: any[];
   };
+  // 缓存命中诊断：用于每行显示「命中缓存（秒级）」还是「全量推理」，解释耗时差异。
+  cache?: { hit: boolean; ttlMs?: number; createdAt?: number };
+  timings?: { totalMs?: number };
 }
 
 interface AssessmentState {
@@ -54,6 +57,35 @@ const FACTOR_LABELS: Record<string, string> = {
   valueCapture: "价值捕获",
   catalyst: "催化剂",
 };
+
+// 每行缓存命中指示：解释「为何耗时差异巨大」——命中静态层缓存秒级回放 vs 全量多智能体推理。
+function CacheBadge({
+  cache,
+  timings,
+}: {
+  cache?: { hit: boolean };
+  timings?: { totalMs?: number };
+}) {
+  if (!cache) return null;
+  const ms = timings?.totalMs;
+  const elapsed = typeof ms === "number" ? (ms >= 60000 ? `${(ms / 60000).toFixed(1)}min` : `${(ms / 1000).toFixed(0)}s`) : "";
+  const label = cache.hit ? `⚡ 缓存命中${elapsed ? ` ${elapsed}` : ""}` : `⧗ 全量推理${elapsed ? ` ${elapsed}` : ""}`;
+  const title = cache.hit
+    ? "命中静态层缓存（基本面/产业链，TTL 一周）：秒级回放静态叙事 + 一次轻量动态推理。"
+    : "未命中缓存：跑完整多智能体管线（主推理 + 自洽投票×2 + Critic + Judge），耗时较长。";
+  return (
+    <span
+      title={title}
+      className={`px-1 py-0.5 text-[8px] font-semibold tracking-wide rounded-[2px] border whitespace-nowrap ${
+        cache.hit
+          ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--accent-soft)]"
+          : "border-[var(--border)] text-[var(--muted)] bg-[var(--inset)]"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
 
 function ScannerContent() {
   const searchParams = useSearchParams();
@@ -222,6 +254,8 @@ function ScannerContent() {
           stats: ev.stats as any,
           assessment: ev.assessment as ChokepointAssessment,
           quant: ev.quant as any,
+          cache: ev.cache as ScanData["cache"],
+          timings: ev.timings as ScanData["timings"],
         };
       } else if (ev.type === "error") {
         streamError = ev.message as string;
@@ -655,8 +689,11 @@ function ScannerContent() {
                         {/* Serenity 得分 */}
                         <td className="px-4 py-3 text-center font-mono font-black">
                           {state.status === "done" && state.data ? (
-                            <span className="text-[var(--accent)] text-sm">
-                              {state.data.assessment.totalScore} 分
+                            <span className="flex flex-col items-center gap-1">
+                              <span className="text-[var(--accent)] text-sm">
+                                {state.data.assessment.totalScore} 分
+                              </span>
+                              <CacheBadge cache={state.data.cache} timings={state.data.timings} />
                             </span>
                           ) : (
                             <span className="text-[var(--faint)]">--</span>

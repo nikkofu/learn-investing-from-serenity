@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { loadConfig } from "./config";
+import { withLlmSlot, withLlmSlotGenerator } from "./llmGate";
 
 export class LLMNotConfiguredError extends Error {
   constructor() {
@@ -38,17 +39,20 @@ export async function chat(
       ? { response_format: { type: "json_object" as const } }
       : {};
 
-  const completion = await client.chat.completions.create({
-    model: config.model,
-    temperature: opts.temperature ?? 0.4,
-    ...responseFormat,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-  } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
+  // 经全局 LLM 在途并发闸：超限时按优先级排队，避免 /scanner 批量把模型端点打满。
+  return withLlmSlot(async () => {
+    const completion = await client.chat.completions.create({
+      model: config.model,
+      temperature: opts.temperature ?? 0.4,
+      ...responseFormat,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
-  return completion.choices[0]?.message?.content ?? "";
+    return completion.choices[0]?.message?.content ?? "";
+  });
 }
 
 /** A streamed delta: model "thinking" (reasoning) or visible answer (content). */
@@ -105,6 +109,15 @@ function reasoningParam(baseURL: string): Record<string, unknown> {
  * deltas as they arrive so the UI can show progress live.
  */
 export async function* chatStream(
+  system: string,
+  user: string,
+  opts: { temperature?: number } = {}
+): AsyncGenerator<StreamDelta, void, unknown> {
+  // 经全局 LLM 在途并发闸：取槽位后再发起流式调用，流结束/中断才释放（见 chatStreamImpl）。
+  yield* withLlmSlotGenerator(() => chatStreamImpl(system, user, opts));
+}
+
+async function* chatStreamImpl(
   system: string,
   user: string,
   opts: { temperature?: number } = {}
