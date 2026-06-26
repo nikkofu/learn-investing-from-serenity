@@ -21,13 +21,14 @@ import {
   type WhitespaceData,
 } from "lightweight-charts";
 import type { Candle } from "@/lib/types";
-import { tradeSizeTag, type TradeAction } from "@/lib/quant";
+import { tradeSizeTag, type TradeAction, type TechnicalAssessment } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance, computePatternSignals, type ResonancePoint, type PatternSignal } from "@/lib/indicators";
 import type { ChartDrawing, MarkerDrawing, DrawingColor } from "@/lib/drawings";
 import { listTvStrategies, getTvStrategy, type TvStrategyLayers, type TradePlan } from "@/lib/tvStrategies";
 import { TradeZonesPrimitive, type TradeZonesData, type TradeZoneBand, type TradeZoneLevel } from "./tradeZonesPrimitive";
 import { TradeReasonsPrimitive, type TradeReasonLabel } from "./tradeReasonsPrimitive";
+import { RegressionChannelPrimitive, type RegressionChannelData, type RegressionChannelPoint } from "./regressionChannelPrimitive";
 
 interface LightweightChartProps {
   candles: Candle[];
@@ -35,6 +36,8 @@ interface LightweightChartProps {
   code?: string;
   fq?: "qfq" | "hfq";
   drawings?: ChartDrawing[];
+  /** 回归通道数据（来自诊断管线 technical.trendChannel，与 /scanner 展开评估同口径）。 */
+  trendChannel?: TechnicalAssessment["trendChannel"] | null;
   /** 初始策略图层 id（如从 ?layer= 进入时自动叠加 TV 复刻策略，""=关闭）。 */
   initialTvStrategyId?: string;
   /** 引擎控件插槽：父级「图表引擎 / 买卖引擎」控件渲染进工具栏首行，与策略图层/回放同处一行，省出一行高度。 */
@@ -201,7 +204,7 @@ function buildTradeZones(plan: TradePlan, anchorTime: Time): TradeZonesData {
   return { anchorTime, bands, levels };
 }
 
-export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], initialTvStrategyId = "", engineSlot }: LightweightChartProps) {
+export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], trendChannel, initialTvStrategyId = "", engineSlot }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -222,6 +225,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [indRsi, setIndRsi] = useState(true);
   const [indKdj, setIndKdj] = useState(true);
   const [showBoll, setShowBoll] = useState(true);
+  // 回归通道（与 /scanner 展开评估同口径）默认开启，可单独关闭。
+  const [showChannel, setShowChannel] = useState(true);
   const [showResonance, setShowResonance] = useState(true);
   // 通用形态标记（顶背离/底背离/天量/地量）默认开启，可单独关闭。
   const [showPatterns, setShowPatterns] = useState(true);
@@ -256,6 +261,36 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const rsi = useMemo(() => computeRSI(candles), [candles]);
   const kdj = useMemo(() => computeKDJ(candles), [candles]);
   const boll = useMemo(() => computeBOLL(candles), [candles]);
+  // 回归通道绘制数据：以 technical.trendChannel（最近 60 日收盘价线性回归 + 标准差上下轨）为源，
+  // 沿最近 N 根 K 线还原三轨斜线，口径与经典 SVG（QuantChart）/scanner 评估完全一致：
+  // 周/月线 channelLen=12、日内不展示；slope 按 1W×5 / 1M×20 折算到对应周期每根的位移。
+  const channelData = useMemo<RegressionChannelData | null>(() => {
+    if (!trendChannel || intraday) return null;
+    const len = candles.length;
+    if (len < 2) return null;
+    const { slope, upperLine, lowerLine, midLine, type } = trendChannel;
+    const weekly = period === "1W";
+    const monthly = period === "1M";
+    const channelLen = Math.min(len, weekly || monthly ? 12 : 60);
+    const startIndex = len - channelLen;
+    const upperDiff = upperLine - midLine;
+    const lowerDiff = midLine - lowerLine;
+    const factor = weekly ? 5 : monthly ? 20 : 1;
+    const points: RegressionChannelPoint[] = [];
+    for (let i = startIndex; i < len; i++) {
+      const offset = len - 1 - i;
+      const midVal = midLine - slope * offset * factor;
+      points.push({ time: toTime(candles[i].date), upper: midVal + upperDiff, mid: midVal, lower: midVal - lowerDiff });
+    }
+    if (points.length < 2) return null;
+    const up = type === "up"; // 上行通道红、其余（down/range）绿，与经典 SVG 同色口径
+    return {
+      points,
+      areaFill: up ? "rgba(239,68,68,0.08)" : "rgba(16,185,129,0.08)",
+      upperStroke: up ? "rgba(239,68,68,0.22)" : "rgba(16,185,129,0.18)",
+      lowerStroke: up ? "rgba(239,68,68,0.18)" : "rgba(16,185,129,0.22)",
+    };
+  }, [trendChannel, intraday, period, candles, toTime]);
   const resonance = useMemo(() => computeResonance(candles, macd, rsi, kdj, boll), [candles, macd, rsi, kdj, boll]);
   const resoByDate = useMemo(() => {
     const m = new Map<string, (typeof resonance)[number]>();
@@ -540,6 +575,12 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       mk((b) => b.lower, false);
     }
 
+    // 回归通道（与 /scanner 展开评估、经典 SVG 同口径）：以自定义 primitive 在主图底层
+    // 绘制半透明轨间填充 + 上/下/中三轨斜线，挂在 K 线序列上随平移/缩放自动重绘。
+    if (showChannel && channelData) {
+      candleSeries.attachPrimitive(new RegressionChannelPrimitive(channelData));
+    }
+
     // 策略图层：TradingView 复刻策略叠加（方向线，A 股配色多头红/空头绿，翻转处断开；翻多/翻空标记在 paint 中统一打）
     if (tvLayers) {
       // 双线着色（多头红 / 空头绿）：各自只在对应方向上有值、其余置空白。
@@ -708,7 +749,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     // 故意不依赖 viewCandles：回放游标变化由下方数据层处理，避免重建图表导致闪烁。
     // 故意不依赖 maOn：MA 勾选只切换序列可见性（见下方独立 effect），不重建图表，避免布局被重置。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, macd, rsi, kdj, boll, resoByDate, showBoll, indMacd, indRsi, indKdj, yScaleMode, intraday, drawings, toTime, paint, tvLayers, tradeReasonLabels, showTradeReasons]);
+  }, [candles, macd, rsi, kdj, boll, resoByDate, showBoll, showChannel, channelData, indMacd, indRsi, indKdj, yScaleMode, intraday, drawings, toTime, paint, tvLayers, tradeReasonLabels, showTradeReasons]);
 
   // MA 勾选切换：仅改对应序列可见性，不触发图表重建（避免缩放/平移/时间位置被重置）。
   useEffect(() => {
@@ -762,6 +803,13 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           <label className="flex items-center gap-1 cursor-pointer hover:text-[var(--text)]">
             <input type="checkbox" checked={showBoll} onChange={(e) => setShowBoll(e.target.checked)} className="rounded-[1px] accent-[var(--accent)]" />
             BOLL
+          </label>
+          <label
+            className={`flex items-center gap-1 ${trendChannel && !intraday ? "cursor-pointer hover:text-[var(--text)]" : "opacity-40 cursor-not-allowed"}`}
+            title={trendChannel ? (intraday ? "回归通道仅在日/周/月 K 显示（基于日线回归）" : "回归通道：与 /scanner 展开评估同口径（最近 60 日线性回归 + 标准差上下轨）") : "暂无回归通道数据（诊断管线未返回 trendChannel）"}
+          >
+            <input type="checkbox" checked={showChannel} disabled={!trendChannel || intraday} onChange={(e) => setShowChannel(e.target.checked)} className="rounded-[1px] accent-[var(--accent)]" />
+            回归通道
           </label>
         </div>
 

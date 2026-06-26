@@ -14,6 +14,10 @@
 
 ---
 
+## 🆕 v0.53.8 亮点
+
+*   **`/chart` Pro 视图新增「回归通道」图形渲染——与 `/scanner` 展开评估、经典 SVG 同口径**：此前在 `/scanner` 一键扫描热门股池、展开评估时能看到回归通道图形（QuantChart 经典 SVG 渲染），但切到 `/chart` 的 Pro 视图（基于 lightweight-charts 的画布）却没有这条通道。本版新建 lightweight-charts v5 自定义 **series primitive**（`src/components/regressionChannelPrimitive.ts`），在 Pro 画布上沿最近 N 根 K 线还原上轨/中轨/下轨三条斜线 + 轨间半透明填充带（内置 LineSeries/AreaSeries 无法表达「两条斜线之间的填充带」，故用官方 primitive 接口直接绘制，挂在 K 线序列上随平移/缩放自动重绘、zOrder `bottom` 不遮挡蜡烛）；数据源为诊断管线返回的 `technical.trendChannel`，配色/虚线/中轨淡线与经典 SVG 逐一对齐；工具栏新增「回归通道」勾选框（默认开启，盘中分时或无通道数据时禁用并给出提示）。**不改任何回归通道的计算/拟合/口径，纯属把已有数据补渲到 Pro 画布。**
+
 ## 🆕 v0.53.7 亮点
 
 *   **`/scanner` 性能修复：全局 LLM 在途并发闸 + 每行缓存命中指示——稳定批量扫描耗时**：批量诊断时单只耗时此前从 22s 一路恶化到 11.6min 且「越扫越久」，根因是 `/api/analyze` 每只（缓存未命中）要串行跑 5 次大模型调用（主推理 + 自洽投票×2 + Critic + Judge），而前端默认并发 5 只 → 峰值约 25 个请求同时砸向同一个大模型 API，而 `llm.ts` 此前**对模型调用没有任何并发上限**。本版新增**全局大模型在途并发闸**（`src/lib/llmGate.ts`，priority-aware 信号量，默认上限 6、可用 `LLM_MAX_CONCURRENCY` 覆盖，按 `requestContext.priority` 出队，单股交互请求不被批量饿死），把「25 个互相拖慢」收敛为「至多 N 个稳定在途」；并在 `/scanner` 每行新增**缓存命中指示**徽标（「⚡ 缓存命中 Xs」/「⧗ 全量推理 Xmin」+ 实际耗时），让用户一眼区分快/慢成因。**不改任何提示词 / 管线步骤（主推理 + 自洽投票×2 + Critic + Judge 完整保留）/ 打分口径 / 缓存策略 / 东财限流，对最终诊断结果无任何影响。**

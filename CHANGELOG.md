@@ -4,6 +4,27 @@
 
 ---
 
+## [0.53.8] - 2026-06-26
+
+> **`/chart` Pro 视图新增「回归通道」图形渲染——与 `/scanner` 展开评估、经典 SVG 同口径**。背景：用户在 `/scanner` 一键扫描热门股池、展开评估时能看到回归通道图形（QuantChart 经典 SVG 渲染），但切到 `/chart` 的 Pro 视图（基于 lightweight-charts 的画布）却没有这条通道。本版把回归通道补到 Pro 画布，**不改任何回归通道的计算/口径/算法**，只新增渲染层。
+
+### 新增
+- `src/components/regressionChannelPrimitive.ts`：新建 lightweight-charts v5 自定义 **series primitive**（`RegressionChannelPrimitive`），在 Pro 画布上绘制回归通道——沿最近 N 根 K 线还原上轨/中轨/下轨三条斜线 + 轨间半透明填充带。lightweight-charts 内置的 LineSeries/AreaSeries 无法表达「两条斜线之间的填充带」，故用官方 primitive 接口直接在画布绘制；坐标用 media 空间（`useMediaCoordinateSpace` + `priceToCoordinate` / `timeToCoordinate`），挂在 K 线序列上随平移/缩放自动重绘，zOrder `bottom` 画在蜡烛之下不遮挡。
+- `src/components/LightweightChart.tsx`：新增 `trendChannel` 入参与 `showChannel` 开关（默认开启），按当前周期（日/周/月）从 `technical.trendChannel` 还原通道点位并 attach primitive；工具栏新增「回归通道」勾选框（盘中分时或无 `trendChannel` 数据时禁用并给出提示）。
+- `src/app/chart/page.tsx`：把诊断管线返回的 `data.quant.technical?.trendChannel` 作为 `trendChannel` 入参传给 `<LightweightChart>`。
+
+### 口径对齐（与经典 SVG / `/scanner` 评估完全一致）
+- 上行通道（`type === "up"`）红系：填充 `rgba(239,68,68,0.08)`、上轨 `rgba(239,68,68,0.22)`、下轨 `rgba(239,68,68,0.18)`；其余（down/range）绿系：填充 `rgba(16,185,129,0.08)`、上轨 `rgba(16,185,129,0.18)`、下轨 `rgba(16,185,129,0.22)`。
+- 上/下轨虚线 dash `2 3`；中轨更淡点线 dash `1 4`、opacity 0.5、色跟随主题 `--faint`——与 QuantChart SVG 渲染逐一对齐。
+
+### 不改动
+- 回归通道的计算/拟合/口径（`technical.trendChannel`：最近 60 日线性回归 + 标准差上下轨）、诊断管线、东财取数与限流均保持原样。本版纯属把已有数据补渲到 Pro 画布。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint` 0 error（21 项既有 warning 不变）。
+
+---
+
 ## [0.53.7] - 2026-06-26
 
 > **`/scanner` 性能修复：全局 LLM 在途并发闸 + 每行缓存命中指示——稳定批量扫描耗时**。背景：用户在 `/scanner` 批量诊断时观察到单只耗时从 22s 一路恶化到 11.6min、且「越扫越久」。根因有二：① `/api/analyze` 诊断管线缓存未命中时每只要串行跑 5 次大模型调用（主推理 + 自洽投票×2 + Critic 批判 + Judge 裁判），而前端 worker-pool 默认并发 5 只 → 峰值约 **25 个请求同时砸向同一个大模型 API**，此前 `llm.ts` 对模型调用**没有任何并发上限**，全部直接发出 → 模型侧排队/限流让每个调用都变慢、尾延迟滚雪球；② 命中静态层缓存（秒级回放）与未命中（全量管线）耗时本就差 10~20 倍，但 UI 不展示，用户无从判断「为何差异这么大」。本版**不改任何提示词/管线步骤/打分口径**，只加一道全局在途并发闸 + 一个每行缓存指示。
