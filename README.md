@@ -14,6 +14,10 @@
 
 ---
 
+## 🆕 v0.53.9 亮点
+
+*   **`/mining` 新增「下轨支撑」过滤条件——上升趋势中精准捕捉高抛低吸切入点**：此前挖掘只能勾「必须上升通道」，但上升通道里现价也可能正贴上轨（追高风险）。本版叠加「必须下轨支撑」：在**上升通道**基础上进一步要求**现价贴近回归通道下轨**（在通道内纵向位置 ≤ 通道宽该百分比、默认 35%）**且未跌破下轨**，专门筛出「上升趋势 + 当前回踩下轨」的低吸切入点。筛选区新增勾选框与「贴近下轨阈值（% 通道宽）」可调输入；命中股票在信号里标「下轨支撑」，执行计划/未命中原因均回显本条件。**不改回归通道任何计算/拟合口径，仅在已有 `technical.trendChannel` 数据上新增一条筛选维度（`MiningResult.channelPosition` 归一化纵向位置 + `requireLowerBandSupport`/`lowerBandPct` 过滤）。**
+
 ## 🆕 v0.53.8 亮点
 
 *   **`/chart` Pro 视图新增「回归通道」图形渲染——与 `/scanner` 展开评估、经典 SVG 同口径**：此前在 `/scanner` 一键扫描热门股池、展开评估时能看到回归通道图形（QuantChart 经典 SVG 渲染），但切到 `/chart` 的 Pro 视图（基于 lightweight-charts 的画布）却没有这条通道。本版新建 lightweight-charts v5 自定义 **series primitive**（`src/components/regressionChannelPrimitive.ts`），在 Pro 画布上沿最近 N 根 K 线还原上轨/中轨/下轨三条斜线 + 轨间半透明填充带（内置 LineSeries/AreaSeries 无法表达「两条斜线之间的填充带」，故用官方 primitive 接口直接绘制，挂在 K 线序列上随平移/缩放自动重绘、zOrder `bottom` 不遮挡蜡烛）；数据源为诊断管线返回的 `technical.trendChannel`，配色/虚线/中轨淡线与经典 SVG 逐一对齐；工具栏新增「回归通道」勾选框（默认开启，盘中分时或无通道数据时禁用并给出提示）。**不改任何回归通道的计算/拟合/口径，纯属把已有数据补渲到 Pro 画布。**

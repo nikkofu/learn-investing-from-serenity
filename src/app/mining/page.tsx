@@ -42,6 +42,7 @@ interface MiningResult {
   channelType: "up" | "down" | "range";
   channelSlopePct: number;
   channelStatus: "inside" | "breakout" | "breakdown";
+  channelPosition: number;
   rangePosition: number;
   reboundOffLowPct: number;
   expectedReturnBase: number;
@@ -136,6 +137,8 @@ export default function MiningPage() {
   const [minScore, setMinScore] = useState(60);
   const [minExpectedReturn, setMinExpectedReturn] = useState("0");
   const [requireUptrend, setRequireUptrend] = useState(true);
+  const [requireLowerBandSupport, setRequireLowerBandSupport] = useState(false);
+  const [lowerBandPct, setLowerBandPct] = useState<string>("35"); // 现价距下轨 ≤ 通道宽该百分比
   const [requireBSignal, setRequireBSignal] = useState(true);
   const [maxBSignalDays, setMaxBSignalDays] = useState<string>(""); // "" = 不限
 
@@ -197,6 +200,11 @@ export default function MiningPage() {
       requireUptrend,
       requireBSignal,
     };
+    if (requireLowerBandSupport) {
+      f.requireLowerBandSupport = true;
+      const pct = Number(lowerBandPct);
+      if (Number.isFinite(pct) && pct > 0) f.lowerBandPct = pct / 100;
+    }
     if (maxBSignalDays !== "") f.maxBSignalAgeDays = Number(maxBSignalDays);
     return f;
   }
@@ -243,6 +251,8 @@ export default function MiningPage() {
         if (f.minScore != null) fp.push(`最低复合分≥${f.minScore}`);
         if (f.minExpectedReturn != null) fp.push(`最低预期收益≥${f.minExpectedReturn}%`);
         if (f.requireUptrend) fp.push("必须上升通道");
+        if (f.requireLowerBandSupport)
+          fp.push(`必须下轨支撑（上升通道+贴近下轨≤${Math.round((Number(f.lowerBandPct) || 0.35) * 100)}%通道宽且未跌破）`);
         if (f.requireBSignal) fp.push("必须有 B 买入信号");
         if (f.maxBSignalAgeDays != null) fp.push(`B 新鲜度≤${f.maxBSignalAgeDays} 交易日`);
         pushLog("info", `  筛选条件（第二段漏斗）：${fp.length ? fp.join("，") : "无（全部返回）"}`);
@@ -293,6 +303,8 @@ export default function MiningPage() {
         if (f.minScore != null) fp.push(`最低复合分≥${f.minScore}`);
         if (f.minExpectedReturn != null) fp.push(`最低预期收益≥${f.minExpectedReturn}%`);
         if (f.requireUptrend) fp.push(`必须上升通道`);
+        if (f.requireLowerBandSupport)
+          fp.push(`必须下轨支撑（上升通道+贴近下轨≤${Math.round((Number(f.lowerBandPct) || 0.35) * 100)}%通道宽且未跌破）`);
         if (f.requireBSignal) fp.push(`必须有 B 买入信号`);
         if (f.maxBSignalAgeDays != null) fp.push(`B 新鲜度≤${f.maxBSignalAgeDays} 交易日`);
         pushLog("info", `  筛选条件：${fp.length ? fp.join("，") : "无（全部返回）"}`);
@@ -341,6 +353,7 @@ export default function MiningPage() {
           minScore: "复合分不足",
           minExpectedReturn: "预期收益不足",
           requireUptrend: "非上升通道",
+          requireLowerBandSupport: "未贴近下轨支撑",
           requireBSignal: "无 B 买入信号",
           bSignalMissing: "无 B 买入信号",
           bSignalStale: "B 信号过期",
@@ -770,6 +783,28 @@ export default function MiningPage() {
             <input type="checkbox" checked={requireUptrend} onChange={(e) => setRequireUptrend(e.target.checked)} />
             <span>必须上升通道</span>
           </label>
+          <label className="flex items-center gap-2 text-xs" title="上升通道 + 现价贴近回归通道下轨（≤通道宽该百分比）且未跌破下轨，用于高抛低吸切入点">
+            <input
+              type="checkbox"
+              checked={requireLowerBandSupport}
+              onChange={(e) => setRequireLowerBandSupport(e.target.checked)}
+            />
+            <span>必须下轨支撑</span>
+          </label>
+          {requireLowerBandSupport && (
+            <label className="flex items-center gap-1.5 text-xs">
+              <span className="text-[var(--muted)]">贴近下轨阈值</span>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={lowerBandPct}
+                onChange={(e) => setLowerBandPct(e.target.value)}
+                className="w-16 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
+              />
+              <span className="text-[var(--faint)]">% 通道宽</span>
+            </label>
+          )}
           <label className="flex items-center gap-2 text-xs">
             <input type="checkbox" checked={requireBSignal} onChange={(e) => setRequireBSignal(e.target.checked)} />
             <span>必须有 B 买入信号</span>

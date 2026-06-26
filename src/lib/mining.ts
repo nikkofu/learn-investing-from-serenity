@@ -82,6 +82,8 @@ export interface MiningResult {
   /** 相对斜率（%/日），正=上行。 */
   channelSlopePct: number;
   channelStatus: "inside" | "breakout" | "breakdown";
+  /** 现价在回归通道内的纵向位置 0(下轨)–1(上轨)，用于「下轨支撑」判定。 */
+  channelPosition: number;
   /** 现价在回看区间内的位置 0(底)–1(顶)。 */
   rangePosition: number;
   /** 现价较近 60 日最低价的反弹幅度 %。 */
@@ -316,9 +318,21 @@ export function evaluateMiningSignal(
   const stopLoss = safe(tech.actionAdvice.stopLoss, price * 0.92);
   const riskReward = price - stopLoss > 0 ? Number(((target - price) / (price - stopLoss)).toFixed(2)) : 0;
 
+  // 现价在回归通道内的纵向位置：0=贴下轨，1=贴上轨。通道宽=上轨-下轨（=3×标准差，恒>0）。
+  const chWidth = tech.trendChannel.upperLine - tech.trendChannel.lowerLine;
+  const channelPosition =
+    chWidth > 0 ? clamp((price - tech.trendChannel.lowerLine) / chWidth, 0, 1) : 0.5;
+
   const matched: string[] = [];
   if (subScores.bottom >= 60) matched.push("底部企稳");
   if (uptrend.score >= 60 && tech.trendChannel.type === "up") matched.push("上升通道");
+  // 「下轨支撑」：上升通道 + 现价贴近下轨（≤通道宽 DEFAULT_LOWER_BAND_PCT）且未跌破下轨——高抛低吸切入点。
+  if (
+    tech.trendChannel.type === "up" &&
+    tech.trendChannel.status !== "breakdown" &&
+    channelPosition <= DEFAULT_LOWER_BAND_PCT
+  )
+    matched.push("下轨支撑");
   // 仅在非下降通道时把「上轨突破」视为利多信号（下降通道里的线性回归上穿多为拟合假象）。
   if (tech.trendChannel.status === "breakout" && tech.trendChannel.type !== "down") matched.push("通道突破");
   if (bSig.hasBuySignal) matched.push("B 买入信号");
@@ -341,6 +355,7 @@ export function evaluateMiningSignal(
     channelType: tech.trendChannel.type,
     channelSlopePct: uptrend.slopePct,
     channelStatus: tech.trendChannel.status,
+    channelPosition: Number(channelPosition.toFixed(2)),
     rangePosition: Number(bottom.rangePos.toFixed(2)),
     reboundOffLowPct: bottom.reboundPct,
     expectedReturnBase,
@@ -357,10 +372,20 @@ export function evaluateMiningSignal(
   };
 }
 
+/** 「下轨支撑」默认阈值：现价距回归通道下轨 ≤ 通道宽度该占比时视为贴近下轨（0=下轨，1=上轨）。 */
+export const DEFAULT_LOWER_BAND_PCT = 0.35;
+
 export interface MiningFilters {
   minScore?: number; // 最低复合分
   minExpectedReturn?: number; // 最低基准预期收益 %
   requireUptrend?: boolean; // 必须上升通道
+  /**
+   * 必须「回归通道下轨支撑」：上升通道 + 现价贴近下轨（≤ lowerBandPct 通道宽）且未跌破下轨。
+   * 用于在上升趋势中寻找高抛低吸切入点；勾选后已隐含「必须上升通道」。
+   */
+  requireLowerBandSupport?: boolean;
+  /** 「贴近下轨」阈值：现价在通道内纵向位置 ≤ 该值（0=下轨，1=上轨）。缺省 DEFAULT_LOWER_BAND_PCT。 */
+  lowerBandPct?: number;
   requireBSignal?: boolean; // 必须有未平仓 B 买入信号
   /** B 信号「新鲜度」上限（交易日）：仅保留距今 ≤ 该值的刚发出信号。0=仅当日，1=当日/隔日。 */
   maxBSignalAgeDays?: number;
@@ -376,6 +401,7 @@ export type RejectReason =
   | "minScore"
   | "minExpectedReturn"
   | "requireUptrend"
+  | "requireLowerBandSupport"
   | "requireBSignal"
   | "bSignalMissing"
   | "bSignalStale";
@@ -389,6 +415,12 @@ export function rejectReason(r: MiningResult, f: MiningFilters): RejectReason | 
   if (f.minScore != null && r.score < f.minScore) return "minScore";
   if (f.minExpectedReturn != null && r.expectedReturnBase < f.minExpectedReturn) return "minExpectedReturn";
   if (f.requireUptrend && r.channelType !== "up") return "requireUptrend";
+  // 下轨支撑：上升通道 + 未跌破下轨 + 现价贴近下轨（纵向位置 ≤ 阈值）。任一不满足即卡掉。
+  if (f.requireLowerBandSupport) {
+    const thr = f.lowerBandPct ?? DEFAULT_LOWER_BAND_PCT;
+    const ok = r.channelType === "up" && r.channelStatus !== "breakdown" && r.channelPosition <= thr;
+    if (!ok) return "requireLowerBandSupport";
+  }
   if (f.requireBSignal && !r.hasBuySignal) return "requireBSignal";
   // 「刚发出」过滤：必须有未平仓 B 信号，且其形成距今不超过 maxBSignalAgeDays 个交易日。
   if (f.maxBSignalAgeDays != null) {
