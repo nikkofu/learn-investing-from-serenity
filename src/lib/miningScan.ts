@@ -183,7 +183,9 @@ export function applyPrefilter(
  * 默认沪深主板 + 创业板、剔除科创板/北交所，ST/*ST/退/B 股再由 filterUniverse 统一剔除。
  * 逐页拉取（统一 clist 兜底+限流）。
  */
-async function fetchFullUniverse(): Promise<MiningCandidate[]> {
+async function fetchFullUniverse(
+  onPage?: (loaded: number, pages: number) => void,
+): Promise<MiningCandidate[]> {
   const fs = boardSegments(getUniverseConfig()).join(",");
 
   // 东财 clist 每页上限 100（push2delay 会把更大的 pz 截到 100），故必须翻页。
@@ -197,6 +199,9 @@ async function fetchFullUniverse(): Promise<MiningCandidate[]> {
     })) as unknown as ClistRow[];
     if (!diff || diff.length === 0) break;
     rows.push(...diff);
+    // 全市场全量需逐页串行限流拉取（约 50 页、数十秒），每页回调一次进度，
+    // 让前端「候选池拉取阶段」也有可见反馈，避免长时间「点了不动」。
+    onPage?.(rows.length, pn);
     if (diff.length < PAGE) break; // 最后一页
   }
 
@@ -257,7 +262,10 @@ function fillUnique(primary: MiningCandidate[], secondary: MiningCandidate[], ta
   return primary;
 }
 
-async function resolveUniverseRaw(body: MiningRequest): Promise<MiningCandidate[]> {
+async function resolveUniverseRaw(
+  body: MiningRequest,
+  onPage?: (loaded: number, pages: number) => void,
+): Promise<MiningCandidate[]> {
   const universe = body.universe || "hot";
   if (universe === "custom") {
     const codes = (body.codes ?? []).map((c) => c.trim()).filter((c) => /^\d{6}$/.test(c));
@@ -270,7 +278,7 @@ async function resolveUniverseRaw(body: MiningRequest): Promise<MiningCandidate[
     return enrichNames(codes);
   }
   if (universe === "full") {
-    return fetchFullUniverse();
+    return fetchFullUniverse(onPage);
   }
   if (universe === "broad") {
     const size = Math.max(20, Math.min(MAX_SIZE, body.size ?? 300));
@@ -290,8 +298,11 @@ async function resolveUniverseRaw(body: MiningRequest): Promise<MiningCandidate[
  * 口径由 /settings 持久化配置决定）。所有 universe 类型（含 custom/sector）都过滤，
  * 确保全站口径一致。
  */
-export async function resolveUniverse(body: MiningRequest): Promise<MiningCandidate[]> {
-  const raw = await resolveUniverseRaw(body);
+export async function resolveUniverse(
+  body: MiningRequest,
+  onPage?: (loaded: number, pages: number) => void,
+): Promise<MiningCandidate[]> {
+  const raw = await resolveUniverseRaw(body, onPage);
   return filterUniverse(raw);
 }
 
@@ -401,6 +412,7 @@ function demoStocks(): { cand: MiningCandidate; candles: Candle[] }[] {
 
 export type ScanEvent =
   | { type: "meta"; total: number; universe: string; concurrency: number; rawTotal?: number }
+  | { type: "universe"; loaded: number; pages: number }
   | { type: "result"; item: MiningResult }
   | {
       type: "progress";
@@ -447,7 +459,11 @@ export async function runMiningScan(
     candidates = stocks.map((s) => s.cand);
     for (const s of stocks) demoMap.set(s.cand.code, s.candles);
   } else {
-    candidates = await resolveUniverse(body);
+    // 候选池解析阶段（尤其 full 全市场逐页拉取）较耗时，逐页回报进度，
+    // 使前端在「开始扫描」前的等待期也有日志滚动，不再像「点了不动」。
+    candidates = await resolveUniverse(body, (loaded, pages) => {
+      onEvent?.({ type: "universe", loaded, pages });
+    });
   }
 
   // 去重

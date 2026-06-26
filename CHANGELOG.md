@@ -4,6 +4,21 @@
 
 ---
 
+## [0.52.1] - 2026-06-26
+
+> **修复：`/mining`「开始挖掘」全市场全量扫描点击后长时间无反馈（看起来「点了不动」、右侧日志与已扫描数都不动）**。根因：`/api/mining` 候选池解析阶段（`fetchFullUniverse` 逐页串行限流拉取全市场数十页）在拉取完成前不发任何事件，且前端 `startScan()` 点击后无即时日志（与 `generateDaily()` 不同），形成「双重静默」。
+
+### 修复
+- `src/app/mining/page.tsx`：`startScan()` 点击后立即输出「▶ 开始挖掘：正拉取候选池…」日志（全量场景额外提示「逐页串行限流拉取、约数分钟、下方持续显示进度」），与「生成今日股票池」对齐。
+- `src/lib/miningScan.ts`：`fetchFullUniverse()` / `resolveUniverse()` 新增逐页进度回调，`runMiningScan` 在候选池解析阶段每翻一页向客户端推送 `{ type: "universe", loaded, pages }` 事件。
+- `src/app/mining/page.tsx`：`consumeStream` 新增 `universe` 事件处理，持续打印「拉取候选池中：已 N 只（第 M 页）」，使候选池拉取阶段有可见进度，消除「点了不动」观感。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint`（改动件）0 error（21 项既有 warning 不变）。
+- 隧道实测 `/api/mining`（universe=full）：点击后即时流式输出 `universe` 进度事件（第 1→7 页持续递增），不再长时间静默。
+
+---
+
 ## [0.52.0] - 2026-06-26
 
 > **性能架构：东财请求公平调度器（`FairScheduler`）替代全局 FIFO 链**。修复「一个标签页跑 `/scanner` 批量诊断时，另一个标签页在 `/mining` 点『生成今日股票池』点了不动」的并发争用问题。根因：全进程所有东财请求都串在唯一一条全局 FIFO Promise 链（单并发 + 最小间隔 1s 防封 IP）上，批量任务把链占满后交互任务被饿死（队头阻塞 / starvation）。本方案在**完全保持对东财实际速率不变**（不增封 IP 风险）的前提下，仅改「出队顺序」：优先级分层 + 同层泳道 round-robin，让低频高优的交互请求抢先、批量任务之间公平轮转。**不改任何业务计算口径、零新增运行时依赖。**

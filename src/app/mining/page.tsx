@@ -191,6 +191,10 @@ export default function MiningPage() {
       const type = ev.type as string;
       if (type === "accepted") {
         pushLog("info", `· ${String(ev.message ?? "已受理")}`);
+      } else if (type === "universe") {
+        const loaded = Number(ev.loaded) || 0;
+        const pages = Number(ev.pages) || 0;
+        pushLog("debug", `· 拉取候选池中：已 ${loaded} 只（第 ${pages} 页）`);
       } else if (type === "meta") {
         const total = Number(ev.total) || 0;
         setProgress((p) => ({ ...p, total }));
@@ -242,6 +246,12 @@ export default function MiningPage() {
     resetRun();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    pushLog(
+      "info",
+      universe === "full"
+        ? `▶ 开始挖掘：正拉取「${UNIVERSE_LABELS[universe]}」候选池…全量需逐页串行限流拉取（约数分钟），下方会持续显示拉取进度，请耐心等待`
+        : `▶ 开始挖掘：正拉取「${UNIVERSE_LABELS[universe]}」候选池…`,
+    );
 
     const payload = {
       universe,
