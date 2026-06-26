@@ -128,6 +128,11 @@ export default function MiningPage() {
   const [concurrency, setConcurrency] = useState("16");
   const [retries, setRetries] = useState("3");
 
+  // 粗筛口径（两段漏斗第 1 段）：原为服务端隐藏默认值（≥1 亿成交额、取前 800 只），
+  // 现提到前端可调并随 payload 传给 /api/mining；仅对 full/broad 全市场场景生效。
+  const [minAmountYi, setMinAmountYi] = useState("1"); // 亿元
+  const [maxCandidates, setMaxCandidates] = useState("800");
+
   const [minScore, setMinScore] = useState(60);
   const [minExpectedReturn, setMinExpectedReturn] = useState("0");
   const [requireUptrend, setRequireUptrend] = useState(true);
@@ -170,6 +175,21 @@ export default function MiningPage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [logs]);
 
+  /** 一键复制完整运行报告（含执行前条件、逐页进度、命中/异常、用时），便于把上下文+问题一起反馈。 */
+  async function copyReport() {
+    if (logs.length === 0) {
+      pushLog("warn", "暂无日志可复制");
+      return;
+    }
+    const text = logs.map((l) => `${l.t} ${l.msg}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      pushLog("success", `📋 已复制运行报告到剪贴板（${logs.length} 行）`);
+    } catch {
+      pushLog("error", "✗ 复制失败：浏览器拒绝剪贴板访问（请手动选择日志复制）");
+    }
+  }
+
   function buildFilters(): Record<string, unknown> {
     const f: Record<string, unknown> = {
       minScore,
@@ -198,6 +218,56 @@ export default function MiningPage() {
       const type = ev.type as string;
       if (type === "accepted") {
         pushLog("info", `· ${String(ev.message ?? "已受理")}`);
+      } else if (type === "plan") {
+        // 执行前回显本次任务的全部生效条件（板块范围 / 粗筛口径 / 筛选 / 策略 / 并发·重试 / 翻页上限）。
+        pushLog("info", "◆ 执行计划（本次任务全部生效条件，执行前回显）");
+        const boards = (ev.boards as string[]) ?? [];
+        const excluded = (ev.excluded as string[]) ?? [];
+        pushLog(
+          "info",
+          `  板块范围：${boards.join("+") || "—"}${excluded.length ? `（剔除 ${excluded.join("/")}）` : ""}`,
+        );
+        const pf = (ev.prefilter ?? null) as Record<string, unknown> | null;
+        if (pf) {
+          const pp: string[] = [];
+          if (pf.minAmount != null) pp.push(`最低成交额≥${(Number(pf.minAmount) / 1e8).toFixed(2)}亿`);
+          if (pf.minTurnover != null) pp.push(`最低换手≥${pf.minTurnover}%`);
+          if (pf.minVolumeRatio != null) pp.push(`最低量比≥${pf.minVolumeRatio}`);
+          if (pf.maxCandidates != null) pp.push(`取前 ${pf.maxCandidates} 只（按成交额倒序）`);
+          pushLog("info", `  粗筛口径（第一段漏斗）：${pp.length ? pp.join("，") : "无"}`);
+        } else {
+          pushLog("info", "  粗筛口径（第一段漏斗）：无（逐只评估全部候选）");
+        }
+        const f = (ev.filters ?? {}) as Record<string, unknown>;
+        const fp: string[] = [];
+        if (f.minScore != null) fp.push(`最低复合分≥${f.minScore}`);
+        if (f.minExpectedReturn != null) fp.push(`最低预期收益≥${f.minExpectedReturn}%`);
+        if (f.requireUptrend) fp.push("必须上升通道");
+        if (f.requireBSignal) fp.push("必须有 B 买入信号");
+        if (f.maxBSignalAgeDays != null) fp.push(`B 新鲜度≤${f.maxBSignalAgeDays} 交易日`);
+        pushLog("info", `  筛选条件（第二段漏斗）：${fp.length ? fp.join("，") : "无（全部返回）"}`);
+        if (ev.strategyName) pushLog("info", `  买卖策略（B 信号源）：${String(ev.strategyName)}`);
+        pushLog(
+          "info",
+          `  并发 ${ev.concurrency ?? ""} · 失败重试 ${ev.retries ?? ""} 次${ev.maxPages != null ? ` · 候选池翻页上限 ${ev.maxPages} 页` : ""}`,
+        );
+      } else if (type === "earlyStop") {
+        const qualified = Number(ev.qualified) || 0;
+        const pages = Number(ev.pages) || 0;
+        const cap = ev.cap != null ? Number(ev.cap) : undefined;
+        const maxPages = Number(ev.maxPages) || 0;
+        const skipped = Math.max(0, maxPages - pages);
+        if (ev.reason === "capReached") {
+          pushLog(
+            "success",
+            `✓ 已集齐 top-${cap ?? qualified} 只（第 ${pages} 页），提前终止翻页：跳过后续约 ${skipped} 页低成交额票，零遗漏（clist 按成交额倒序，后续页不可能再进入结果）`,
+          );
+        } else {
+          pushLog(
+            "success",
+            `✓ 第 ${pages} 页末行成交额已跌破最低阈值，提前终止翻页：跳过后续约 ${skipped} 页，零遗漏`,
+          );
+        }
       } else if (type === "universe") {
         const loaded = Number(ev.loaded) || 0;
         const pages = Number(ev.pages) || 0;
@@ -318,10 +388,15 @@ export default function MiningPage() {
       retries: Number(retries) || 3,
       filters: buildFilters(),
       strategyId: strategyId || undefined,
+      // 粗筛口径仅对 full/broad 生效；其余股票池无粗筛默认，不传。
+      prefilter:
+        universe === "full" || universe === "broad"
+          ? {
+              minAmount: Math.max(0, Number(minAmountYi) || 0) * 1e8,
+              maxCandidates: Number(maxCandidates) > 0 ? Number(maxCandidates) : undefined,
+            }
+          : undefined,
     };
-    if (selectedStrategy) {
-      pushLog("info", `• 买卖策略（B 信号源）：${selectedStrategy.name} v${selectedStrategy.version}`);
-    }
 
     try {
       const res = await fetch("/api/mining", {
@@ -656,7 +731,39 @@ export default function MiningPage() {
               className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm"
             />
           </label>
+
+          {(universe === "full" || universe === "broad") && (
+            <>
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-[var(--muted)]">粗筛·最低成交额（亿元，第一段漏斗）</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.1"
+                  value={minAmountYi}
+                  onChange={(e) => setMinAmountYi(e.target.value)}
+                  className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-[var(--muted)]">粗筛·取前 N 只（按成交额倒序，1–8000）</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8000}
+                  value={maxCandidates}
+                  onChange={(e) => setMaxCandidates(e.target.value)}
+                  className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm"
+                />
+              </label>
+            </>
+          )}
         </div>
+        {(universe === "full" || universe === "broad") && (
+          <p className="mt-2 text-[11px] leading-relaxed text-[var(--faint)]">
+            粗筛口径（第一段漏斗）：候选池按成交额倒序，先用上述「最低成交额 + 取前 N 只」快速截断，再对幸存者逐只取 K 线评估信号，避免对几千只低流动性票做无谓回测。设最低成交额为 0 即不按成交额过滤。执行前会在右侧日志「执行计划」一并回显。
+          </p>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-4">
           <label className="flex items-center gap-2 text-xs">
@@ -836,6 +943,9 @@ export default function MiningPage() {
                 <span className="text-emerald-500">命中</span>
                 <span className="text-amber-500">跳过</span>
                 <span className="text-[var(--faint)]">未达</span>
+                <button onClick={copyReport} className="text-[var(--muted)] hover:text-[var(--text)]">
+                  复制报告
+                </button>
                 <button onClick={() => setLogs([])} className="text-[var(--muted)] hover:text-[var(--text)]">
                   清空
                 </button>

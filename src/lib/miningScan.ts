@@ -36,6 +36,17 @@ export interface UniverseProgress {
   onPage?: (loaded: number, pages: number) => void;
   /** 命中候选池快照缓存时回调一次（免去逐页重拉）。 */
   onCacheHit?: (loaded: number, pages: number, ageMs: number, phase: UniversePhase, ttlMs: number) => void;
+  /**
+   * 提前终止翻页时回调一次（已集齐 top-N，或整页末行成交额已跌破 minAmount）。
+   * 让前端显式告知用户「跳过了后续约 M 页低成交额票、零遗漏」，消除「是不是漏了」的疑虑。
+   */
+  onEarlyStop?: (
+    qualified: number,
+    pages: number,
+    cap: number | undefined,
+    maxPages: number,
+    reason: "capReached" | "amountBelowMin",
+  ) => void;
 }
 
 /** 给一个 Promise 套上超时上限（对标 SCS analyst-fallback：单只卡死不拖垮整批）。 */
@@ -104,6 +115,31 @@ export const DEFAULT_FULL_PREFILTER: Prefilter = {
 };
 
 export const MAX_SIZE = 5000;
+
+/** 候选池逐页拉取：每页 100 只（东财 clist 单页上限），最多翻 80 页（8000 只安全上限）。 */
+export const UNIVERSE_PAGE_SIZE = 100;
+export const UNIVERSE_MAX_PAGES = 80;
+
+/**
+ * 人类可读的「板块范围 + 剔除项」描述，供执行前 plan 事件回显：
+ * 让用户在拉候选池之前就清楚本次扫描覆盖哪些板块、剔除了什么（口径由设置页「股票池纯净化」决定）。
+ */
+export function describeUniverseScope(cfg: UniverseConfig = getUniverseConfig()): {
+  boards: string[];
+  excluded: string[];
+} {
+  const boards = ["沪深主板"];
+  if (!cfg.excludeChiNext) boards.push("创业板");
+  if (!cfg.excludeStar) boards.push("科创板");
+  if (!cfg.excludeBeijing) boards.push("北交所");
+  const excluded: string[] = [];
+  if (cfg.excludeStar) excluded.push("科创板");
+  if (cfg.excludeBeijing) excluded.push("北交所");
+  if (cfg.excludeChiNext) excluded.push("创业板");
+  if (cfg.excludeST) excluded.push("ST/*ST/退/PT");
+  if (cfg.excludeB) excluded.push("B 股");
+  return { boards, excluded };
+}
 
 function marketOfCode(code: string): "SH" | "SZ" | "BJ" {
   const h = code[0];
@@ -258,13 +294,14 @@ async function fetchFullUniverse(
   // 请求速率不变（仍单并发 + 最小 1s 限流 + 抖动），但总请求数从 ~50 页降到个位数，
   // 全程零额外封 IP 风险（请求更少 = 风险更低）。无粗筛口径（pf 为空）时不提前终止，
   // 仍拉完整全市场（complete=true，可被任意口径复用）。
-  const PAGE = 100;
-  const MAX_PAGES = 80; // 安全上限（8000 只），防止异常时无限翻页
+  const PAGE = UNIVERSE_PAGE_SIZE;
+  const MAX_PAGES = UNIVERSE_MAX_PAGES;
   const cap = pf?.maxCandidates;
   const rows: ClistRow[] = [];
   let pages = 0;
   let reachedEnd = false;
   let earlyStopped = false;
+  let earlyStopReason: "capReached" | "amountBelowMin" | null = null;
   const qualifiedSeen = new Set<string>();
   let qualified = 0;
   for (let pn = 1; pn <= MAX_PAGES; pn++) {
@@ -290,15 +327,17 @@ async function fetchFullUniverse(
         qualifiedSeen.add(code);
         qualified++;
       }
-      if (qualified >= cap) { earlyStopped = true; break; } // 已集齐 top-maxCandidates（按成交额）
+      if (qualified >= cap) { earlyStopped = true; earlyStopReason = "capReached"; break; } // 已集齐 top-maxCandidates（按成交额）
       if (pf?.minAmount != null && num(diff[diff.length - 1].f6) < pf.minAmount) {
         // 整页末行成交额已跌破 minAmount（clist 倒序，后续页只会更低）：即便不足
         // maxCandidates 只，后续也不可能再有过 minAmount 的票，可安全终止。
         earlyStopped = true;
+        earlyStopReason = "amountBelowMin";
         break;
       }
     }
   }
+  if (earlyStopped && earlyStopReason) prog?.onEarlyStop?.(qualified, pages, cap, MAX_PAGES, earlyStopReason);
 
   const seen = new Set<string>();
   const candidates = rows
@@ -522,6 +561,35 @@ function demoStocks(): { cand: MiningCandidate; candles: Candle[] }[] {
 
 export type ScanEvent =
   | {
+      /**
+       * 执行计划：在拉候选池之前最先发出，一次性回显本次扫描的全部生效条件（板块范围 /
+       * 粗筛口径 / 筛选条件 / 策略源 / 并发·重试 / 翻页上限），让用户在等待期即可核对，
+       * 而不是等候选池拉完（数分钟后）才看到。
+       */
+      type: "plan";
+      universe: string;
+      boards: string[];
+      excluded: string[];
+      prefilter?: Prefilter | null;
+      filters?: MiningFilters;
+      strategyId?: string;
+      strategyName?: string;
+      concurrency: number;
+      retries: number;
+      maxPages?: number;
+      size?: number;
+      sort?: string;
+    }
+  | {
+      /** 提前终止翻页：已集齐 top-N（capReached）或整页跌破 minAmount（amountBelowMin）。 */
+      type: "earlyStop";
+      qualified: number;
+      pages: number;
+      cap?: number;
+      maxPages: number;
+      reason: "capReached" | "amountBelowMin";
+    }
+  | {
       type: "meta";
       total: number;
       universe: string;
@@ -590,6 +658,32 @@ export async function runMiningScan(
     else if (body.universe === "full" || body.universe === "broad") pf = DEFAULT_FULL_PREFILTER;
   }
 
+  // 策略源在拉候选池之前先解析好，以便随 plan 事件执行前回显。
+  const strat = strategyId ? getStrategy(strategyId) : undefined;
+  const strategyName = strat ? `${strat.meta.name} v${strat.meta.version}` : undefined;
+
+  // 执行前先推一条 plan：在任何耗时拉取之前把本次扫描的全部生效条件（含服务端
+  // 默认的粗筛口径、板块范围、翻页上限等隐藏限制）一次性告知前端，让用户在等待期即可核对。
+  if (!isDemo) {
+    const scope = describeUniverseScope();
+    const u = body.universe || "hot";
+    onEvent?.({
+      type: "plan",
+      universe: u,
+      boards: scope.boards,
+      excluded: scope.excluded,
+      prefilter: pf,
+      filters,
+      strategyId,
+      strategyName,
+      concurrency,
+      retries,
+      maxPages: u === "full" ? UNIVERSE_MAX_PAGES : undefined,
+      size: u === "broad" ? (body.size ?? 300) : u === "hot" ? (body.size ?? 100) : undefined,
+      sort: u === "broad" ? (body.sort ?? "amount") : undefined,
+    });
+  }
+
   const demoMap = new Map<string, Candle[]>();
   let candidates: MiningCandidate[];
   if (isDemo) {
@@ -603,6 +697,8 @@ export async function runMiningScan(
       onPage: (loaded, pages) => onEvent?.({ type: "universe", loaded, pages }),
       onCacheHit: (loaded, pages, ageMs, phase, ttlMs) =>
         onEvent?.({ type: "universe", loaded, pages, cached: true, ageMs, phase, ttlMs }),
+      onEarlyStop: (qualified, pages, cap, maxPages, reason) =>
+        onEvent?.({ type: "earlyStop", qualified, pages, cap, maxPages, reason }),
     }, pf);
   }
 
@@ -618,8 +714,6 @@ export async function runMiningScan(
   const t0 = Date.now();
   const total = candidates.length;
   // 回显本次筛选+粗筛条件与策略源，便于排查（如 0 命中时核对阈值是否过严）。
-  const strat = strategyId ? getStrategy(strategyId) : undefined;
-  const strategyName = strat ? `${strat.meta.name} v${strat.meta.version}` : undefined;
   onEvent?.({
     type: "meta",
     total,

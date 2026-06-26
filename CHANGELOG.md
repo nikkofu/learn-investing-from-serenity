@@ -4,6 +4,27 @@
 
 ---
 
+## [0.53.3] - 2026-06-26
+
+> **条件可见化 Phase 1（仅 `/mining`）：把藏在服务端的执行参数在「执行前」一次性回显，并把粗筛口径提到页面可调**。背景：此前全市场全量扫描的粗筛口径（`DEFAULT_FULL_PREFILTER = { minAmount: 1e8（≥1 亿成交额）, maxCandidates: 800 }`）纯属服务端兜底默认——前端 payload 不带、UI 不显示、设置页也没有；用户只能在候选池拉完（数分钟后）才在 `meta` 事件里看到部分回显，导致「为什么只扫 800 只」「是不是漏了」无从自查。本版把全部生效条件在点击「开始挖掘」的第一时间（任何耗时拉取之前）推一条 `plan` 事件回显，并将粗筛口径做成表单可调。**不改任何挖掘评分算法、过滤口径、缓存策略与限流速率**——纯属「可见化 + 可配置」。
+
+### 新增
+- `src/lib/miningScan.ts`：新增 `plan` 事件（`ScanEvent` 变体），在 `resolveUniverse()` 拉候选池**之前**最先发出，一次性回显本次扫描的全部生效条件：板块范围（`boards` / `excluded`，由设置页「股票池纯净化」决定）、粗筛口径（`prefilter`）、筛选条件（`filters`）、策略源（`strategyId` / `strategyName`）、并发·重试、候选池翻页上限（`maxPages`）。
+- `src/lib/miningScan.ts`：新增 `earlyStop` 事件 + `UniverseProgress.onEarlyStop` 回调，候选池阶段触发「提前终止翻页」时显式告知前端（`capReached` 已集齐 top-N / `amountBelowMin` 整页跌破最低成交额），并附「跳过后续约 M 页、零遗漏」说明，消除「是不是漏了」的疑虑。
+- `src/lib/miningScan.ts`：导出 `UNIVERSE_PAGE_SIZE = 100`、`UNIVERSE_MAX_PAGES = 80` 常量与 `describeUniverseScope()`（人类可读的板块范围/剔除项描述）。
+- `src/app/mining/page.tsx`：表单新增可调粗筛口径——「最低成交额（亿元）」与「取前 N 只（1–8000）」两个输入框（仅 `full`/`broad` 全市场场景显示），随 payload 以 `prefilter` 传给 `/api/mining`，覆盖服务端默认；附口径说明（设最低成交额为 0 即不按成交额过滤）。
+- `src/app/mining/page.tsx`：日志面板新增「复制报告」按钮（`copyReport()`），一键复制完整运行报告（含执行前条件、逐页进度、命中/异常、用时）到剪贴板，便于把上下文 + 问题一起反馈。
+
+### 优化
+- `src/app/mining/page.tsx`：`consumeStream()` 新增 `plan` / `earlyStop` 事件处理——执行前打印「◆ 执行计划」块（板块范围 / 粗筛口径 / 筛选条件 / 买卖策略 / 并发·重试·翻页上限），提前终止时打印「✓ 已集齐 top-N…跳过后续约 M 页，零遗漏」。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint` 0 error（21 项既有 warning 不变）。
+
+> 注：本版仅覆盖 `/mining`（Phase 1）。`/chart`·`/analyze` 诊断隐藏参数（Phase 2）与市场数据接口隐藏参数（Phase 3）将在后续版本逐步落地。
+
+---
+
 ## [0.53.2] - 2026-06-26
 
 > **韧性补丁：修复非交易时段候选池拉取「单页瞬时故障即整轮 `✗ fetch failed`」**。现象：非交易时段点「开始挖掘」，第 1 页正常（已 100 只）后立即整轮失败。根因：非交易时段 push2 系接口 host 兜底顺序为 `[push2delay, push2primary]`——`push2delay`（实测全球可达）排首位，`push2.eastmoney.com` 主站排末位且境外/数据中心 IP 固定返回 502。但 `push2Json` 的「快速失败」预算**按位置**分配（非末位仅 2.5s 超时 + 0 重试，末位才给完整 15s + 1 重试），恰好把**唯一可用的 `push2delay` 当成快速失败**、把**只会 502 的主站当成完整预算**。于是 `push2delay` 一遇瞬时抖动（>2.5s 或偶发断连）就立刻跌穿到必 502 的主站 → 单页失败 → 1~4 分钟整轮扫描全挂。**不改任何限流速率与并发（仍单并发 + 最小 1s 间隔 + 抖动，零额外封 IP 风险）**。
