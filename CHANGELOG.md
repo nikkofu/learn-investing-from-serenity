@@ -4,6 +4,24 @@
 
 ---
 
+## [0.53.5] - 2026-06-26
+
+> **条件可见化 Phase 3（市场数据统一接口 `/api/market/data`）：把各数据类型「隐藏」的 URL 默认口径回显到响应**。背景：统一数据出口的一大批取数口径——日K `limit=120`、财务三表 `num=8`、行业对比 `topN=20`、龙虎榜 `lookBack=30`、两融 `pageSize=30`、大宗 `20`、股东数 `10`、分红 `20`、解禁 `forwardDays=90`、研报 `maxPages=5`、个股新闻 `20`、全球资讯 `50`、公告 `30`、问财 `size=50` 等——此前全是散落在各分支里的 `?? 字面量`：前端不传、响应不回显、设置页也没有，用户拿到数据后无从得知本次到底取了多少条 / 回看多少天。本版统一提取为具名常量 `DEFAULTS`，并在**每个响应**里回显本次「生效口径」（`params`：值 / 默认值 / 是否来自 URL / 中文标签）；不带 `type` 调用还会回显**完整默认目录**。**口径数值完全不变，纯属可见化。**
+
+### 新增
+- `src/app/api/market/data/route.ts`：新增 `makeParamReader()`，统一解析查询参数并记录本次「生效口径」——每个分支套用默认或 URL 覆盖时都登记 `{ value, default, fromUrl, label }`；响应新增 `params` 字段回显，调用方一眼可见本次 `limit/num/topN/lookBack/pageSize/forwardDays/maxPages/size` 等取了多少、是默认还是显式传入。
+- `src/app/api/market/data/route.ts`：未知/空 `type` 的帮助响应新增 `defaults` 字段，一次性回显全部数据类型的可调参数默认口径，便于发现并按需用 URL 覆盖。
+
+### 优化
+- `src/app/api/market/data/route.ts`：把散落在 14 个分支里的魔法数默认值统一提取为具名常量 `DEFAULTS`（`klineLimit` / `financialsNum` / `industryTopN` / `dragonLookBack` / `marginPageSize` / `blockTradePageSize` / `holderPageSize` / `dividendPageSize` / `lockupForwardDays` / `reportsMaxPages` / `newsPageSize` / `globalNewsPageSize` / `announcementsPageSize` / `iwencaiChannel` / `iwencaiSize` 等）并加注释，各分支统一引用，口径完全不变。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint` 0 error（21 项既有 warning 不变）。
+
+> 注：至此「隐藏参数可见化」三期收官——Phase 1（`/mining`）、Phase 2（`/chart`·`/analyze` 诊断）、Phase 3（市场数据统一接口）。
+
+---
+
 ## [0.53.4] - 2026-06-26
 
 > **条件可见化 Phase 2（`/chart` · `/analyze` 个股诊断）：把诊断链路里写死/隐藏的执行口径在「拉数据之前」回显到页面**。背景：个股诊断（`/chart` Pro 画布与 `/analyze` 五因子研判）同样藏着一批前端不传、UI 不显示、设置页也没有的服务端默认——近端分析窗口 `DISPLAY_WINDOW = 360`、历史回测上限 `HISTORY_LIMIT`、默认买卖策略 `DEFAULT_STRATEGY_ID`、中性瓶颈分 `NEUTRAL_CHOKEPOINT_SCORE = 70`、自洽投票轮数 `SELF_CONSISTENCY_RUNS`、关联推文 `slice(0, 3)`、基本面静态缓存 TTL 等，用户要等 2~5 分钟出结果后才能（部分）反推本次用了什么口径。本版把这些口径在执行前一次性回显到前端（`/analyze` 流式 `plan` 事件 + `/chart` 图表接口 `diagnostics` 字段），并附「复制参数」便于把上下文 + 问题一起反馈。**不改任何诊断/分析算法、口径阈值、缓存策略与限流速率**——纯属「可见化」，沿用 Phase 1 同款做法。
