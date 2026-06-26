@@ -189,7 +189,9 @@ export default function MiningPage() {
     }
     await readNdjson(res, (ev: Record<string, unknown>) => {
       const type = ev.type as string;
-      if (type === "meta") {
+      if (type === "accepted") {
+        pushLog("info", `· ${String(ev.message ?? "已受理")}`);
+      } else if (type === "meta") {
         const total = Number(ev.total) || 0;
         setProgress((p) => ({ ...p, total }));
         pushLog("info", `▶ 开始扫描 ${total} 只 · 池 ${label} · 并发 ${ev.concurrency ?? ""}`);

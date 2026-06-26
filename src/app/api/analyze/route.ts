@@ -10,6 +10,7 @@ import { finalizeAssessment } from "@/lib/chokepoint";
 import { runCriticReview, runChokepointReview, deriveWinRate, runSelfConsistencyVote } from "@/lib/agentWorkflow";
 import { recordPrediction, getCalibrationSummary, type CalibrationSummary } from "@/lib/calibration";
 import { ndjsonStream } from "@/lib/stream";
+import { withRequestContext, BULK_PRIORITY } from "@/lib/requestContext";
 import { NarrativeJsonSplitter } from "@/lib/split";
 import type { ChokepointAssessment } from "@/lib/types";
 import { globalCache } from "@/lib/cache";
@@ -170,7 +171,10 @@ export async function POST(req: Request) {
   // 复权口径：qfq=前复权（贴现价，看操作）/ hfq=后复权（长周期真实回测）。决定筹码/交易标记/回测/投影的统一口径。
   const fq: FqMode = body.fq === "hfq" ? "hfq" : "qfq";
 
-  return ndjsonStream(async (send) => {
+  // 每个诊断请求一个独立泳道（按代码）+ 批量优先级：使 /scanner 并发的多个诊断
+  // 在东财限流上公平轮转，且整体主动退让于 /mining 等交互请求（详见 docs/perf-concurrency-analysis.md）。
+  return ndjsonStream((send) =>
+    withRequestContext({ lane: `analyze:${code}`, priority: BULK_PRIORITY }, async () => {
     const tStart = performance.now();
 
     // Stage 1: fetch market data (the "tool call").
@@ -449,5 +453,6 @@ export async function POST(req: Request) {
     });
     send({ type: "stage", key: "summary", status: "done", elapsedMs: summaryElapsed });
     send({ type: "done" });
-  });
+    }),
+  );
 }

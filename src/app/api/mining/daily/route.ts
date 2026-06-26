@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ndjsonStream } from "@/lib/stream";
+import { withRequestContext, INTERACTIVE_PRIORITY } from "@/lib/requestContext";
 import type { MiningFilters } from "@/lib/mining";
 import type { Prefilter } from "@/lib/miningScan";
 import {
@@ -71,9 +72,14 @@ export async function POST(req: Request) {
   };
   const wantStream = body.stream !== false;
 
+  // 泳道 mining-daily + 交互优先级：生成今日股票池是前台交互请求，其候选池拉取
+  // 应优先于 /scanner 的批量诊断，避免被后者饫死（详见 docs/perf-concurrency-analysis.md）。
   if (!wantStream) {
     try {
-      const file = await generateDailyPool(opts);
+      const file = await withRequestContext(
+        { lane: "mining-daily", priority: INTERACTIVE_PRIORITY },
+        () => generateDailyPool(opts),
+      );
       return NextResponse.json({ ok: true, meta: file.meta, count: file.results.length, results: file.results });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -81,11 +87,15 @@ export async function POST(req: Request) {
     }
   }
 
-  return ndjsonStream(async (send) => {
-    const file = await generateDailyPool(opts, send);
-    // 扫描的 done 事件后，再补一条 saved 事件，告知已落盘的清单与元信息。
-    send({ type: "saved", date: file.meta.date, generatedAt: file.meta.generatedAt, count: file.results.length });
-  });
+  return ndjsonStream((send) =>
+    withRequestContext({ lane: "mining-daily", priority: INTERACTIVE_PRIORITY }, async () => {
+      // 立即回一条 ack：告知前端请求已到达后端、开始拉取候选池（区别于「还卡在浏览器队列」）。
+      send({ type: "accepted", message: "已受理，正在拉取全市场候选池…" });
+      const file = await generateDailyPool(opts, send);
+      // 扫描的 done 事件后，再补一条 saved 事件，告知已落盘的清单与元信息。
+      send({ type: "saved", date: file.meta.date, generatedAt: file.meta.generatedAt, count: file.results.length });
+    }),
+  );
 }
 
 /** 返回当日股票池能力的默认参数（便于页面初始化与 cron 自检）。 */

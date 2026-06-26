@@ -10,6 +10,8 @@
 
 import iconv from "iconv-lite";
 import { isAShareActiveTime } from "../cache";
+import { FairScheduler } from "./emScheduler";
+import { currentRequestContext, NORMAL_PRIORITY } from "../requestContext";
 
 export const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -76,35 +78,37 @@ export function qs(params: Record<string, string | number | undefined>): string 
   return u.toString();
 }
 
-// ── 东财防封：全局串行限流 + 随机抖动 ───────────────────────────────────
+// ── 东财防封：全局公平限流 + 随机抖动 ───────────────────────────────────
 // 东财系接口（push2 / datacenter / reportapi / search / np-weblist）有风控：
 // 每秒 >5 次 / 单 IP 并发 ≥10 / 1 分钟 ≥200 次 → 临时封 IP。
-// 所有 eastmoney.com 请求都走 emFetch()：用一条 Promise 链把请求串起来，
-// 每次至少间隔 EM_MIN_INTERVAL_MS + 100~500ms 抖动。批量任务可调大间隔。
+// 所有 eastmoney.com 请求都走 emFetch()：交给 FairScheduler 单并发节流，
+// 每次至少间隔 EM_MIN_INTERVAL_MS + 100~500ms 抖动（对东财的实际速率与原来一致）。
+//
+// 与旧的「单条 FIFO Promise 链」相比，调度器只改变出队顺序：按请求上下文的
+// 优先级分层、同层内按泳道（lane）公平轮转。这样 /scanner 的批量诊断不会把额度
+// 占满、饿死 /mining「生成今日股票池」的候选池请求（详见 docs/perf-concurrency-analysis.md）。
 const EM_MIN_INTERVAL_MS = Number(process.env.EM_MIN_INTERVAL_MS ?? 1000);
-let emChain: Promise<unknown> = Promise.resolve();
-let emLastCall = 0;
+const emScheduler = new FairScheduler({ minIntervalMs: EM_MIN_INTERVAL_MS });
 
-/** 东财统一请求入口：串行限流 + 默认 UA。所有 eastmoney.com 接口都应通过它。 */
+/** 调试/自检用：当前调度器排队快照（各泳道等待数）。 */
+export function emSchedulerStats() {
+  return emScheduler.stats();
+}
+
+/** 东财统一请求入口：公平限流 + 默认 UA。所有 eastmoney.com 接口都应通过它。 */
 export function emFetch(url: string, init: FetchOpts = {}): Promise<Response> {
-  const run = async (): Promise<Response> => {
-    const wait = EM_MIN_INTERVAL_MS - (Date.now() - emLastCall);
-    if (wait > 0) await sleep(wait + 100 + Math.random() * 400);
-    try {
-      return await fetchRetry(url, {
-        timeoutMs: 15000,
-        retries: 1,
-        ...init,
-        headers: { "User-Agent": UA, ...(init.headers ?? {}) },
-      });
-    } finally {
-      emLastCall = Date.now();
-    }
-  };
-  // 串到链尾，无论上一个成功/失败都继续，避免链被一次失败打断。
-  const result = emChain.then(run, run);
-  emChain = result.catch(() => undefined);
-  return result;
+  const run = (): Promise<Response> =>
+    fetchRetry(url, {
+      timeoutMs: 15000,
+      retries: 1,
+      ...init,
+      headers: { "User-Agent": UA, ...(init.headers ?? {}) },
+    });
+  // 在「调用方」的异步上下文中读取泳道/优先级（跨 await 不丢失），未设置则归入默认泳道。
+  const ctx = currentRequestContext();
+  const lane = ctx?.lane ?? "default";
+  const priority = ctx?.priority ?? NORMAL_PRIORITY;
+  return emScheduler.enqueue(run, lane, priority);
 }
 
 // push2 系接口的 host 兜底顺序（按封 IP / 实时性权衡）：

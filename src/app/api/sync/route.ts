@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSyncStatus, runSync, runAllSync, SYNC_SOURCES, type SyncSourceId } from "@/lib/sync";
+import { withRequestContext, BULK_PRIORITY } from "@/lib/requestContext";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -36,15 +37,22 @@ export async function POST(req: Request) {
   const source = body.source;
   const force = body.force === true;
 
+  // 泳道 sync + 批量优先级：数据同步是后台批量任务，主动退让于 /mining 等交互请求。
   try {
     if (!source || source === "all") {
-      const results = await runAllSync(force);
+      const results = await withRequestContext(
+        { lane: "sync", priority: BULK_PRIORITY },
+        () => runAllSync(force),
+      );
       return NextResponse.json({ results });
     }
     if (!VALID_IDS.has(source)) {
       return NextResponse.json({ error: `未知数据源: ${source}` }, { status: 400 });
     }
-    const result = await runSync(source as SyncSourceId, force);
+    const result = await withRequestContext(
+      { lane: "sync", priority: BULK_PRIORITY },
+      () => runSync(source as SyncSourceId, force),
+    );
     const status = result.ok ? 200 : 500;
     return NextResponse.json({ result }, { status });
   } catch (err) {

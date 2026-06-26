@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ndjsonStream } from "@/lib/stream";
 import { runMiningScan, type MiningRequest } from "@/lib/miningScan";
+import { withRequestContext, NORMAL_PRIORITY } from "@/lib/requestContext";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -15,9 +16,13 @@ export async function POST(req: Request) {
 
   const wantStream = body.stream !== false;
 
+  // 泳道 mining + 普通优先级：手动扫描与 /scanner 批量诊断公平共享东财限流额度。
   if (!wantStream) {
     try {
-      const { summary, results } = await runMiningScan(body);
+      const { summary, results } = await withRequestContext(
+        { lane: "mining", priority: NORMAL_PRIORITY },
+        () => runMiningScan(body),
+      );
       return NextResponse.json({ summary, results });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -25,9 +30,11 @@ export async function POST(req: Request) {
     }
   }
 
-  return ndjsonStream(async (send) => {
-    await runMiningScan(body, send);
-  });
+  return ndjsonStream((send) =>
+    withRequestContext({ lane: "mining", priority: NORMAL_PRIORITY }, async () => {
+      await runMiningScan(body, send);
+    }),
+  );
 }
 
 /** 返回挖掘能力的元信息与默认参数，便于页面初始化与 cron 自检。 */
