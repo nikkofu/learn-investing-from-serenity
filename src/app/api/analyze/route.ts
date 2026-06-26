@@ -3,7 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { deriveStats, getQuoteFailover, getKlineFailover, getHfqDailyHistory, HISTORY_LIMIT, type FqMode } from "@/lib/sources";
 import { calculateChipDistribution, runWalkForwardWinRate, analyzeTechnicalPatterns, generatePriceProjection } from "@/lib/quant";
-import { runAllStrategies, pickDefaultResult, DEFAULT_STRATEGY_ID } from "@/lib/strategies";
+import { runAllStrategies, pickDefaultResult, DEFAULT_STRATEGY_ID, getStrategy } from "@/lib/strategies";
 import { buildAnalyzePrompt } from "@/lib/serenity";
 import { chatStream, LLMNotConfiguredError, parseJsonObject } from "@/lib/llm";
 import { finalizeAssessment } from "@/lib/chokepoint";
@@ -31,6 +31,12 @@ const ANALYZE_CACHE_NS = "analyze";
 
 /** 打分/筹码/技术形态等「近端」分析所用的窗口长度（保持原 360 根口径不变）。 */
 const DISPLAY_WINDOW = 360;
+
+/** 关联推文检索的展示上限（仅取相关度最高的前 N 条喂入 Prompt，保持原口径不变）。 */
+const RELATED_TWEETS_LIMIT = 3;
+
+/** 自洽投票额外轮数（在主趟之外多跑 N 趟取中位降方差；0 表示关闭，可用环境变量覆盖）。 */
+const SELF_CONSISTENCY_RUNS = Number(process.env.SELF_CONSISTENCY_RUNS ?? 2);
 
 /** 完整（缓存未命中）管线展示的阶段。 */
 const FULL_STAGES = [
@@ -144,7 +150,7 @@ async function findSerenityKnowledge(code: string, name: string) {
             return bScore - aScore;
           });
           
-          matchedTweets = matchedTweets.slice(0, 3);
+          matchedTweets = matchedTweets.slice(0, RELATED_TWEETS_LIMIT);
         } catch {
           // 忽略 x-posts.json 报错以防运行中断
         }
@@ -176,6 +182,31 @@ export async function POST(req: Request) {
   return ndjsonStream((send) =>
     withRequestContext({ lane: `analyze:${code}`, priority: BULK_PRIORITY }, async () => {
     const tStart = performance.now();
+
+    // ── 执行前回显「诊断参数」：把这条链路里写死/隐藏的口径在拉数据之前一次性下发，
+    // 用户无需等到 2~5min 后才知道本次用了什么窗口/策略/轮数（详见 docs 隐藏参数可见化 Phase 2）。
+    const cfg = await loadConfig();
+    const model = cfg?.model ?? "unknown";
+    const ttlMs = getCacheTTL("analysisFundamental", true);
+    const defaultStrategyMeta = getStrategy(DEFAULT_STRATEGY_ID)?.meta;
+    send({
+      type: "plan",
+      plan: {
+        fq,
+        fqLabel: fq === "hfq" ? "后复权（长周期真实回测）" : "前复权（贴现价，看操作）",
+        displayWindow: DISPLAY_WINDOW,
+        historyLimit: HISTORY_LIMIT,
+        defaultStrategyId: DEFAULT_STRATEGY_ID,
+        defaultStrategyLabel: defaultStrategyMeta
+          ? `${defaultStrategyMeta.name} v${defaultStrategyMeta.version}`
+          : DEFAULT_STRATEGY_ID,
+        selfConsistencyRuns: Number.isFinite(SELF_CONSISTENCY_RUNS) && SELF_CONSISTENCY_RUNS > 0 ? SELF_CONSISTENCY_RUNS : 0,
+        relatedTweetsLimit: RELATED_TWEETS_LIMIT,
+        model,
+        refresh: Boolean(body.refresh),
+        cacheTtlMs: ttlMs,
+      },
+    });
 
     // Stage 1: fetch market data (the "tool call").
     const tQuoteStart = performance.now();
@@ -221,11 +252,9 @@ export async function POST(req: Request) {
     // ── 静态/动态拆分：静态层（基本面/产业链/护城河，一周内不变）走持久化缓存，
     // 命中即跳过昂贵的主推理 + 自洽投票 + Critic + Judge；动态层（关注度/催化/买卖区间）
     // 每次都用当日行情实时刷新。知识库变化 / 自定义 context / 提示词版本变化都会让 key 改变从而自动失效。
-    const cfg = await loadConfig();
-    const model = cfg?.model ?? "unknown";
+    // 注：cfg / model / ttlMs 已在执行计划回显处统一解析（见上方 plan 事件），此处直接复用。
     const keyFp = fingerprint({ knowledge: matchedKnowledge, context: body.context ?? "" });
     const cacheKey = `v${STATIC_PROMPT_VERSION}:${code}:${model}:${keyFp}`;
-    const ttlMs = getCacheTTL("analysisFundamental", true);
     const cached = body.refresh ? null : await getPersistent<StaticAnalysis>(ANALYZE_CACHE_NS, cacheKey);
     const usingCache = Boolean(cached && cached.value.promptVersion === STATIC_PROMPT_VERSION);
 
@@ -337,7 +366,7 @@ export async function POST(req: Request) {
 
       // Stage 3.5: 自洽投票（self-consistency）：多次独立打分取每因子中位数，降单趟方差。
       try {
-        const extraRuns = Number(process.env.SELF_CONSISTENCY_RUNS ?? 2);
+        const extraRuns = SELF_CONSISTENCY_RUNS;
         if (Number.isFinite(extraRuns) && extraRuns > 0) {
           send({ type: "stage", key: "vote", status: "start" });
           const vote = await runSelfConsistencyVote({ quote, stats, assessment: computed, extraRuns });

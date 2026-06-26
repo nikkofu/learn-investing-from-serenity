@@ -4,6 +4,27 @@
 
 ---
 
+## [0.53.4] - 2026-06-26
+
+> **条件可见化 Phase 2（`/chart` · `/analyze` 个股诊断）：把诊断链路里写死/隐藏的执行口径在「拉数据之前」回显到页面**。背景：个股诊断（`/chart` Pro 画布与 `/analyze` 五因子研判）同样藏着一批前端不传、UI 不显示、设置页也没有的服务端默认——近端分析窗口 `DISPLAY_WINDOW = 360`、历史回测上限 `HISTORY_LIMIT`、默认买卖策略 `DEFAULT_STRATEGY_ID`、中性瓶颈分 `NEUTRAL_CHOKEPOINT_SCORE = 70`、自洽投票轮数 `SELF_CONSISTENCY_RUNS`、关联推文 `slice(0, 3)`、基本面静态缓存 TTL 等，用户要等 2~5 分钟出结果后才能（部分）反推本次用了什么口径。本版把这些口径在执行前一次性回显到前端（`/analyze` 流式 `plan` 事件 + `/chart` 图表接口 `diagnostics` 字段），并附「复制参数」便于把上下文 + 问题一起反馈。**不改任何诊断/分析算法、口径阈值、缓存策略与限流速率**——纯属「可见化」，沿用 Phase 1 同款做法。
+
+### 新增
+- `src/app/api/analyze/route.ts`：新增 `plan` 事件，在拉取行情数据**之前**最先发出，一次性回显本次个股诊断的全部生效口径：复权口径（`fq` / `fqLabel`）、近端分析窗口（`displayWindow`）、历史回测上限（`historyLimit`）、默认买卖策略源（`defaultStrategyId` / `defaultStrategyLabel`，带策略名 + 版本）、自洽投票轮数（`selfConsistencyRuns`）、关联推文上限（`relatedTweetsLimit`）、评估模型（`model`）、基本面静态缓存 TTL（`cacheTtlMs`）与是否强制刷新（`refresh`）。
+- `src/app/api/market/chart-data/route.ts`：响应新增 `diagnostics` 字段，回显图表链路口径：复权口径、图表 K 线根数（`klineLimit` / 实际载入 `loadedBars`）、中性瓶颈分（`neutralScore`）、默认策略源（`defaultStrategyLabel`，并标注是否来自 URL `?strategy=` 指定）。
+- `src/app/analyze/page.tsx`：新增「本次诊断执行参数（执行前回显）」只读面板（`DiagnosticPlanCard`），消费 `plan` 事件并在结果区上方常驻展示，附「复制参数」按钮一键导出。
+- `src/app/chart/page.tsx`：终端日志面板新增「◆ 本次诊断执行参数」只读回显块（`DiagnosticsPanel`），合并图表链路 `diagnostics` 与 AI 诊断 `plan` 两路口径展示，附「复制」按钮。
+
+### 优化
+- `src/app/api/analyze/route.ts`：把诊断链路里写死的魔法数提取为具名常量并加注释——`RELATED_TWEETS_LIMIT = 3`（关联推文展示上限）、`SELF_CONSISTENCY_RUNS`（自洽投票额外轮数，可环境变量覆盖），原 `matchedTweets.slice(0, 3)` 与 `Number(process.env.SELF_CONSISTENCY_RUNS ?? 2)` 改为引用常量，口径完全不变。
+- `src/app/api/market/chart-data/route.ts`：把 `360`（图表 K 线根数）与 `70`（中性瓶颈分）提取为具名常量 `CHART_KLINE_LIMIT` / `NEUTRAL_CHOKEPOINT_SCORE` 并加注释，调用处统一引用，口径完全不变。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint` 0 error（21 项既有 warning 不变）。
+
+> 注：本版覆盖 `/chart`·`/analyze`（Phase 2）。市场数据接口（龙虎榜/两融/大宗/解禁/研报等）的隐藏 URL 默认参数（Phase 3）将在后续版本落地。
+
+---
+
 ## [0.53.3] - 2026-06-26
 
 > **条件可见化 Phase 1（仅 `/mining`）：把藏在服务端的执行参数在「执行前」一次性回显，并把粗筛口径提到页面可调**。背景：此前全市场全量扫描的粗筛口径（`DEFAULT_FULL_PREFILTER = { minAmount: 1e8（≥1 亿成交额）, maxCandidates: 800 }`）纯属服务端兜底默认——前端 payload 不带、UI 不显示、设置页也没有；用户只能在候选池拉完（数分钟后）才在 `meta` 事件里看到部分回显，导致「为什么只扫 800 只」「是不是漏了」无从自查。本版把全部生效条件在点击「开始挖掘」的第一时间（任何耗时拉取之前）推一条 `plan` 事件回显，并将粗筛口径做成表单可调。**不改任何挖掘评分算法、过滤口径、缓存策略与限流速率**——纯属「可见化 + 可配置」。

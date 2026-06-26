@@ -33,6 +33,41 @@ interface AnalyzeResponse {
   quant?: any;
 }
 
+/** /api/market/chart-data 执行前回显的图表链路口径（隐藏参数可见化 Phase 2）。 */
+interface ChartDiagnostics {
+  period: string;
+  fq: string;
+  fqLabel: string;
+  klineLimit: number;
+  loadedBars: number;
+  neutralScore: number;
+  defaultStrategyId: string;
+  defaultStrategyLabel: string;
+  strategyFromUrl: boolean;
+}
+
+/** /api/analyze 执行前回显的 AI 诊断口径（隐藏参数可见化 Phase 2）。 */
+interface AiDiagnosticPlan {
+  fq: string;
+  fqLabel: string;
+  displayWindow: number;
+  historyLimit: number;
+  defaultStrategyId: string;
+  defaultStrategyLabel: string;
+  selfConsistencyRuns: number;
+  relatedTweetsLimit: number;
+  model: string;
+  refresh: boolean;
+  cacheTtlMs: number;
+}
+
+function fmtTtl(ms: number): string {
+  if (!ms || ms <= 0) return "不缓存";
+  const h = ms / 3_600_000;
+  if (h >= 1) return `${Number.isInteger(h) ? h : h.toFixed(1)} 小时`;
+  return `${Math.round(ms / 60_000)} 分钟`;
+}
+
 // 传统均线突破策略可调参数表单字段（对标 TradingView Strategy 参数面板）。
 const PARAM_FIELDS: { key: keyof MaStrategyParams; label: string; step: number; min: number; max: number; suffix?: string }[] = [
   { key: "maPeriod", label: "均线周期", step: 1, min: 2, max: 250 },
@@ -67,6 +102,10 @@ function ChartInner() {
   const [aiStageMsg, setAiStageMsg] = useState("");
   const [aiLogText, setAiLogText] = useState("");
   const [aiError, setAiError] = useState("");
+
+  // 隐藏参数可见化 Phase 2：图表链路口径 + AI 诊断执行前回显口径。
+  const [chartDiag, setChartDiag] = useState<ChartDiagnostics | null>(null);
+  const [aiPlan, setAiPlan] = useState<AiDiagnosticPlan | null>(null);
 
   // UI 交互控制
   const [activeTab, setActiveTab] = useState<"ai" | "trades" | "terminal">("ai");
@@ -177,6 +216,8 @@ function ChartInner() {
     setAiStageMsg("");
     setAiLogText("");
     setAiError("");
+    setChartDiag(null);
+    setAiPlan(null);
     
     // 同时并发发起行情基础数据与 AI 诊断请求，互不阻塞
     const urlStrategy = params.get("strategy")?.trim();
@@ -198,6 +239,8 @@ function ChartInner() {
       if (chartJson.error) {
         throw new Error(chartJson.error);
       }
+      // 回显图表链路执行口径（K 线根数/中性瓶颈分/默认策略/复权等）。
+      if (chartJson.diagnostics) setChartDiag(chartJson.diagnostics as ChartDiagnostics);
       
       // 立即渲染 K 线图表与指标，隐藏大 loading 圈
       setData({
@@ -245,6 +288,10 @@ function ChartInner() {
       await readNdjson(aiRes, (ev) => {
         const now = Date.now();
         switch (ev.type as string) {
+          case "plan":
+            // AI 诊断执行前回显口径（窗口/策略/投票轮数/模型/缓存）。
+            setAiPlan(ev.plan as AiDiagnosticPlan);
+            break;
           case "stage":
             let msg = "";
             if (ev.key === "quote" && ev.status === "start") msg = "整理最新价格指标与资金面数据...";
@@ -706,6 +753,7 @@ function ChartInner() {
               {/* 终端日志面板 */}
               {activeTab === "terminal" && (
                 <div className="space-y-3">
+                  {(chartDiag || aiPlan) && <DiagnosticsPanel chartDiag={chartDiag} aiPlan={aiPlan} />}
                   <div className="flex justify-between items-center text-[10px]">
                     <span className={`font-bold font-mono ${aiLoading ? "text-[var(--accent)] animate-pulse" : "text-[var(--muted)]"}`}>
                       {aiLoading ? `⚡ ${aiStageMsg}` : "✔ 大模型诊断已完成"}
@@ -985,6 +1033,75 @@ function ChartInner() {
         )}
 
       </div>
+    </div>
+  );
+}
+
+/** 隐藏参数可见化 Phase 2：图表链路 + AI 诊断执行口径的只读回显面板。 */
+function DiagnosticsPanel({
+  chartDiag,
+  aiPlan,
+}: {
+  chartDiag: ChartDiagnostics | null;
+  aiPlan: AiDiagnosticPlan | null;
+}) {
+  const [copied, setCopied] = useState(false);
+  const rows: [string, string][] = [];
+  if (chartDiag) {
+    rows.push(["复权口径", chartDiag.fqLabel]);
+    rows.push(["图表 K 线根数", `${chartDiag.klineLimit} 根（实际载入 ${chartDiag.loadedBars} 根）`]);
+    rows.push(["中性瓶颈分", `${chartDiag.neutralScore}（未接 AI 打分时的筹码/投影/初筛回测基准）`]);
+    rows.push([
+      "默认策略源",
+      `${chartDiag.defaultStrategyLabel}${chartDiag.strategyFromUrl ? "（来自 URL 指定）" : "（系统默认）"}`,
+    ]);
+  }
+  if (aiPlan) {
+    rows.push(["AI 近端分析窗口", `最近 ${aiPlan.displayWindow} 根 K 线`]);
+    rows.push(["AI 历史回测上限", `最多 ${aiPlan.historyLimit} 根 K 线`]);
+    rows.push([
+      "AI 自洽投票",
+      aiPlan.selfConsistencyRuns > 0 ? `主趟 + 额外 ${aiPlan.selfConsistencyRuns} 趟取中位` : "关闭（仅主趟）",
+    ]);
+    rows.push(["AI 关联推文上限", `相关度最高的前 ${aiPlan.relatedTweetsLimit} 条`]);
+    rows.push(["AI 评估模型", aiPlan.model]);
+    rows.push([
+      "基本面静态缓存",
+      aiPlan.refresh ? "本次强制刷新（忽略缓存）" : `命中即秒级回放（TTL ${fmtTtl(aiPlan.cacheTtlMs)}）`,
+    ]);
+  }
+  const copy = () => {
+    const text = ["◆ 个股诊断执行参数（图表 + AI）", ...rows.map(([k, v]) => `· ${k}：${v}`)].join("\n");
+    navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {}
+    );
+  };
+  return (
+    <div className="border border-[var(--border)] bg-[var(--bg)] rounded-[2px] p-3 space-y-2">
+      <div className="flex justify-between items-center text-[10px] font-mono">
+        <span className="font-bold text-[var(--accent)]">◆ 本次诊断执行参数</span>
+        <button
+          onClick={copy}
+          className="px-2 py-0.5 border border-[var(--border)] rounded-[1px] text-[var(--muted)] hover:text-[var(--text)] cursor-pointer"
+        >
+          {copied ? "已复制" : "复制"}
+        </button>
+      </div>
+      <dl className="space-y-1 text-[10px] font-mono">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex justify-between gap-3 border-b border-dashed border-[var(--border)] pb-1">
+            <dt className="shrink-0 text-[var(--faint)]">{k}</dt>
+            <dd className="text-right text-[var(--muted)]">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-[9px] text-[var(--faint)] leading-relaxed">
+        以上为图表/AI 链路写死/隐藏的执行口径，现已回显便于核对与反馈。
+      </p>
     </div>
   );
 }

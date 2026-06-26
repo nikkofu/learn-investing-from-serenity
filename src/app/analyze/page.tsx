@@ -72,6 +72,28 @@ const ANALYZE_STAGES: { key: string; label: string }[] = [
   { key: "judge", label: "裁判调和（最终结论与置信度）" },
 ];
 
+/** 后端执行前回显的「诊断参数」口径（隐藏参数可见化 Phase 2）。 */
+interface DiagnosticPlan {
+  fq: string;
+  fqLabel: string;
+  displayWindow: number;
+  historyLimit: number;
+  defaultStrategyId: string;
+  defaultStrategyLabel: string;
+  selfConsistencyRuns: number;
+  relatedTweetsLimit: number;
+  model: string;
+  refresh: boolean;
+  cacheTtlMs: number;
+}
+
+function fmtTtl(ms: number): string {
+  if (!ms || ms <= 0) return "不缓存";
+  const h = ms / 3_600_000;
+  if (h >= 1) return `${Number.isInteger(h) ? h : h.toFixed(1)} 小时`;
+  return `${Math.round(ms / 60_000)} 分钟`;
+}
+
 function yi(n: number): string {
   if (!n) return "-";
   return (n / 1e8).toFixed(1) + " 亿";
@@ -94,6 +116,7 @@ function AnalyzeInner() {
   const [content, setContent] = useState("");
   const [structured, setStructured] = useState("");
   const [preview, setPreview] = useState<{ quote: StockQuote; stats: Stats } | null>(null);
+  const [plan, setPlan] = useState<DiagnosticPlan | null>(null);
   const [retryCount, setRetryCount] = useState(1);
   const [recentStocks, setRecentStocks] = useState<RecentStock[]>([]);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -136,6 +159,7 @@ function AnalyzeInner() {
     if (attempt === 1) {
       setData(null);
       setPreview(null);
+      setPlan(null);
     }
     setStages(ANALYZE_STAGES.map((s) => ({ ...s, status: "pending" })));
     setReasoning("");
@@ -157,6 +181,10 @@ function AnalyzeInner() {
       await readNdjson(res, (ev) => {
         setRetryCount(1);
         switch (ev.type as string) {
+          case "plan":
+            // 执行前回显本次诊断的全部生效口径（窗口/策略/投票轮数/模型/缓存等），用户无需等结果即可核对。
+            setPlan(ev.plan as DiagnosticPlan);
+            break;
           case "stages":
             // 后端根据是否命中静态缓存下发本次运行的阶段清单（命中/未命中两套不同）。
             setStages((ev.stages as { key: string; label: string }[]).map((s) => ({ ...s, status: "pending" })));
@@ -328,6 +356,8 @@ function AnalyzeInner() {
         </div>
       )}
 
+      {plan && <DiagnosticPlanCard plan={plan} />}
+
       {(loading || content || reasoning || structured || stages.some((s) => s.status !== "pending")) && (
         <ProgressTrace
           stages={stages}
@@ -351,6 +381,57 @@ function AnalyzeInner() {
       {preview && !data && <PreviewCard quote={preview.quote} stats={preview.stats} />}
 
       {data && <Result data={data} />}
+    </div>
+  );
+}
+
+function DiagnosticPlanCard({ plan }: { plan: DiagnosticPlan }) {
+  const [copied, setCopied] = useState(false);
+  const rows: [string, string][] = [
+    ["复权口径", plan.fqLabel],
+    ["近端分析窗口", `最近 ${plan.displayWindow} 根 K 线（打分/筹码/技术形态）`],
+    ["历史回测上限", `最多 ${plan.historyLimit} 根 K 线（全量回测口径）`],
+    ["默认买卖策略源", plan.defaultStrategyLabel],
+    ["自洽投票轮数", plan.selfConsistencyRuns > 0 ? `主趟 + 额外 ${plan.selfConsistencyRuns} 趟取中位` : "关闭（仅主趟）"],
+    ["关联推文上限", `相关度最高的前 ${plan.relatedTweetsLimit} 条`],
+    ["评估模型", plan.model],
+    ["基本面静态缓存", plan.refresh ? "本次强制刷新（忽略缓存）" : `命中即秒级回放（TTL ${fmtTtl(plan.cacheTtlMs)}）`],
+  ];
+  const copy = () => {
+    const text = ["◆ 个股诊断执行参数", ...rows.map(([k, v]) => `· ${k}：${v}`)].join("\n");
+    navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {}
+    );
+  };
+  return (
+    <div className="rounded-[2px] border border-[var(--border)] bg-[var(--panel)] p-5 text-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-[var(--accent)]">◆</span>
+          <span className="font-medium">本次诊断执行参数（执行前回显）</span>
+        </div>
+        <button
+          onClick={copy}
+          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--muted)] hover:text-[var(--text)]"
+        >
+          {copied ? "已复制" : "复制参数"}
+        </button>
+      </div>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex justify-between gap-3 border-b border-dashed border-[var(--border)] pb-1">
+            <dt className="shrink-0 text-[var(--faint)]">{k}</dt>
+            <dd className="text-right font-medium text-[var(--muted)]">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-3 text-xs text-[var(--faint)]">
+        以上为服务端写死/隐藏的诊断口径，现已在拉取数据之前回显，便于核对与反馈问题。
+      </p>
     </div>
   );
 }
