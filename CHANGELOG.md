@@ -4,6 +4,27 @@
 
 ---
 
+## [0.52.0] - 2026-06-26
+
+> **性能架构：东财请求公平调度器（`FairScheduler`）替代全局 FIFO 链**。修复「一个标签页跑 `/scanner` 批量诊断时，另一个标签页在 `/mining` 点『生成今日股票池』点了不动」的并发争用问题。根因：全进程所有东财请求都串在唯一一条全局 FIFO Promise 链（单并发 + 最小间隔 1s 防封 IP）上，批量任务把链占满后交互任务被饿死（队头阻塞 / starvation）。本方案在**完全保持对东财实际速率不变**（不增封 IP 风险）的前提下，仅改「出队顺序」：优先级分层 + 同层泳道 round-robin，让低频高优的交互请求抢先、批量任务之间公平轮转。**不改任何业务计算口径、零新增运行时依赖。**
+
+### 新增
+- `src/lib/sources/emScheduler.ts`：新增 `FairScheduler`——优先级分层（交互 3 / 普通 5 / 批量 7，数值小者整体抢先）+ 同优先级内泳道 round-robin（批量任务互不独占）；精确保持原始节流（单并发 + `EM_MIN_INTERVAL_MS` 最小间隔 + 100~500ms 抖动）。
+- `src/lib/requestContext.ts`：基于 `AsyncLocalStorage` 的请求上下文，跨 await 透传 `{ lane, priority }` 到深层 `emFetch`，业务逻辑零改动；导出 `withRequestContext` / `currentRequestContext` 与 `INTERACTIVE_PRIORITY(3)` / `NORMAL_PRIORITY(5)` / `BULK_PRIORITY(7)`。
+- `docs/perf-concurrency-analysis.md`：完整根因分析、方案选型、实现与验证文档（含修正后的东财请求精确口径：单只 `/api/analyze` 走东财 0~3 次，真实洪峰来自 `/api/sync` 批量 + 失败级联，而非「每只 analyze 10+ 请求」）。
+- `scripts/verify-scheduler.ts`：调度器自检脚本（节流间隔、交互抢先、泳道公平轮转三项断言）。
+
+### 优化
+- `src/lib/sources/http.ts`：`emFetch` 由全局 FIFO `emChain` 改为经 `FairScheduler.enqueue(run, lane, priority)` 出队；新增 `emSchedulerStats()`。
+- 路由泳道/优先级标注：`POST /api/mining/daily`→`mining-daily`(交互 3)、`POST /api/mining`→`mining`(普通 5)、`POST /api/analyze`→`analyze:${code}`(批量 7，每只一条泳道)、`POST /api/sync`→`sync`(批量 7)。
+- `src/app/api/mining/daily/route.ts` 新增即时 `accepted` 事件 + `src/app/mining/page.tsx` 对应日志反馈，点击「生成今日股票池」后立刻提示「已受理」，消除「点了不动」的观感。
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint`（改动文件）0 error。
+- 调度器自检：节流间隔 ✓ / 交互抢先 ✓ / 泳道公平轮转 ✓ 全部通过。
+
+---
+
 ## [0.51.0] - 2026-06-25
 
 > **新增策略：Cardwell RSI Trade Navigator 趋势延续版 V2，并设为买卖引擎偏好默认**。针对 V1「强趋势被跟踪止损洗出后再也回不来」的痛点——V1 唯一入场钥匙是 RSI(14) 全新上穿中线 50，被 1.5×ATR 跟踪止损打出来时 RSI 常仍在多头区(>50)，要再入场必须 RSI 先跌回 ≤50 再上穿；可主升浪里 RSI 长期 >50，钥匙永远插不上，于是空仓走完整段拉升（600522 实测：2026-05-27 止损离场后整段主升浪再无 B）。V2「只增不改」：完整保留 V1 入场 / 离场 / 止损口径，额外增加一条**趋势延续再入场**通道，把主升浪里的「柱子翻红 / KDJ 金叉」显式纳为补充买点。**V1 保持不变；后端默认策略不变（仍 `chokepoint-momentum-v7`），仅前端买卖引擎偏好默认由 Cardwell V1 升级为 V2。**
