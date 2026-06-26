@@ -20,7 +20,7 @@ import {
   type RejectReason,
 } from "./mining";
 import { rankNormalize } from "./portfolioBacktest";
-import { getUniverseConfig, filterUniverse, type UniverseConfig } from "./universe";
+import { getUniverseConfig, filterUniverse, isAllowed, type UniverseConfig } from "./universe";
 import { getStrategy } from "./strategies";
 import {
   getCachedUniverse,
@@ -203,13 +203,19 @@ export function applyPrefilter(
  * 默认沪深主板 + 创业板、剔除科创板/北交所，ST/*ST/退/B 股再由 filterUniverse 统一剔除。
  * 逐页拉取（统一 clist 兜底+限流）。
  */
-async function fetchFullUniverse(prog?: UniverseProgress): Promise<MiningCandidate[]> {
+async function fetchFullUniverse(
+  prog?: UniverseProgress,
+  pf?: Prefilter | null,
+): Promise<MiningCandidate[]> {
   const segments = boardSegments(getUniverseConfig()).join(",");
+  const sig = prefilterSig(pf);
 
-  // 先查按时段自适应 TTL 的候选池快照缓存，命中则免去逐页重拉（节省数分钟基础时间）。
+  // 先查按时段自适应 TTL 的候选池快照缓存。命中条件：
+  //   - 完整快照（complete!==false，含旧快照）：可服务任意粗筛口径；
+  //   - 提前终止得到的「部分快照」：仅当粗筛签名一致时可复用（其前缀即所需 top-N）。
   const now = new Date();
   const cached = await getCachedUniverse(segments, now);
-  if (cached) {
+  if (cached && (cached.complete !== false || cached.prefilterSig === sig)) {
     prog?.onCacheHit?.(
       cached.candidates.length,
       cached.pages,
@@ -221,22 +227,56 @@ async function fetchFullUniverse(prog?: UniverseProgress): Promise<MiningCandida
   }
 
   // 东财 clist 每页上限 100（push2delay 会把更大的 pz 截到 100），故必须翻页。
+  // 关键提速：clist 按成交额（fid=f6, po=1）严格倒序返回，因此在以下任一条件成立时
+  // 可提前终止翻页——后续页成交额只会更低，绝不可能再进入粗筛结果：
+  //   ① 已集齐 maxCandidates 只「过板块过滤 + 过 min-* 阈值」的候选（与最终结果同口径）；
+  //   ② 整页末行成交额已 < minAmount（该页之后全部更低，必被 minAmount 卡掉）。
+  // 请求速率不变（仍单并发 + 最小 1s 限流 + 抖动），但总请求数从 ~50 页降到个位数，
+  // 全程零额外封 IP 风险（请求更少 = 风险更低）。无粗筛口径（pf 为空）时不提前终止，
+  // 仍拉完整全市场（complete=true，可被任意口径复用）。
   const PAGE = 100;
   const MAX_PAGES = 80; // 安全上限（8000 只），防止异常时无限翻页
+  const cap = pf?.maxCandidates;
   const rows: ClistRow[] = [];
   let pages = 0;
+  let reachedEnd = false;
+  let earlyStopped = false;
+  const qualifiedSeen = new Set<string>();
+  let qualified = 0;
   for (let pn = 1; pn <= MAX_PAGES; pn++) {
     const diff = (await emClist({
       pn, pz: PAGE, po: 1, np: 1, fltt: 2, invt: 2, fid: "f6",
       fs: segments, fields: "f12,f14,f2,f3,f6,f8,f10",
     })) as unknown as ClistRow[];
-    if (!diff || diff.length === 0) break;
+    if (!diff || diff.length === 0) { reachedEnd = true; break; }
     rows.push(...diff);
     pages = pn;
-    // 全市场全量需逐页串行限流拉取（约 50 页、数十秒），每页回调一次进度，
-    // 让前端「候选池拉取阶段」也有可见反馈，避免长时间「点了不动」。
+    // 候选池拉取阶段每页回调一次进度，让前端有可见反馈，避免长时间「点了不动」。
     prog?.onPage?.(rows.length, pn);
-    if (diff.length < PAGE) break; // 最后一页
+    if (diff.length < PAGE) { reachedEnd = true; break; } // 最后一页（已完整拉完）
+
+    // —— 提前终止判定（仅在配置了 maxCandidates 上限时启用）——
+    // 无 cap（如「生成今日股票池」要全量覆盖）时不提前终止，仍拉完整全市场，
+    // 得到 complete=true 的快照可被任意口径复用（避免与 top-N 部分快照互相挤兑缓存）。
+    if (cap != null) {
+      for (const r of diff) {
+        const code = r.f12;
+        if (!code || !/^\d{6}$/.test(code) || qualifiedSeen.has(code)) continue;
+        if (!isAllowed(code, r.f14)) continue; // 与 filterUniverse 同口径（剔除 ST/退/B 等）
+        if (pf?.minAmount != null && num(r.f6) < pf.minAmount) continue;
+        if (pf?.minTurnover != null && num(r.f8) < pf.minTurnover) continue;
+        if (pf?.minVolumeRatio != null && num(r.f10) < pf.minVolumeRatio) continue;
+        qualifiedSeen.add(code);
+        qualified++;
+      }
+      if (qualified >= cap) { earlyStopped = true; break; } // 已集齐 top-maxCandidates（按成交额）
+      if (pf?.minAmount != null && num(diff[diff.length - 1].f6) < pf.minAmount) {
+        // 整页末行成交额已跌破 minAmount（clist 倒序，后续页只会更低）：即便不足
+        // maxCandidates 只，后续也不可能再有过 minAmount 的票，可安全终止。
+        earlyStopped = true;
+        break;
+      }
+    }
   }
 
   const seen = new Set<string>();
@@ -246,8 +286,16 @@ async function fetchFullUniverse(prog?: UniverseProgress): Promise<MiningCandida
     .map((r) => rowToCandidate(r));
 
   // 落盘 + 内存缓存，供 TTL 内的后续扫描秒级复用。
-  await setCachedUniverse({ segments, fetchedAt: Date.now(), pages, candidates });
+  // complete=true：拉完整全市场，可服务任意口径；提前终止则为部分快照，记录粗筛签名。
+  const complete = reachedEnd && !earlyStopped;
+  await setCachedUniverse({ segments, fetchedAt: Date.now(), pages, candidates, complete, prefilterSig: sig });
   return candidates;
+}
+
+/** 粗筛签名：部分快照缓存复用判定用（口径一致才可复用提前终止得到的前缀）。 */
+function prefilterSig(pf?: Prefilter | null): string {
+  if (!pf) return "full";
+  return `a:${pf.minAmount ?? ""}|t:${pf.minTurnover ?? ""}|v:${pf.minVolumeRatio ?? ""}|n:${pf.maxCandidates ?? ""}`;
 }
 
 /** 东财人气榜 Top100 作为候选池（统一 emappdata 接口）。 */
@@ -303,6 +351,7 @@ function fillUnique(primary: MiningCandidate[], secondary: MiningCandidate[], ta
 async function resolveUniverseRaw(
   body: MiningRequest,
   prog?: UniverseProgress,
+  pf?: Prefilter | null,
 ): Promise<MiningCandidate[]> {
   const universe = body.universe || "hot";
   if (universe === "custom") {
@@ -316,7 +365,7 @@ async function resolveUniverseRaw(
     return enrichNames(codes);
   }
   if (universe === "full") {
-    return fetchFullUniverse(prog);
+    return fetchFullUniverse(prog, pf);
   }
   if (universe === "broad") {
     const size = Math.max(20, Math.min(MAX_SIZE, body.size ?? 300));
@@ -339,8 +388,9 @@ async function resolveUniverseRaw(
 export async function resolveUniverse(
   body: MiningRequest,
   prog?: UniverseProgress,
+  pf?: Prefilter | null,
 ): Promise<MiningCandidate[]> {
-  const raw = await resolveUniverseRaw(body, prog);
+  const raw = await resolveUniverseRaw(body, prog, pf);
   return filterUniverse(raw);
 }
 
@@ -510,6 +560,15 @@ export async function runMiningScan(
   const strategyId = body.strategyId;
   const isDemo = body.universe === "demo";
 
+  // 两段漏斗第 1 段的粗筛口径需在「拉取候选池前」算好：full 全市场据此可在
+  // 集齐 top-maxCandidates 时提前终止翻页（同一份 pf 复用于候选池提前终止、
+  // 粗筛截断、meta 回显，口径一致）。显式传 prefilter 优先，传 null 关闭。
+  let pf: Prefilter | null = null;
+  if (!isDemo) {
+    if (body.prefilter !== undefined) pf = body.prefilter;
+    else if (body.universe === "full" || body.universe === "broad") pf = DEFAULT_FULL_PREFILTER;
+  }
+
   const demoMap = new Map<string, Candle[]>();
   let candidates: MiningCandidate[];
   if (isDemo) {
@@ -523,21 +582,17 @@ export async function runMiningScan(
       onPage: (loaded, pages) => onEvent?.({ type: "universe", loaded, pages }),
       onCacheHit: (loaded, pages, ageMs, phase, ttlMs) =>
         onEvent?.({ type: "universe", loaded, pages, cached: true, ageMs, phase, ttlMs }),
-    });
+    }, pf);
   }
 
   // 去重
   const seen = new Set<string>();
   candidates = candidates.filter((c) => c && c.code && !seen.has(c.code) && seen.add(c.code));
 
-  // 两段漏斗第 1 段：粗筛（full/broad 默认开启；显式传 prefilter 优先，传 null 关闭）。
+  // 两段漏斗第 1 段：粗筛截断（full/broad 默认开启；提前终止时候选池已是 top-N 前缀，
+  // 此处再按 maxCandidates 精确截断，结果与拉全量一致）。
   const rawTotal = candidates.length;
-  let pf: Prefilter | null = null;
-  if (!isDemo) {
-    if (body.prefilter !== undefined) pf = body.prefilter;
-    else if (body.universe === "full" || body.universe === "broad") pf = DEFAULT_FULL_PREFILTER;
-    if (pf) candidates = applyPrefilter(candidates, pf);
-  }
+  if (!isDemo && pf) candidates = applyPrefilter(candidates, pf);
 
   const t0 = Date.now();
   const total = candidates.length;

@@ -26,6 +26,14 @@ export interface UniverseSnapshot {
   /** 拉取页数。 */
   pages: number;
   candidates: MiningCandidate[];
+  /**
+   * 是否完整拉完全市场（翻到末页）。提前终止（按成交额倒序集齐 top-N 即停）得到的
+   * 是「部分快照」，complete=false。完整快照可服务任意粗筛口径；部分快照仅当粗筛
+   * 签名一致时可复用（其前缀恰为该口径所需的 top-N）。缺省（旧快照）按完整处理。
+   */
+  complete?: boolean;
+  /** 粗筛签名（部分快照复用判定用）；完整快照可忽略。 */
+  prefilterSig?: string;
 }
 
 export type UniversePhase = "盘中" | "午间休市" | "盘后/盘前" | "周末";
