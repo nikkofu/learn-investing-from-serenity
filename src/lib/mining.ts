@@ -8,6 +8,7 @@ import {
   type ChipDistributionResult,
   type TechnicalAssessment,
 } from "./quant";
+import { getStrategy } from "./strategies";
 
 /**
  * 智能挖掘（Smart Mining）—— 纯函数信号引擎。
@@ -259,8 +260,13 @@ function scoreChips(chips: ChipDistributionResult, poc: number, price: number): 
 /**
  * 评估单只股票的挖掘信号（纯计算，无网络）。
  * candles 建议传入≥120 根日 K（越多通道/回测越稳），price 传实时现价（缺失用最后收盘）。
+ * opts.strategyId 指定「B 买入信号」所用的买卖策略（取自策略注册表 strategies.ts），
+ * 缺省/未知 id 时回退到内置「瓶颈动量 v1」，与全站 /chart 口径保持一致。
  */
-export function evaluateMiningSignal(input: MiningCandidate & { candles: Candle[] }): MiningResult | null {
+export function evaluateMiningSignal(
+  input: MiningCandidate & { candles: Candle[] },
+  opts?: { strategyId?: string },
+): MiningResult | null {
   const { code, name, candles, market, changePct } = input;
   if (!candles || candles.length < 60) return null; // 样本不足无法判形态
 
@@ -271,7 +277,12 @@ export function evaluateMiningSignal(input: MiningCandidate & { candles: Candle[
   const chips = calculateChipDistribution(candles, price);
   const tech = analyzeTechnicalPatterns(candles, price, chips);
   // 成交价统一走「次日开盘成交（T+1 open）」口径，B 信号点与全站一致。
-  const backtest = executeTradesNextOpen(candles, runChokepointMomentumBacktest(candles, NEUTRAL_SCORE, { code }));
+  // strategyId 命中策略注册表则用所选策略产出 B 信号，否则回退内置瓶颈动量 v1。
+  const strat = opts?.strategyId ? getStrategy(opts.strategyId) : undefined;
+  const rawBacktest = strat
+    ? strat.run(candles, { chokepointScore: NEUTRAL_SCORE, code })
+    : runChokepointMomentumBacktest(candles, NEUTRAL_SCORE, { code });
+  const backtest = executeTradesNextOpen(candles, rawBacktest);
   const projections = generatePriceProjection(candles, NEUTRAL_SCORE);
 
   const bottom = scoreBottom(closes, price);
@@ -357,16 +368,34 @@ export interface MiningFilters {
 
 /** 判断一条结果是否满足筛选条件。 */
 export function passesFilters(r: MiningResult, f: MiningFilters): boolean {
-  if (f.minScore != null && r.score < f.minScore) return false;
-  if (f.minExpectedReturn != null && r.expectedReturnBase < f.minExpectedReturn) return false;
-  if (f.requireUptrend && r.channelType !== "up") return false;
-  if (f.requireBSignal && !r.hasBuySignal) return false;
+  return rejectReason(r, f) === null;
+}
+
+/** 未命中原因键（与 passesFilters 同序，返回首个未通过项；用于「未命中原因分布」统计）。 */
+export type RejectReason =
+  | "minScore"
+  | "minExpectedReturn"
+  | "requireUptrend"
+  | "requireBSignal"
+  | "bSignalMissing"
+  | "bSignalStale";
+
+/**
+ * 返回一条结果「第一个未通过的筛选项」（通过返回 null）。
+ * 与 passesFilters 严格同序，使日志里的「未命中原因分布」与实际过滤口径一致，
+ * 便于排查 0 命中是被哪条筛选条件卡掉。
+ */
+export function rejectReason(r: MiningResult, f: MiningFilters): RejectReason | null {
+  if (f.minScore != null && r.score < f.minScore) return "minScore";
+  if (f.minExpectedReturn != null && r.expectedReturnBase < f.minExpectedReturn) return "minExpectedReturn";
+  if (f.requireUptrend && r.channelType !== "up") return "requireUptrend";
+  if (f.requireBSignal && !r.hasBuySignal) return "requireBSignal";
   // 「刚发出」过滤：必须有未平仓 B 信号，且其形成距今不超过 maxBSignalAgeDays 个交易日。
   if (f.maxBSignalAgeDays != null) {
-    if (!r.hasBuySignal) return false;
-    if (r.buySignalAgeDays == null || r.buySignalAgeDays > f.maxBSignalAgeDays) return false;
+    if (!r.hasBuySignal) return "bSignalMissing";
+    if (r.buySignalAgeDays == null || r.buySignalAgeDays > f.maxBSignalAgeDays) return "bSignalStale";
   }
-  return true;
+  return null;
 }
 
 /**

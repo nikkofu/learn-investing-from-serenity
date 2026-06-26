@@ -13,12 +13,30 @@ import {
   evaluateMiningSignal,
   mapPool,
   passesFilters,
+  rejectReason,
   type MiningCandidate,
   type MiningFilters,
   type MiningResult,
+  type RejectReason,
 } from "./mining";
 import { rankNormalize } from "./portfolioBacktest";
 import { getUniverseConfig, filterUniverse, type UniverseConfig } from "./universe";
+import { getStrategy } from "./strategies";
+import {
+  getCachedUniverse,
+  setCachedUniverse,
+  universePhase,
+  universeTtlMs,
+  type UniversePhase,
+} from "./universeCache";
+
+/** 候选池解析阶段的进度回调（逐页拉取 / 命中缓存二选一）。 */
+export interface UniverseProgress {
+  /** 逐页串行拉取时每页回调一次（loaded=累计只数，pages=当前页号）。 */
+  onPage?: (loaded: number, pages: number) => void;
+  /** 命中候选池快照缓存时回调一次（免去逐页重拉）。 */
+  onCacheHit?: (loaded: number, pages: number, ageMs: number, phase: UniversePhase, ttlMs: number) => void;
+}
 
 /** 给一个 Promise 套上超时上限（对标 SCS analyst-fallback：单只卡死不拖垮整批）。 */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -52,6 +70,8 @@ export interface MiningRequest {
   concurrency?: number; // 并发度（默认 8，区间 4–32）
   retries?: number; // K 线拉取失败重试次数（默认 3，最多 10）
   filters?: MiningFilters;
+  /** 「B 买入信号」所用买卖策略 id（取自策略注册表 strategies.ts）；缺省回退内置瓶颈动量 v1。 */
+  strategyId?: string;
   stream?: boolean; // 默认 true → NDJSON 流；false → 一次性 JSON（便于 cron）
   /**
    * 「两段漏斗」第 1 段：用候选池已带的批量字段（成交额/换手/量比）先粗筛，
@@ -183,33 +203,51 @@ export function applyPrefilter(
  * 默认沪深主板 + 创业板、剔除科创板/北交所，ST/*ST/退/B 股再由 filterUniverse 统一剔除。
  * 逐页拉取（统一 clist 兜底+限流）。
  */
-async function fetchFullUniverse(
-  onPage?: (loaded: number, pages: number) => void,
-): Promise<MiningCandidate[]> {
-  const fs = boardSegments(getUniverseConfig()).join(",");
+async function fetchFullUniverse(prog?: UniverseProgress): Promise<MiningCandidate[]> {
+  const segments = boardSegments(getUniverseConfig()).join(",");
+
+  // 先查按时段自适应 TTL 的候选池快照缓存，命中则免去逐页重拉（节省数分钟基础时间）。
+  const now = new Date();
+  const cached = await getCachedUniverse(segments, now);
+  if (cached) {
+    prog?.onCacheHit?.(
+      cached.candidates.length,
+      cached.pages,
+      now.getTime() - cached.fetchedAt,
+      universePhase(now),
+      universeTtlMs(now),
+    );
+    return cached.candidates;
+  }
 
   // 东财 clist 每页上限 100（push2delay 会把更大的 pz 截到 100），故必须翻页。
   const PAGE = 100;
   const MAX_PAGES = 80; // 安全上限（8000 只），防止异常时无限翻页
   const rows: ClistRow[] = [];
+  let pages = 0;
   for (let pn = 1; pn <= MAX_PAGES; pn++) {
     const diff = (await emClist({
       pn, pz: PAGE, po: 1, np: 1, fltt: 2, invt: 2, fid: "f6",
-      fs, fields: "f12,f14,f2,f3,f6,f8,f10",
+      fs: segments, fields: "f12,f14,f2,f3,f6,f8,f10",
     })) as unknown as ClistRow[];
     if (!diff || diff.length === 0) break;
     rows.push(...diff);
+    pages = pn;
     // 全市场全量需逐页串行限流拉取（约 50 页、数十秒），每页回调一次进度，
     // 让前端「候选池拉取阶段」也有可见反馈，避免长时间「点了不动」。
-    onPage?.(rows.length, pn);
+    prog?.onPage?.(rows.length, pn);
     if (diff.length < PAGE) break; // 最后一页
   }
 
   const seen = new Set<string>();
-  return rows
+  const candidates = rows
     .filter((r) => r.f12 && /^\d{6}$/.test(r.f12))
     .filter((r) => !seen.has(r.f12 as string) && seen.add(r.f12 as string)) // 跨页去重
     .map((r) => rowToCandidate(r));
+
+  // 落盘 + 内存缓存，供 TTL 内的后续扫描秒级复用。
+  await setCachedUniverse({ segments, fetchedAt: Date.now(), pages, candidates });
+  return candidates;
 }
 
 /** 东财人气榜 Top100 作为候选池（统一 emappdata 接口）。 */
@@ -264,7 +302,7 @@ function fillUnique(primary: MiningCandidate[], secondary: MiningCandidate[], ta
 
 async function resolveUniverseRaw(
   body: MiningRequest,
-  onPage?: (loaded: number, pages: number) => void,
+  prog?: UniverseProgress,
 ): Promise<MiningCandidate[]> {
   const universe = body.universe || "hot";
   if (universe === "custom") {
@@ -278,7 +316,7 @@ async function resolveUniverseRaw(
     return enrichNames(codes);
   }
   if (universe === "full") {
-    return fetchFullUniverse(onPage);
+    return fetchFullUniverse(prog);
   }
   if (universe === "broad") {
     const size = Math.max(20, Math.min(MAX_SIZE, body.size ?? 300));
@@ -300,9 +338,9 @@ async function resolveUniverseRaw(
  */
 export async function resolveUniverse(
   body: MiningRequest,
-  onPage?: (loaded: number, pages: number) => void,
+  prog?: UniverseProgress,
 ): Promise<MiningCandidate[]> {
-  const raw = await resolveUniverseRaw(body, onPage);
+  const raw = await resolveUniverseRaw(body, prog);
   return filterUniverse(raw);
 }
 
@@ -335,6 +373,7 @@ async function fetchCandlesWithRetry(
 async function scanOne(
   cand: MiningCandidate,
   retries: number,
+  strategyId?: string,
 ): Promise<{ result: MiningResult | null; source: string }> {
   const { candles, source } = await fetchCandlesWithRetry(cand.code, retries);
   if (candles.length < 60) return { result: null, source };
@@ -343,7 +382,7 @@ async function scanOne(
     const kn = getKlineName(cand.code);
     if (kn) cand.name = kn;
   }
-  return { result: evaluateMiningSignal({ ...cand, candles }), source };
+  return { result: evaluateMiningSignal({ ...cand, candles }, { strategyId }), source };
 }
 
 // ---------------- 演示数据（离线、无网络） ----------------
@@ -411,8 +450,18 @@ function demoStocks(): { cand: MiningCandidate; candles: Candle[] }[] {
 // ---------------- 扫描编排 ----------------
 
 export type ScanEvent =
-  | { type: "meta"; total: number; universe: string; concurrency: number; rawTotal?: number }
-  | { type: "universe"; loaded: number; pages: number }
+  | {
+      type: "meta";
+      total: number;
+      universe: string;
+      concurrency: number;
+      rawTotal?: number;
+      filters?: MiningFilters;
+      prefilter?: Prefilter | null;
+      strategyId?: string;
+      strategyName?: string;
+    }
+  | { type: "universe"; loaded: number; pages: number; cached?: boolean; ageMs?: number; phase?: string; ttlMs?: number }
   | { type: "result"; item: MiningResult }
   | {
       type: "progress";
@@ -427,7 +476,15 @@ export type ScanEvent =
       score?: number;
       ret?: number;
     }
-  | { type: "done"; scanned: number; failed: number; matched: number; elapsedMs: number }
+  | {
+      type: "done";
+      scanned: number;
+      failed: number;
+      matched: number;
+      elapsedMs: number;
+      /** 未命中原因分布（被各筛选项卡掉的只数 + 取数失败 fetchFailed）。 */
+      reasons?: Record<string, number>;
+    }
   | { type: "error"; message: string };
 
 export interface ScanSummary {
@@ -450,6 +507,7 @@ export async function runMiningScan(
   const concurrency = Math.max(4, Math.min(32, body.concurrency ?? 8));
   const retries = Math.max(0, Math.min(10, body.retries ?? 3));
   const filters: MiningFilters = body.filters ?? {};
+  const strategyId = body.strategyId;
   const isDemo = body.universe === "demo";
 
   const demoMap = new Map<string, Candle[]>();
@@ -461,8 +519,10 @@ export async function runMiningScan(
   } else {
     // 候选池解析阶段（尤其 full 全市场逐页拉取）较耗时，逐页回报进度，
     // 使前端在「开始扫描」前的等待期也有日志滚动，不再像「点了不动」。
-    candidates = await resolveUniverse(body, (loaded, pages) => {
-      onEvent?.({ type: "universe", loaded, pages });
+    candidates = await resolveUniverse(body, {
+      onPage: (loaded, pages) => onEvent?.({ type: "universe", loaded, pages }),
+      onCacheHit: (loaded, pages, ageMs, phase, ttlMs) =>
+        onEvent?.({ type: "universe", loaded, pages, cached: true, ageMs, phase, ttlMs }),
     });
   }
 
@@ -472,8 +532,8 @@ export async function runMiningScan(
 
   // 两段漏斗第 1 段：粗筛（full/broad 默认开启；显式传 prefilter 优先，传 null 关闭）。
   const rawTotal = candidates.length;
+  let pf: Prefilter | null = null;
   if (!isDemo) {
-    let pf: Prefilter | null = null;
     if (body.prefilter !== undefined) pf = body.prefilter;
     else if (body.universe === "full" || body.universe === "broad") pf = DEFAULT_FULL_PREFILTER;
     if (pf) candidates = applyPrefilter(candidates, pf);
@@ -481,12 +541,30 @@ export async function runMiningScan(
 
   const t0 = Date.now();
   const total = candidates.length;
-  onEvent?.({ type: "meta", total, universe: body.universe || "hot", concurrency, rawTotal });
+  // 回显本次筛选+粗筛条件与策略源，便于排查（如 0 命中时核对阈值是否过严）。
+  const strat = strategyId ? getStrategy(strategyId) : undefined;
+  const strategyName = strat ? `${strat.meta.name} v${strat.meta.version}` : undefined;
+  onEvent?.({
+    type: "meta",
+    total,
+    universe: body.universe || "hot",
+    concurrency,
+    rawTotal,
+    filters,
+    prefilter: pf,
+    strategyId,
+    strategyName,
+  });
 
   const results: MiningResult[] = [];
   let scanned = 0;
   let failed = 0;
   let matched = 0;
+  // 未命中原因分布：被各筛选项卡掉的只数 + 取数失败。
+  const reasons: Record<string, number> = {};
+  const bump = (key: RejectReason | "fetchFailed") => {
+    reasons[key] = (reasons[key] ?? 0) + 1;
+  };
 
   if (total === 0) {
     onEvent?.({ type: "done", scanned: 0, failed: 0, matched: 0, elapsedMs: 0 });
@@ -499,9 +577,9 @@ export async function runMiningScan(
     const demo = demoMap.get(cand.code);
     if (demo) {
       await new Promise((r) => setTimeout(r, 40));
-      return { result: evaluateMiningSignal({ ...cand, candles: demo }), source: "demo" };
+      return { result: evaluateMiningSignal({ ...cand, candles: demo }, { strategyId }), source: "demo" };
     }
-    return scanOne(cand, retries);
+    return scanOne(cand, retries, strategyId);
   };
 
   await mapPool(candidates, concurrency, worker, (r, cand) => {
@@ -512,6 +590,7 @@ export async function runMiningScan(
     if (!res) {
       failed++;
       outcome = "failed";
+      bump("fetchFailed");
     } else if (passesFilters(res, filters)) {
       matched++;
       outcome = "matched";
@@ -519,6 +598,8 @@ export async function runMiningScan(
       onEvent?.({ type: "result", item: res });
     } else {
       outcome = "filtered";
+      const rr = rejectReason(res, filters);
+      if (rr) bump(rr);
     }
     onEvent?.({
       type: "progress",
@@ -576,6 +657,6 @@ export async function runMiningScan(
   }
 
   const elapsedMs = Date.now() - t0;
-  onEvent?.({ type: "done", scanned, failed, matched, elapsedMs });
+  onEvent?.({ type: "done", scanned, failed, matched, elapsedMs, reasons });
   return { summary: { total, scanned, failed, matched, elapsedMs }, results };
 }

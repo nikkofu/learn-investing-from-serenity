@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { readNdjson } from "@/lib/stream-client";
 import { NFA } from "@/lib/disclaimers";
 import { PageHeader } from "@/components/ui";
+import { resolveInitialStrategyId, saveStrategyId } from "@/lib/strategyPref";
+import type { StrategyMeta } from "@/lib/strategies";
 
 type LogLevel = "info" | "success" | "warn" | "error" | "debug";
 interface LogEntry {
@@ -132,6 +134,11 @@ export default function MiningPage() {
   const [requireBSignal, setRequireBSignal] = useState(true);
   const [maxBSignalDays, setMaxBSignalDays] = useState<string>(""); // "" = 不限
 
+  // 「B 买入信号」所用买卖策略：与全站（/chart、1/backtest/strategy）共用同一偏好，
+  // 默认带出上次所选（缺省为 Cardwell RSI Trade Navigator 趋势延续版 V2）。
+  const [strategies, setStrategies] = useState<StrategyMeta[]>([]);
+  const [strategyId, setStrategyId] = useState<string>("");
+
   const [dailyMeta, setDailyMeta] = useState<DailyPoolMeta | null>(null);
   const [dailyStale, setDailyStale] = useState(false);
   const [dailyDates, setDailyDates] = useState<string[]>([]);
@@ -194,11 +201,39 @@ export default function MiningPage() {
       } else if (type === "universe") {
         const loaded = Number(ev.loaded) || 0;
         const pages = Number(ev.pages) || 0;
-        pushLog("debug", `· 拉取候选池中：已 ${loaded} 只（第 ${pages} 页）`);
+        if (ev.cached) {
+          const ageMin = (Number(ev.ageMs) || 0) / 60000;
+          const ttlMin = (Number(ev.ttlMs) || 0) / 60000;
+          pushLog(
+            "success",
+            `⚡ 复用候选池快照：${loaded} 只（免去逐页重拉）· 缓存龄 ${ageMin.toFixed(1)} 分钟 · 时段 ${String(ev.phase ?? "")}（TTL ${ttlMin.toFixed(0)} 分钟）`,
+          );
+        } else {
+          pushLog("debug", `· 拉取候选池中：已 ${loaded} 只（第 ${pages} 页）`);
+        }
       } else if (type === "meta") {
         const total = Number(ev.total) || 0;
+        const rawTotal = Number(ev.rawTotal) || 0;
         setProgress((p) => ({ ...p, total }));
-        pushLog("info", `▶ 开始扫描 ${total} 只 · 池 ${label} · 并发 ${ev.concurrency ?? ""}`);
+        pushLog("info", `▶ 开始扫描 ${total} 只${rawTotal > total ? `（粗筛前 ${rawTotal} 只）` : ""} · 池 ${label} · 并发 ${ev.concurrency ?? ""}`);
+        if (ev.strategyName) pushLog("info", `  买卖策略（B 信号源）：${String(ev.strategyName)}`);
+        const f = (ev.filters ?? {}) as Record<string, unknown>;
+        const pf = (ev.prefilter ?? null) as Record<string, unknown> | null;
+        const fp: string[] = [];
+        if (f.minScore != null) fp.push(`最低复合分≥${f.minScore}`);
+        if (f.minExpectedReturn != null) fp.push(`最低预期收益≥${f.minExpectedReturn}%`);
+        if (f.requireUptrend) fp.push(`必须上升通道`);
+        if (f.requireBSignal) fp.push(`必须有 B 买入信号`);
+        if (f.maxBSignalAgeDays != null) fp.push(`B 新鲜度≤${f.maxBSignalAgeDays} 交易日`);
+        pushLog("info", `  筛选条件：${fp.length ? fp.join("，") : "无（全部返回）"}`);
+        if (pf) {
+          const pp: string[] = [];
+          if (pf.minAmount != null) pp.push(`最低成交额≥${(Number(pf.minAmount) / 1e8).toFixed(1)}亿`);
+          if (pf.minTurnover != null) pp.push(`最低换手≥${pf.minTurnover}%`);
+          if (pf.minVolumeRatio != null) pp.push(`最低量比≥${pf.minVolumeRatio}`);
+          if (pf.maxCandidates != null) pp.push(`取前 ${pf.maxCandidates} 只（按成交额）`);
+          if (pp.length) pushLog("info", `  粗筛（第一段漏斗）：${pp.join("，")}`);
+        }
       } else if (type === "progress") {
         setProgress({
           scanned: Number(ev.scanned) || 0,
@@ -231,6 +266,26 @@ export default function MiningPage() {
           "info",
           `■ 完成：扫描 ${ev.scanned}，命中 ${ev.matched}，失败 ${ev.failed}，用时 ${(elapsed / 1000).toFixed(1)}s`
         );
+        const reasons = (ev.reasons ?? {}) as Record<string, number>;
+        const LABELS: Record<string, string> = {
+          minScore: "复合分不足",
+          minExpectedReturn: "预期收益不足",
+          requireUptrend: "非上升通道",
+          requireBSignal: "无 B 买入信号",
+          bSignalMissing: "无 B 买入信号",
+          bSignalStale: "B 信号过期",
+          fetchFailed: "取数失败",
+        };
+        const parts = Object.entries(reasons)
+          .filter(([, n]) => n > 0)
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, n]) => `${LABELS[k] ?? k}卡掉 ${n} 只`);
+        if (parts.length) {
+          pushLog(
+            Number(ev.matched) > 0 ? "info" : "warn",
+            `  未命中原因分布：[${parts.join(" | ")}]`,
+          );
+        }
       } else if (type === "saved") {
         pushLog("success", `💾 已存盘今日股票池 ${ev.date}：共 ${ev.count} 只`);
       } else if (type === "error") {
@@ -262,7 +317,11 @@ export default function MiningPage() {
       concurrency: Number(concurrency) || 16,
       retries: Number(retries) || 3,
       filters: buildFilters(),
+      strategyId: strategyId || undefined,
     };
+    if (selectedStrategy) {
+      pushLog("info", `• 买卖策略（B 信号源）：${selectedStrategy.name} v${selectedStrategy.version}`);
+    }
 
     try {
       const res = await fetch("/api/mining", {
@@ -334,6 +393,34 @@ export default function MiningPage() {
     fetchDailyStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 拉取已登记策略列表，并与全站一致地选出初始策略（上次保存 > 偏好 Cardwell V2 > 后端默认 > 首个）。
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/strategies")
+      .then((r) => r.json())
+      .then((j: { defaultStrategyId?: string; strategies?: StrategyMeta[] }) => {
+        if (!alive) return;
+        const list = j.strategies ?? [];
+        setStrategies(list);
+        setStrategyId(
+          resolveInitialStrategyId({
+            ids: list.map((s) => s.id),
+            urlId: null,
+            backendDefaultId: j.defaultStrategyId ?? null,
+          }),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const selectedStrategy = useMemo(
+    () => strategies.find((s) => s.id === strategyId),
+    [strategies, strategyId],
+  );
 
   /** 载入某日已存股票池到结果表。 */
   async function loadDaily(date?: string) {
@@ -449,6 +536,26 @@ export default function MiningPage() {
               {(Object.keys(UNIVERSE_LABELS) as Universe[]).map((u) => (
                 <option key={u} value={u}>
                   {UNIVERSE_LABELS[u]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-[var(--muted)]">买卖策略（B 信号源，与 /chart 全局一致）</span>
+            <select
+              value={strategyId}
+              onChange={(e) => {
+                setStrategyId(e.target.value);
+                saveStrategyId(e.target.value);
+              }}
+              className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm"
+              title={selectedStrategy?.description}
+            >
+              {strategies.length === 0 && <option value="">加载中…</option>}
+              {strategies.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} v{s.version}
                 </option>
               ))}
             </select>
