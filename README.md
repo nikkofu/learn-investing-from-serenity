@@ -14,6 +14,10 @@
 
 ---
 
+## 🆕 v0.54.2 亮点
+
+*   **修复晚间扫描过滤条件：排除通道破位股票**：在晚间扫描的过滤条件中增加对 `channelStatus` 的检查，排除状态为 `breakdown`（通道破位）的股票。这避免了 B 买入信号后出现破位导致的买卖歧义问题（如 002076 星光股份：有 B 信号但通道已破位）。
+
 ## 🆕 v0.54.1 亮点
 
 *   **修复 TypeScript 编译错误**：修复 `eveningScan.ts` 中 `criteria.maxChannelPosition` 可能为 undefined 的错误，使用空值合并运算符提供默认值 0.15；修复 `scheduler.ts` 中 `cron` 命名空间错误，改用 namespace import。

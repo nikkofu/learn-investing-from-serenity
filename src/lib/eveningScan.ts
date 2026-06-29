@@ -84,6 +84,11 @@ export async function runEveningScan(config: EveningScanConfig = {}): Promise<Ev
         return false;
       }
 
+      // 5. 排除通道破位（breakdown）的股票 - 避免B信号后破位导致歧义
+      if (stock.channelStatus === "breakdown") {
+        return false;
+      }
+
       return true;
     });
   };
