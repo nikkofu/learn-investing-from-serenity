@@ -101,6 +101,11 @@ export default function SettingsPage() {
   const [universeBusy, setUniverseBusy] = useState(false);
   const [universeStatus, setUniverseStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
 
+  // Email configuration
+  const [emailConfig, setEmailConfig] = useState({ senderEmail: "", recipientEmail: "" });
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
+
   const fetchMarket = async () => {
     try {
       const res = await fetch("/api/settings/market");
@@ -161,6 +166,40 @@ export default function SettingsPage() {
       await fetchUniverse();
     } finally {
       setUniverseBusy(false);
+    }
+  };
+
+  const fetchEmailConfig = async () => {
+    try {
+      const res = await fetch("/api/settings/email");
+      const d = await res.json();
+      if (d.config) {
+        // Set empty strings for UI if not configured
+        setEmailConfig({
+          senderEmail: "",
+          recipientEmail: "",
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const saveEmailConfig = async () => {
+    setEmailBusy(true);
+    setEmailStatus(null);
+    try {
+      const res = await fetch("/api/settings/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(emailConfig),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "保存失败");
+      setEmailStatus({ kind: "ok", msg: "邮件配置已保存。晚间扫描功能将使用此配置发送报告邮件。" });
+    } catch (err) {
+      setEmailStatus({ kind: "err", msg: err instanceof Error ? err.message : "保存失败" });
+    } finally {
+      setEmailBusy(false);
     }
   };
 
@@ -353,6 +392,7 @@ export default function SettingsPage() {
     fetchCache();
     fetchMarket();
     fetchUniverse();
+    fetchEmailConfig();
   }, []);
 
   const selectProviderCard = (name: string) => {
@@ -853,6 +893,70 @@ export default function SettingsPage() {
             {universeStatus && (
               <p className={`text-xs ${universeStatus.kind === "ok" ? "text-emerald-400" : universeStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
                 {universeStatus.msg}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-[var(--border)]" />
+
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--text)] select-none">晚间扫描邮件配置</h2>
+          <p className="text-xs text-[var(--muted)] mt-0.5">
+            配置晚间自动股票扫描报告的邮件发送功能。发件人需要先在 agent.qq.com 完成授权，收件人默认为空需手动配置。配置存于 <code className="font-mono text-xs">.data/email-config.json</code>。
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 space-y-4">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-[var(--text)] mb-1.5">
+                发件人邮箱 <span className="text-[var(--muted)] font-normal">（agent.qq.com 别名）</span>
+              </label>
+              <input
+                type="email"
+                placeholder="例如：cadena@agent.qq.com"
+                value={emailConfig.senderEmail}
+                onChange={(e) => setEmailConfig({ ...emailConfig, senderEmail: e.target.value })}
+                disabled={emailBusy}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
+              />
+              {!emailConfig.senderEmail && (
+                <p className="text-xs text-[var(--muted)] mt-1">
+                  发件人邮箱为空时，请先前往 <a href="https://agent.qq.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">agent.qq.com</a> 注册并授权 Agent Mail CLI
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[var(--text)] mb-1.5">
+                收件人邮箱 <span className="text-[var(--muted)] font-normal">（您的个人邮箱）</span>
+              </label>
+              <input
+                type="email"
+                placeholder="例如：your@email.com"
+                value={emailConfig.recipientEmail}
+                onChange={(e) => setEmailConfig({ ...emailConfig, recipientEmail: e.target.value })}
+                disabled={emailBusy}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={saveEmailConfig}
+              disabled={emailBusy || !emailConfig.senderEmail || !emailConfig.recipientEmail}
+              className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50 cursor-pointer select-none"
+            >
+              保存邮件配置
+            </button>
+            {emailStatus && (
+              <p className={`text-xs ${emailStatus.kind === "ok" ? "text-emerald-400" : emailStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
+                {emailStatus.msg}
               </p>
             )}
           </div>

@@ -1,9 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
-import type { LLMConfig, PublicLLMConfig } from "./types";
+import type { LLMConfig, PublicLLMConfig, EmailConfig, PublicEmailConfig } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const CONFIG_PATH = path.join(DATA_DIR, "llm-config.json");
+const EMAIL_CONFIG_PATH = path.join(DATA_DIR, "email-config.json");
 
 /**
  * Load the LLM config. Precedence: the saved config file, then environment
@@ -187,4 +188,61 @@ export async function saveThemeMode(mode: string): Promise<void> {
   }
   current.themeMode = mode;
   await fs.writeFile(CONFIG_PATH, JSON.stringify(current, null, 2), "utf8");
+}
+
+/**
+ * Load email configuration for evening scan reports.
+ */
+export async function loadEmailConfig(): Promise<EmailConfig | null> {
+  try {
+    const raw = await fs.readFile(EMAIL_CONFIG_PATH, "utf8");
+    const config = JSON.parse(raw) as EmailConfig;
+    
+    // Validate basic structure
+    if (typeof config.senderEmail !== "string" || typeof config.recipientEmail !== "string") {
+      return null;
+    }
+    
+    return config;
+  } catch {
+    // no saved config yet
+    return null;
+  }
+}
+
+/**
+ * Save email configuration.
+ */
+export async function saveEmailConfig(config: EmailConfig): Promise<void> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(EMAIL_CONFIG_PATH, JSON.stringify(config, null, 2), "utf8");
+}
+
+/**
+ * Get public email config (safe to expose to browser).
+ */
+export async function getPublicEmailConfig(): Promise<PublicEmailConfig> {
+  try {
+    const raw = await fs.readFile(EMAIL_CONFIG_PATH, "utf8");
+    const config = JSON.parse(raw) as EmailConfig;
+    
+    const maskEmail = (email: string): string => {
+      if (!email) return "";
+      const [local, domain] = email.split("@");
+      if (local.length <= 2) return `${local[0]}***@${domain}`;
+      return `${local[0]}${"*".repeat(local.length - 2)}${local[local.length - 1]}@${domain}`;
+    };
+    
+    return {
+      hasSenderEmail: Boolean(config.senderEmail && config.senderEmail.trim()),
+      hasRecipientEmail: Boolean(config.recipientEmail && config.recipientEmail.trim()),
+      maskedSenderEmail: config.senderEmail ? maskEmail(config.senderEmail) : undefined,
+      maskedRecipientEmail: config.recipientEmail ? maskEmail(config.recipientEmail) : undefined,
+    };
+  } catch {
+    return {
+      hasSenderEmail: false,
+      hasRecipientEmail: false,
+    };
+  }
 }

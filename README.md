@@ -14,6 +14,10 @@
 
 ---
 
+## 🆕 v0.54.0 亮点
+
+*   **新增晚间自动股票扫描与邮件报告功能**：集成 Agent Mail CLI，支持每日定时扫描热门股票并自动发送投资建议邮件。系统会筛选符合"上升趋势 + 5日内B信号 + 35%+预期涨幅 + 通道底部15%以内"条件的股票，生成详细分析报告并通过配置的邮箱发送。用户可在设置页面配置发件人（需先在 agent.qq.com 授权）和收件人邮箱，支持手动触发和定时任务两种模式。**配置信息安全存储在 `.data/email-config.json`，不含敏感信息，可安全提交到 GitHub。**
+
 ## 🆕 v0.53.9 亮点
 
 *   **`/mining` 新增「下轨支撑」过滤条件——上升趋势中精准捕捉高抛低吸切入点**：此前挖掘只能勾「必须上升通道」，但上升通道里现价也可能正贴上轨（追高风险）。本版叠加「必须下轨支撑」：在**上升通道**基础上进一步要求**现价贴近回归通道下轨**（在通道内纵向位置 ≤ 通道宽该百分比、默认 35%）**且未跌破下轨**，专门筛出「上升趋势 + 当前回踩下轨」的低吸切入点。筛选区新增勾选框与「贴近下轨阈值（% 通道宽）」可调输入；命中股票在信号里标「下轨支撑」，执行计划/未命中原因均回显本条件。**不改回归通道任何计算/拟合口径，仅在已有 `technical.trendChannel` 数据上新增一条筛选维度（`MiningResult.channelPosition` 归一化纵向位置 + `requireLowerBandSupport`/`lowerBandPct` 过滤）。**
@@ -343,7 +347,15 @@ Serenity 的设计哲学完全相反——**准确性优先，诚实优先**：
 *   **两段漏斗加速**：先用 clist 批量字段（成交额 / 换手 / 量比，零额外请求）把 4448 只全市场粗筛到数百只，再拉 K 线，**冷扫 K 线请求量降约 5–10×**。
 *   **批量 K 线原语**：`getKlinesBatch()` 有界并发 + 缓存 + 单只重试，为高吞吐扫描与回测供能。
 *   **截面相对排名**：每只命中股给出在"综合分 / 预期收益"上的全市场 percentile，回答"它今天在命中里排第几"。
-*   **卖方一致预期**：聚合东财研报，给出看多占比 / 一致 EPS / 目标价 / 上行空间，单只超时自动降级不拖垮整批。
+
+### 📧 晚间自动扫描与邮件报告
+*   **定时股票扫描**：支持每日定时执行股票扫描，筛选符合"上升趋势 + 5日内B信号 + 35%+预期涨幅 + 通道底部15%以内"等条件的优质股票。
+*   **智能邮件推送**：集成 Agent Mail CLI，自动生成详细的投资建议分析邮件并发送到配置的收件人邮箱。
+*   **安全配置管理**：邮件配置（发件人/收件人）通过设置页面管理，安全存储在本地，不含敏感信息，可安全提交到 GitHub。
+*   **灵活执行模式**：支持手动触发（`npx tsx scripts/evening-scan.ts`）和定时任务自动执行两种模式。
+
+### 🔍 卖方一致预期
+*   **聚合东财研报**：给出看多占比 / 一致 EPS / 目标价 / 上行空间，单只超时自动降级不拖垮整批。
 
 ### 📊 三套回测体系（含 A 股涨跌停撮合真实性）
 *   **单只回测**：传统均线突破 + Serenity 瓶颈动量突破多策略（V4→V8 可切换对照），新增**对比基准（买入持有）+ 样本量 + z 检验显著性**标注；回测口径只取前复权有效正价区间，杜绝长周期负价失真。
@@ -380,6 +392,8 @@ Serenity 的设计哲学完全相反——**准确性优先，诚实优先**：
 | 海报渲染 | `html-to-image` 无损离线导出 |
 | 数据采集 | `playwright-core`（抓取 X 一手发言） |
 | 行情来源 | 东方财富 / 腾讯 / 新浪 / 百度 / 同花顺 / 巨潮 多源互备 |
+| 邮件发送 | Agent Mail CLI (agently-cli) |
+| 定时任务 | node-cron |
 
 > 🧩 **零额外重型依赖**：所有量化引擎（回测 / 校准 / 排名 / 漏斗）均为纯 TypeScript 实现，无 Python sidecar 也可完整运行。
 
@@ -428,6 +442,44 @@ npm run build          # 生产构建
 页面下方还会呈现：
 *   **回测口径胜率**：样本外 walk-forward 命中率 + 样本内对照 + N 日前瞻 + 信号数。
 *   **对比基准**：策略累计收益 vs 同期买入持有、超额 pp、对 50% 的 z 检验显著性徽章（样本 < 30 明确标"不显著"）。
+
+### 📧 晚间自动扫描 · 手动执行
+系统支持晚间自动股票扫描与邮件报告功能，可手动触发或配置定时任务。
+
+#### 手动执行
+```bash
+npx tsx scripts/evening-scan.ts
+```
+
+#### 配置步骤
+1. **安装 Agent Mail CLI**：
+   ```bash
+   npm install -g @tencent-qqmail/agently-cli
+   npx skills add https://agent.qq.com --skill -g -y
+   agently-cli auth login  # 完成授权
+   ```
+
+2. **配置邮件**：在设置页面新增"晚间扫描邮件配置"区域：
+   - **发件人邮箱**：填写已授权的 agent.qq.com 别名（如 cadena@agent.qq.com）
+   - **收件人邮箱**：填写您的个人邮箱（如 your@email.com）
+
+3. **筛选条件**：默认筛选条件为：
+   - 上升趋势：是
+   - B信号时效：5个交易日内
+   - 预期涨幅：≥35%
+   - 通道位置：底部15%以内
+
+#### 定时任务集成
+如需启用定时任务，可在应用启动代码中集成：
+```typescript
+import { createEveningScanScheduler } from "@/lib/scheduler";
+
+// 每天晚上20:00执行
+createEveningScanScheduler({
+  cronSchedule: "0 20 * * *",
+  timezone: "Asia/Shanghai",
+});
+```
 *   **校准闭环卡片**：当前全局 Brier 分、实际命中率与可靠性曲线。
 *   **筹码分布 / 技术形态 / 价格情景 / 一键分享海报。**
 
@@ -515,7 +567,7 @@ curl -s localhost:3000/api/calibration/record
 │   │   ├── mining/               # 全市场智能挖掘
 │   │   ├── backtest/             # 组合回测 + strategy 建议忠实回测
 │   │   ├── sectors/ scanner/ chart/ map/ sync/ settings/
-│   │   └── api/                  # analyze / backtest / calibration / mining / market …
+│   │   └── api/                  # analyze / backtest / calibration / mining / market / settings …
 │   ├── components/               # QuantChart / SharingCard / RadarChart / ThemeSwitcher …
 │   └── lib/                      # 算法与数据层
 │       ├── agentWorkflow.ts      # 生成器→批判者→裁判 编排 + 回测锚定胜率
@@ -525,11 +577,14 @@ curl -s localhost:3000/api/calibration/record
 │       ├── recommendationBacktest.ts # 建议忠实回测框架
 │       ├── calibration.ts        # 校准闭环（Brier / 可靠性）
 │       ├── miningScan.ts mining.ts   # 两段漏斗 + 截面排名 + 卖方一致预期
+│       ├── eveningScan.ts        # 晚间股票扫描 + 邮件报告生成
+│       ├── agentlyMailer.ts      # Agent Mail CLI 邮件发送封装
+│       ├── scheduler.ts          # 定时任务调度器
 │       ├── llm.ts                # OpenAI 兼容封装（含 json_schema 强约束）
 │       └── sources/              # 东财/腾讯/新浪/百度/同花顺/巨潮 多源 + unified 门面
 ├── data/                         # 行业映射 / 知识库 / 热度榜 JSON
 ├── knowledge/                    # 方法论 markdown
-├── scripts/                      # 行业同步 / X 抓取脚本
+├── scripts/                      # 行业同步 / X 抓取脚本 / 晚间扫描脚本
 └── public/                       # 静态资源
 ```
 

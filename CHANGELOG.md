@@ -4,6 +4,34 @@
 
 ---
 
+## [0.54.0] - 2026-06-29
+
+> **新增晚间自动股票扫描与邮件报告功能**：集成 Agent Mail CLI，支持每日定时扫描热门股票并自动发送投资建议邮件。系统会筛选符合"上升趋势 + 5日内B信号 + 35%+预期涨幅 + 通道底部15%以内"条件的股票，生成详细分析报告并通过配置的邮箱发送。用户可在设置页面配置发件人（需先在 agent.qq.com 授权）和收件人邮箱，支持手动触发和定时任务两种模式。**配置信息安全存储在 `.data/email-config.json`，不含敏感信息，可安全提交到 GitHub。**
+
+### 新增
+- `src/lib/eveningScan.ts`：晚间精选扫描核心逻辑，支持精确过滤条件（上升趋势、B信号时效、预期涨幅、通道位置）；邮件HTML模板生成（含股票详细分析表格）；纯文本摘要生成。
+- `src/lib/agentlyMailer.ts`：Agent Mail CLI 邮件发送封装，支持两步确认机制；HTML富文本邮件支持；错误处理和日志记录。
+- `src/lib/scheduler.ts`：基于 node-cron 的定时任务调度器；支持手动触发和定时执行；完整的任务状态管理。
+- `scripts/evening-scan.ts`：独立执行的晚间扫描脚本，便于测试和手动触发。
+- `src/lib/types.ts`：新增 `EmailConfig` 和 `PublicEmailConfig` 接口，用于邮件配置类型定义。
+- `src/lib/config.ts`：新增邮件配置加载/保存/公开化函数（`loadEmailConfig`、`saveEmailConfig`、`getPublicEmailConfig`）；支持邮箱地址脱敏显示。
+- `src/app/api/settings/email/route.ts`：邮件配置 API 端点，支持 GET（获取公开配置）和 POST（保存配置）。
+- `src/app/settings/page.tsx`：设置页面新增"晚间扫描邮件配置"区域；发件人邮箱输入（含 agent.qq.com 注册引导）；收件人邮箱输入；配置保存和状态显示。
+
+### 改进
+- 更新 README.md：新增 v0.54.0 亮点说明；晚间自动扫描功能详细使用说明；技术栈补充 Agent Mail CLI 和 node-cron；项目结构新增相关模块。
+- 邮件配置安全性：配置存储在 `.data/email-config.json`，已在 `.gitignore` 中排除；API 返回脱敏邮箱地址；前端不显示完整邮箱地址。
+
+### 使用说明
+- **手动执行**：`npx tsx scripts/evening-scan.ts`
+- **配置步骤**：1. 安装 Agent Mail CLI 并授权；2. 在设置页面配置发件人和收件人邮箱；3. 运行脚本或集成定时任务
+- **默认筛选条件**：上升趋势（是）、B信号时效（5个交易日内）、预期涨幅（≥35%）、通道位置（底部15%以内）
+
+### 质量门禁
+- `tsc --noEmit` 0 error · `eslint` 0 error
+
+---
+
 ## [0.53.9] - 2026-06-26
 
 > **`/mining` 新增「下轨支撑」过滤条件——上升趋势中寻找高抛低吸切入点**：此前 `/mining` 只能筛「必须上升通道」，但上升通道里现价可能正贴近上轨（追高风险）。本版叠加「必须下轨支撑」过滤：在**上升通道**基础上，进一步要求**现价贴近回归通道下轨**（纵向位置 ≤ 通道宽该百分比，默认 35%）**且未跌破下轨**，从而锁定「上升趋势 + 当前回踩下轨支撑」的高抛低吸切入点。阈值页面可调。**不改回归通道的任何计算/拟合口径，仅在已有 `technical.trendChannel` 数据上新增一条筛选维度。**

@@ -10,6 +10,26 @@ export interface LLMConfig {
   providers?: Record<string, { baseURL: string; apiKey: string; model?: string; filters?: string }>;
 }
 
+/** Email configuration for evening scan reports. */
+export interface EmailConfig {
+  /** Sender email (agent.qq.com alias, must be authorized via agently-cli auth login) */
+  senderEmail: string;
+  /** Recipient email for evening scan reports */
+  recipientEmail: string;
+}
+
+/** Public email config (safe to expose to browser). */
+export interface PublicEmailConfig {
+  /** Whether sender email is configured */
+  hasSenderEmail: boolean;
+  /** Whether recipient email is configured */
+  hasRecipientEmail: boolean;
+  /** Masked sender email (e.g., "c***@agent.qq.com") */
+  maskedSenderEmail?: string;
+  /** Masked recipient email (e.g., "n***@qq.com") */
+  maskedRecipientEmail?: string;
+}
+
 /** Config as exposed to the browser — apiKey is redacted. */
 export interface PublicLLMConfig {
   provider: string;
