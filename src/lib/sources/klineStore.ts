@@ -82,6 +82,21 @@ function freshMs(): number {
   return isAShareActiveTime() ? 2 * 60 * 1000 : 12 * 60 * 60 * 1000;
 }
 
+/**
+ * 最近一个「应已收盘结算」的交易日（北京时区，YYYY-MM-DD）。
+ * 收盘清算完成（约 15:30）前当日尚未结算，取上一交易日；周末顺延至上一工作日。
+ * 注：未含法定节假日日历，节假日会回退到最近自然工作日，该日无数据时增量取数为空，
+ * 按既有逻辑降级回放盘内数据，不影响正确性。
+ */
+function latestSettledTradingDate(): string {
+  const bj = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+  if (bj.getHours() * 60 + bj.getMinutes() < 15 * 60 + 30) bj.setDate(bj.getDate() - 1);
+  while (bj.getDay() === 0 || bj.getDay() === 6) bj.setDate(bj.getDate() - 1);
+  const m = String(bj.getMonth() + 1).padStart(2, "0");
+  const d = String(bj.getDate()).padStart(2, "0");
+  return `${bj.getFullYear()}-${m}-${d}`;
+}
+
 function baiduToCandles(rows: BaiduCandle[], limit: number): Candle[] {
   const out: Candle[] = [];
   for (let i = 0; i < rows.length; i++) {
@@ -195,11 +210,14 @@ async function loadDailyHistory(code: string, order: "em-first" | "baidu-first",
   const disk = await readDisk(code, fq);
 
   if (disk && disk.candles.length > 0) {
+    const lastDate = disk.candles[disk.candles.length - 1].date;
+    // 盘后若盘内缺最新结算交易日的日 K（收盘后仍停留在上一交易日），强制补一次增量；
+    // 否则 12h「非交易时段新鲜窗口」内会一直看不到当日结算 bar。补齐后条件自动失效，不反复打网。
+    const missingSettledBar = lastDate < latestSettledTradingDate();
     // 盘内足够新 → 直接回放，不打网络。
-    if (Date.now() - disk.updatedAt < freshMs()) {
+    if (!missingSettledBar && Date.now() - disk.updatedAt < freshMs()) {
       return { data: disk.candles, source: `${disk.source}+disk`, attempts: [] };
     }
-    const lastDate = disk.candles[disk.candles.length - 1].date;
     try {
       const recent = await fetchRecent(code, order, OVERLAP_BARS, fq);
       if (recent.data.length === 0) {
