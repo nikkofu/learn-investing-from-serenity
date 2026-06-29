@@ -105,6 +105,8 @@ export default function SettingsPage() {
   const [emailConfig, setEmailConfig] = useState({ 
     senderEmail: "", 
     recipientEmail: "",
+    maskedSenderEmail: "",
+    maskedRecipientEmail: "",
     filters: {
       requireUptrend: true,
       maxBSignalAgeDays: 5,
@@ -186,8 +188,10 @@ export default function SettingsPage() {
       const d = await res.json();
       if (d.config) {
         setEmailConfig({
-          senderEmail: "",
-          recipientEmail: "",
+          senderEmail: d.config.maskedSenderEmail || "",
+          recipientEmail: d.config.maskedRecipientEmail || "",
+          maskedSenderEmail: d.config.maskedSenderEmail || "",
+          maskedRecipientEmail: d.config.maskedRecipientEmail || "",
           filters: d.config.filters || {
             requireUptrend: true,
             maxBSignalAgeDays: 5,
@@ -961,7 +965,7 @@ export default function SettingsPage() {
                 type="email"
                 placeholder="例如：cadena@agent.qq.com"
                 value={emailConfig.senderEmail}
-                onChange={(e) => setEmailConfig({ ...emailConfig, senderEmail: e.target.value })}
+                onChange={(e) => setEmailConfig({ ...emailConfig, senderEmail: e.target.value, maskedSenderEmail: "" })}
                 disabled={emailBusy}
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
               />
@@ -980,7 +984,7 @@ export default function SettingsPage() {
                 type="email"
                 placeholder="例如：your@email.com"
                 value={emailConfig.recipientEmail}
-                onChange={(e) => setEmailConfig({ ...emailConfig, recipientEmail: e.target.value })}
+                onChange={(e) => setEmailConfig({ ...emailConfig, recipientEmail: e.target.value, maskedRecipientEmail: "" })}
                 disabled={emailBusy}
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
               />
