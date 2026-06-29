@@ -672,6 +672,7 @@ function ChartInner() {
                       </button>
                     )}
                   </div>
+                  {drawing && <div className="text-[10px] font-mono text-[var(--accent)] flex items-center gap-1.5"><span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />AI 实时生成绘图中…（约 15–25 秒，请稍候）</div>}
                   {drawErr && <div className="text-[10px] font-mono text-amber-400">{drawErr}</div>}
                   {drawRationale && <div className="text-[10px] font-mono text-[var(--muted)] leading-relaxed">💡 {drawRationale}</div>}
                 </div>

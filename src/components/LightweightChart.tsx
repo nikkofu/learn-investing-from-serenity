@@ -829,6 +829,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             ))}
           </div>
           {tfLoading && <span className="text-[9px] text-[var(--accent)] ml-0.5">分时加载中…</span>}
+          {intraday && drawings.length > 0 && <span className="text-[9px] text-amber-400 ml-0.5">AI 绘图仅在 K 线（日/周/月）显示，请切换周期</span>}
           {tfErr && <span className="text-[9px] text-emerald-400 ml-0.5">{tfErr}</span>}
         </div>
 
