@@ -1,7 +1,8 @@
-import cron from "node-cron";
+import * as cron from "node-cron";
 import { runEveningScan, generateEmailHtml, generateEmailText, type EveningScanConfig } from "./eveningScan";
 import { sendAgentlyMail, type AgentlyMailConfig } from "./agentlyMailer";
 import { loadEmailConfig } from "./config";
+import type { ScheduledTask } from "node-cron";
 
 export interface SchedulerConfig {
   /** cron 表达式（默认每天晚上20:00执行） */
@@ -13,7 +14,7 @@ export interface SchedulerConfig {
 }
 
 class EveningScanScheduler {
-  private task: cron.ScheduledTask | null = null;
+  private task: ScheduledTask | null = null;
   private config: SchedulerConfig;
   private isRunning: boolean = false;
 
@@ -86,11 +87,27 @@ class EveningScanScheduler {
       }
       
       console.log(`邮件配置: 发件人=${emailConfig.senderEmail}, 收件人=${emailConfig.recipientEmail}`);
+      
+      // 从邮件配置中获取筛选条件，如果没有则使用默认值
+      const scanConfig = emailConfig.filters || this.config.scanConfig || {
+        requireUptrend: true,
+        maxBSignalAgeDays: 5,
+        minExpectedReturn: 35,
+        maxChannelPosition: 0.15,
+        maxResults: 10,
+        enableAdaptiveRelaxation: true,
+      };
+      
+      console.log(`筛选条件:`, scanConfig);
 
       // 1. 执行扫描
       console.log("步骤1: 执行股票扫描...");
-      const scanResult = await runEveningScan(this.config.scanConfig);
+      const scanResult = await runEveningScan(scanConfig);
       console.log(`扫描完成: 共扫描 ${scanResult.totalScanned} 只股票，筛选出 ${scanResult.filteredCount} 只`);
+      
+      if (scanResult.usedRelaxedCriteria) {
+        console.log(`使用了放宽条件:`, scanResult.relaxedCriteria);
+      }
 
       // 2. 生成邮件内容
       console.log("步骤2: 生成邮件内容...");

@@ -14,6 +14,10 @@
 
 ---
 
+## 🆕 v0.54.1 亮点
+
+*   **修复 TypeScript 编译错误**：修复 `eveningScan.ts` 中 `criteria.maxChannelPosition` 可能为 undefined 的错误，使用空值合并运算符提供默认值 0.15；修复 `scheduler.ts` 中 `cron` 命名空间错误，改用 namespace import。
+
 ## 🆕 v0.54.0 亮点
 
 *   **新增晚间自动股票扫描与邮件报告功能**：集成 Agent Mail CLI，支持每日定时扫描热门股票并自动发送投资建议邮件。系统会筛选符合"上升趋势 + 5日内B信号 + 35%+预期涨幅 + 通道底部15%以内"条件的股票，生成详细分析报告并通过配置的邮箱发送。用户可在设置页面配置发件人（需先在 agent.qq.com 授权）和收件人邮箱，支持手动触发和定时任务两种模式。**配置信息安全存储在 `.data/email-config.json`，不含敏感信息，可安全提交到 GitHub。**

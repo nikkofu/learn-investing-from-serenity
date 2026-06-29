@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { LLMConfig, PublicLLMConfig, EmailConfig, PublicEmailConfig } from "./types";
+import { DEFAULT_EVENING_SCAN_FILTERS } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const CONFIG_PATH = path.join(DATA_DIR, "llm-config.json");
@@ -203,6 +204,11 @@ export async function loadEmailConfig(): Promise<EmailConfig | null> {
       return null;
     }
     
+    // Ensure filters exist with defaults
+    if (!config.filters) {
+      config.filters = { ...DEFAULT_EVENING_SCAN_FILTERS };
+    }
+    
     return config;
   } catch {
     // no saved config yet
@@ -238,11 +244,13 @@ export async function getPublicEmailConfig(): Promise<PublicEmailConfig> {
       hasRecipientEmail: Boolean(config.recipientEmail && config.recipientEmail.trim()),
       maskedSenderEmail: config.senderEmail ? maskEmail(config.senderEmail) : undefined,
       maskedRecipientEmail: config.recipientEmail ? maskEmail(config.recipientEmail) : undefined,
+      filters: config.filters || { ...DEFAULT_EVENING_SCAN_FILTERS },
     };
   } catch {
     return {
       hasSenderEmail: false,
       hasRecipientEmail: false,
+      filters: { ...DEFAULT_EVENING_SCAN_FILTERS },
     };
   }
 }

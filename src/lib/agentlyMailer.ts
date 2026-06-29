@@ -40,7 +40,7 @@ export async function sendAgentlyMail(config: AgentlyMailConfig): Promise<{ succ
     const firstCommand = `agently-cli message +send --to "${config.to}" --subject "${config.subject}" --body-file ./body.html`;
     
     console.log("执行第一步邮件发送...");
-    const { stdout: firstStdout, stderr: firstStderr } = await execAsync(firstCommand, {
+    const { stdout: firstStdout } = await execAsync(firstCommand, {
       timeout: 30000,
       cwd: tempDir,
     });
@@ -56,7 +56,7 @@ export async function sendAgentlyMail(config: AgentlyMailConfig): Promise<{ succ
       } else if (response.confirmation_required && response.confirmation_token) {
         confirmToken = response.confirmation_token;
       }
-    } catch (e) {
+    } catch {
       // 如果JSON解析失败，尝试从文本中提取token
       const tokenMatch = firstStdout.match(/confirmation_token["\s:]+([^\s"}]+)/);
       if (tokenMatch) {
@@ -116,7 +116,7 @@ export async function sendAgentlyMailSimple(config: AgentlyMailConfig): Promise<
     const firstCommand = `agently-cli message +send --to "${config.to}" --subject "${config.subject}" --body "${body}"`;
     
     console.log("执行第一步邮件发送...");
-    const { stdout: firstStdout, stderr: firstStderr } = await execAsync(firstCommand, {
+    const { stdout: firstStdout } = await execAsync(firstCommand, {
       timeout: 30000,
     });
 
@@ -131,7 +131,7 @@ export async function sendAgentlyMailSimple(config: AgentlyMailConfig): Promise<
       } else if (response.confirmation_required && response.confirmation_token) {
         confirmToken = response.confirmation_token;
       }
-    } catch (e) {
+    } catch {
       const tokenMatch = firstStdout.match(/confirmation_token["\s:]+([^\s"}]+)/);
       if (tokenMatch) {
         confirmToken = tokenMatch[1];
@@ -149,15 +149,11 @@ export async function sendAgentlyMailSimple(config: AgentlyMailConfig): Promise<
     const secondCommand = `agently-cli message +send --to "${config.to}" --subject "${config.subject}" --body "${body}" --confirmation-token "${confirmToken}"`;
     
     console.log("执行第二步邮件发送...");
-    const { stdout: secondStdout, stderr: secondStderr } = await execAsync(secondCommand, {
+    const { stdout: secondStdout } = await execAsync(secondCommand, {
       timeout: 30000,
     });
 
     console.log("第二步响应:", secondStdout);
-
-    if (secondStderr && secondStderr.includes("error")) {
-      return { success: false, error: secondStderr };
-    }
 
     return { success: true };
   } catch (error) {

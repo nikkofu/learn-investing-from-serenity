@@ -16,7 +16,35 @@ export interface EmailConfig {
   senderEmail: string;
   /** Recipient email for evening scan reports */
   recipientEmail: string;
+  /** Evening scan filter configuration */
+  filters?: EveningScanFilters;
 }
+
+/** Evening scan filter configuration. */
+export interface EveningScanFilters {
+  /** Whether to require uptrend */
+  requireUptrend: boolean;
+  /** Maximum B signal age in days */
+  maxBSignalAgeDays: number;
+  /** Minimum expected return percentage */
+  minExpectedReturn: number;
+  /** Maximum channel position (0-1, e.g., 0.15 = bottom 15%) */
+  maxChannelPosition: number;
+  /** Maximum number of results to return */
+  maxResults: number;
+  /** Whether to enable adaptive filter relaxation (auto-loosen when 0 results) */
+  enableAdaptiveRelaxation: boolean;
+}
+
+/** Default evening scan filters. */
+export const DEFAULT_EVENING_SCAN_FILTERS: EveningScanFilters = {
+  requireUptrend: true,
+  maxBSignalAgeDays: 5,
+  minExpectedReturn: 35,
+  maxChannelPosition: 0.15,
+  maxResults: 10,
+  enableAdaptiveRelaxation: true,
+};
 
 /** Public email config (safe to expose to browser). */
 export interface PublicEmailConfig {
@@ -28,6 +56,8 @@ export interface PublicEmailConfig {
   maskedSenderEmail?: string;
   /** Masked recipient email (e.g., "n***@qq.com") */
   maskedRecipientEmail?: string;
+  /** Evening scan filters (safe to expose) */
+  filters?: EveningScanFilters;
 }
 
 /** Config as exposed to the browser — apiKey is redacted. */

@@ -12,15 +12,6 @@ import { runEveningScan, generateEmailHtml, generateEmailText, type EveningScanC
 import { sendAgentlyMail, type AgentlyMailConfig } from "../src/lib/agentlyMailer";
 import { loadEmailConfig } from "../src/lib/config";
 
-// 扫描配置
-const SCAN_CONFIG: EveningScanConfig = {
-  requireUptrend: true,           // 上升趋势
-  maxBSignalAgeDays: 5,           // 5个交易日内刚发出B信号
-  minExpectedReturn: 35,          // 预期35%+涨幅
-  maxChannelPosition: 0.15,       // 通道底部15%以内
-  maxResults: 10,                 // 最多返回10只股票
-};
-
 async function main() {
   console.log("========================================");
   console.log("🚀 开始晚间股票扫描");
@@ -40,16 +31,33 @@ async function main() {
     console.log(`✅ 邮件配置加载完成:`);
     console.log(`   发件人: ${emailConfig.senderEmail}`);
     console.log(`   收件人: ${emailConfig.recipientEmail}`);
+    
+    // 从配置中获取筛选条件
+    const scanConfig: EveningScanConfig = emailConfig.filters || {
+      requireUptrend: true,
+      maxBSignalAgeDays: 5,
+      minExpectedReturn: 35,
+      maxChannelPosition: 0.15,
+      maxResults: 10,
+      enableAdaptiveRelaxation: true,
+    };
+    
+    console.log(`   筛选条件:`, scanConfig);
 
     // 1. 执行扫描
     console.log("\n📊 步骤1: 执行股票扫描...");
-    const scanResult = await runEveningScan(SCAN_CONFIG);
+    const scanResult = await runEveningScan(scanConfig);
     
     console.log(`✅ 扫描完成:`);
     console.log(`   - 扫描日期: ${scanResult.date}`);
     console.log(`   - 总扫描数量: ${scanResult.totalScanned} 只`);
     console.log(`   - 符合条件: ${scanResult.filteredCount} 只`);
     console.log(`   - 精选股票: ${scanResult.stocks.length} 只`);
+    
+    if (scanResult.usedRelaxedCriteria) {
+      console.log(`   - 使用了放宽条件: 是`);
+      console.log(`   - 放宽后条件:`, scanResult.relaxedCriteria);
+    }
 
     if (scanResult.stocks.length > 0) {
       console.log("\n🏆 精选股票列表:");

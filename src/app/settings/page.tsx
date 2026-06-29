@@ -102,7 +102,18 @@ export default function SettingsPage() {
   const [universeStatus, setUniverseStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
 
   // Email configuration
-  const [emailConfig, setEmailConfig] = useState({ senderEmail: "", recipientEmail: "" });
+  const [emailConfig, setEmailConfig] = useState({ 
+    senderEmail: "", 
+    recipientEmail: "",
+    filters: {
+      requireUptrend: true,
+      maxBSignalAgeDays: 5,
+      minExpectedReturn: 35,
+      maxChannelPosition: 0.15,
+      maxResults: 10,
+      enableAdaptiveRelaxation: true,
+    }
+  });
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailStatus, setEmailStatus] = useState<{ kind: "ok" | "err" | "info"; msg: string } | null>(null);
 
@@ -174,10 +185,17 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings/email");
       const d = await res.json();
       if (d.config) {
-        // Set empty strings for UI if not configured
         setEmailConfig({
           senderEmail: "",
           recipientEmail: "",
+          filters: d.config.filters || {
+            requireUptrend: true,
+            maxBSignalAgeDays: 5,
+            minExpectedReturn: 35,
+            maxChannelPosition: 0.15,
+            maxResults: 10,
+            enableAdaptiveRelaxation: true,
+          },
         });
       }
     } catch {
@@ -942,6 +960,118 @@ export default function SettingsPage() {
                 disabled={emailBusy}
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
               />
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--border)] pt-4">
+            <h3 className="text-sm font-semibold text-[var(--text)] mb-3">筛选条件配置</h3>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="requireUptrend"
+                  checked={emailConfig.filters.requireUptrend}
+                  onChange={(e) => setEmailConfig({ 
+                    ...emailConfig, 
+                    filters: { ...emailConfig.filters, requireUptrend: e.target.checked } 
+                  })}
+                  disabled={emailBusy}
+                  className="rounded border-[var(--border)] bg-[var(--bg)]"
+                />
+                <label htmlFor="requireUptrend" className="text-sm text-[var(--text)]">
+                  要求上升趋势
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm text-[var(--text)] mb-1">
+                  B信号最大天数（1-30天）
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={emailConfig.filters.maxBSignalAgeDays}
+                  onChange={(e) => setEmailConfig({ 
+                    ...emailConfig, 
+                    filters: { ...emailConfig.filters, maxBSignalAgeDays: parseInt(e.target.value) || 5 } 
+                  })}
+                  disabled={emailBusy}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-[var(--text)] mb-1">
+                  最低预期涨幅（%）
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={emailConfig.filters.minExpectedReturn}
+                  onChange={(e) => setEmailConfig({ 
+                    ...emailConfig, 
+                    filters: { ...emailConfig.filters, minExpectedReturn: parseInt(e.target.value) || 35 } 
+                  })}
+                  disabled={emailBusy}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-[var(--text)] mb-1">
+                  通道底部位置阈值（0-1，如0.15=底部15%）
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={emailConfig.filters.maxChannelPosition}
+                  onChange={(e) => setEmailConfig({ 
+                    ...emailConfig, 
+                    filters: { ...emailConfig.filters, maxChannelPosition: parseFloat(e.target.value) || 0.15 } 
+                  })}
+                  disabled={emailBusy}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-[var(--text)] mb-1">
+                  最大返回股票数量（1-50）
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={emailConfig.filters.maxResults}
+                  onChange={(e) => setEmailConfig({ 
+                    ...emailConfig, 
+                    filters: { ...emailConfig.filters, maxResults: parseInt(e.target.value) || 10 } 
+                  })}
+                  disabled={emailBusy}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="enableAdaptiveRelaxation"
+                  checked={emailConfig.filters.enableAdaptiveRelaxation}
+                  onChange={(e) => setEmailConfig({ 
+                    ...emailConfig, 
+                    filters: { ...emailConfig.filters, enableAdaptiveRelaxation: e.target.checked } 
+                  })}
+                  disabled={emailBusy}
+                  className="rounded border-[var(--border)] bg-[var(--bg)]"
+                />
+                <label htmlFor="enableAdaptiveRelaxation" className="text-sm text-[var(--text)]">
+                  启用自适应放宽条件（当筛选结果为0时自动放宽条件）
+                </label>
+              </div>
             </div>
           </div>
 
