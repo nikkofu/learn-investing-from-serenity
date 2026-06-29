@@ -221,6 +221,30 @@ export default function SettingsPage() {
     }
   };
 
+  const runEveningScanNow = async () => {
+    if (!emailConfig.senderEmail || !emailConfig.recipientEmail) {
+      setEmailStatus({ kind: "err", msg: "请先配置发件人和收件人邮箱" });
+      return;
+    }
+    setEmailBusy(true);
+    setEmailStatus({ kind: "info", msg: "正在执行晚间扫描并发送邮件，请稍候..." });
+    try {
+      const res = await fetch("/api/settings/evening-scan", {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "扫描执行失败");
+      setEmailStatus({ 
+        kind: "ok", 
+        msg: `扫描完成！扫描日期: ${data.scanResult.date}，总扫描: ${data.scanResult.totalScanned} 只，符合条件: ${data.scanResult.filteredCount} 只，精选: ${data.scanResult.stocksCount} 只。邮件已发送。` 
+      });
+    } catch (err) {
+      setEmailStatus({ kind: "err", msg: err instanceof Error ? err.message : "扫描执行失败" });
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
   const fetchCache = async () => {
     try {
       const res = await fetch("/api/settings/cache");
@@ -1083,6 +1107,14 @@ export default function SettingsPage() {
               className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50 cursor-pointer select-none"
             >
               保存邮件配置
+            </button>
+            <button
+              type="button"
+              onClick={runEveningScanNow}
+              disabled={emailBusy || !emailConfig.senderEmail || !emailConfig.recipientEmail}
+              className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-50 cursor-pointer select-none"
+            >
+              {emailBusy ? "执行中..." : "立即执行扫描并发送邮件"}
             </button>
             {emailStatus && (
               <p className={`text-xs ${emailStatus.kind === "ok" ? "text-emerald-400" : emailStatus.kind === "err" ? "text-red-400" : "text-[var(--muted)]"}`}>
