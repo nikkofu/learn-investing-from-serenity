@@ -5,12 +5,12 @@
  * （/backtest/strategy）等所有页面，默认带出同一策略，并记忆用户「最后一次选择」——
  * 任意页面切换策略都会写入 localStorage，下次打开任意页面自然带出上次选择。
  *
- * 优先级：深链 ?strategy= > 上次保存 > 偏好默认（Cardwell RSI Trade Navigator 趋势延续版 V2）> 后端默认 > 列表首个。
+ * 优先级：深链 ?strategy= > 上次保存 > 偏好默认（Cardwell RSI Trade Navigator 趋势捕捉版 V3）> 后端默认 > 列表首个。
  * 所有候选都按「是否存在于当前策略列表」校验，失效时安全回退。
  */
 
 /** 偏好默认买卖引擎：Cardwell RSI Trade Navigator 趋势延续版 V2（解决 V1 强趋势出局后回不来）。 */
-export const PREFERRED_PRO_STRATEGY_ID = "tv-cardwell-rsi-navigator-v2";
+export const PREFERRED_PRO_STRATEGY_ID = "tv-cardwell-rsi-navigator-v3";
 /** 持久化键：全站共用同一 key，保证各页面一致。 */
 export const PRO_STRATEGY_LS_KEY = "serenity.chart.proStrategyId";
 

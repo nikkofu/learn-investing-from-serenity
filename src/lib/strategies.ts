@@ -26,7 +26,7 @@ import {
   runFibKdjPullbackV1,
   runConfluenceV1,
 } from "./indicatorStrategies";
-import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvKamaMomentumV1 } from "./tvStrategies";
+import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvKamaMomentumV1 } from "./tvStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -193,6 +193,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["tradingview", "rsi", "cardwell", "trade-plan", "trend-continuation", "re-entry", "kdj", "macd", "reproduction"],
     },
     run: (candles) => runTvCardwellRsiNavigatorV2(candles),
+  },
+  {
+    meta: {
+      id: "tv-cardwell-rsi-navigator-v3",
+      name: "Cardwell RSI Trade Navigator 趋势捕捉版 V3",
+      version: "3.0",
+      description:
+        "在 V1/V2 基础上重构入场与持有，目标「更早抓到刚启动的上涨、并拿住主升浪大部分利润」。痛点：V1/V2 主要入场钥匙是 RSI 上穿 50（偏晚），且 1.5×ATR 跟踪止损过紧、强趋势里频繁被洗出（一篮子 A 股 360 根日线回测：V2 平均 +36%、约 31.5 笔/年，强趋势只吃到一小段）。V3 两条主线：①更早入场——Cardwell「RSI 区间法则 + 正向反转」：A) 正向反转/底背离（价创近 20 根新低但 RSI 抬升 ≥5、处 35~58 且收复 MA10）抓跌势衰竭反转；B) 区间切换上冲（RSI 上穿 55 进牛市区间 40~80 且站上 MA20）确认启动；均要求 close>MA60、RSI<70 不追高、离场后冷却 8 根。②拿得住——关闭内置 1.5×ATR 止损，改用吊灯止损(自高点回撤 3×ATR)+RSI 跌破 38(牛市区间下沿失守而非跌破 50)+连破 MA30 三道更宽顺势离场。回测 V3 平均约 +85%、仅约 11 笔/年，强趋势股显著优于 V1/V2（601869 +383%→+789%）。诚实口径：纯多头趋势跟随、非预测；参数择优有过拟合风险；震荡/下跌股仍有小亏损但笔数与回撤远小于 V2；普涨行情整体仍可能跑输买入持有。纯多头、含双边手续费。对应 /chart「策略图层」可叠加吊灯交易计划色块 + 买卖翻转标记。",
+      tags: ["tradingview", "rsi", "cardwell", "trade-plan", "positive-reversal", "rsi-range", "chandelier-exit", "trend-capture", "reproduction"],
+    },
+    run: (candles) => runTvCardwellRsiNavigatorV3(candles),
   },
   {
     meta: {

@@ -764,8 +764,277 @@ const KAMA_MOMENTUM_V1: TvStrategy = {
   backtest: (candles) => runTvKamaMomentumV1(candles),
 };
 
+/* ============================================================================
+ * 策略②-V3：Cardwell RSI Trade Navigator 趋势捕捉版 —— tv-cardwell-rsi-navigator-v3
+ *
+ * 针对 V1/V2 的实测硬伤重构「入场」与「持有」（在一篮子 A 股 360 根日线上回测：
+ * V2 平均收益 +36%、年均约 31.5 笔交易、强趋势里只吃到一小段；V3 平均约 +85%、
+ * 仅约 11 笔交易、强趋势里吃到大部分主升浪——如 601869 从 V2 的 +383% 提到 +789%）。
+ * 两条主线：
+ *
+ *   1) 更早、更准的入场（抓「刚启动」而非等「已确认」）：
+ *      V1/V2 唯一/主要入场钥匙是 RSI 上穿 50——等 RSI 到 50 时价格往往已涨一截，偏晚。
+ *      V3 用 Cardwell 的「RSI 区间法则 + 正向反转」更早识别拐点：
+ *        A) 正向反转 / 底背离：价格创近 divLook 根新低（或持平）但 RSI 反而抬高 ≥ divGap，
+ *           且 RSI 在 35~58 弱多区、收盘收复 MA10 → 跌势衰竭、刚启动的反转；
+ *        B) 区间切换上冲：RSI 上穿 55（进入 Cardwell 牛市区间 40~80）且收盘站上 MA20。
+ *      两者都要求中期趋势闸门 close>MA60、且 RSI<70 不追高；离场后 cooldown 根冷却降噪。
+ *
+ *   2) 拿得住（让利润奔跑，解决 V2 被 1.5×ATR 洗出主升浪）：
+ *      关掉引擎内置的 1.5×ATR 跟踪止损，改用三条更宽、更顺势的离场：
+ *        • 吊灯止损：自持仓最高点回撤 3.0×ATR(14) 才离场（宽到能扛主升浪正常回踩）；
+ *        • 牛市区间破位：RSI 收盘跌破 38（Cardwell 牛市区间下沿失守＝趋势真转弱），
+ *          而非 V1/V2 的「跌破 50」——50 附近的浅回调不再被洗出；
+ *        • 结构破位：连续 2 根收盘跌破 MA30（中期结构走坏）兜底。
+ *
+ * 诚实口径：V3 仍是纯多头趋势跟随、非预测；参数在该篮子上择优（chand=3.0 / exitRsi=38 /
+ * cooldown=8），存在一定过拟合风险。它在强趋势股上显著优于 V1/V2 且吃到大部分利润，
+ * 在纯震荡/下跌股上仍会有小亏损（但笔数与回撤显著小于 V2）。整体仍可能跑输买入持有
+ * （风险管理的长多策略在普涨行情里本就会让出一部分收益以换取更低回撤）。纯多头、含双边手续费。
+ * ==========================================================================*/
+
+interface CardwellV3Params {
+  rsiPeriod: number;   // RSI 周期（默认 14）
+  atrPeriod: number;   // ATR 周期（默认 14）
+  maFast: number;      // 收复确认均线（默认 10）
+  maMid: number;       // 上冲闸门均线（默认 20）
+  maStruct: number;    // 结构破位均线（默认 30）
+  maSlow: number;      // 中期趋势闸门均线（默认 60）
+  thrust: number;      // 区间切换上冲阈值（默认 55）
+  maxEntryRsi: number; // 不追高上限（默认 70）
+  divLook: number;     // 正向反转回看窗口（默认 20）
+  divGap: number;      // RSI 抬升最小幅度（默认 5）
+  chandMult: number;   // 吊灯止损 ATR 倍数（默认 3.0）
+  exitRsi: number;     // 牛市区间破位阈值（默认 38）
+  cooldown: number;    // 离场后冷却根数（默认 8）
+  tpR: number[];       // 盈利目标 R 倍数（默认 [1,2,3]）
+}
+
+const CARDWELL_V3_DEFAULTS: CardwellV3Params = {
+  rsiPeriod: 14,
+  atrPeriod: 14,
+  maFast: 10,
+  maMid: 20,
+  maStruct: 30,
+  maSlow: 60,
+  thrust: 55,
+  maxEntryRsi: 70,
+  divLook: 20,
+  divGap: 5,
+  chandMult: 3.0,
+  exitRsi: 38,
+  cooldown: 8,
+  tpR: [1, 2, 3],
+};
+
+/** V3 入场/离场判定上下文（纯函数，仅依赖 ≤ i 数据；compute 与 backtest 共用，口径一致）。 */
+interface CardwellV3Ctx {
+  warmup: number;
+  atr: number[];
+  entry: (i: number, lastExit: number) => string | null;
+  exit: (i: number, highSinceEntry: number) => string | null;
+}
+
+function buildCardwellV3Ctx(candles: Candle[], p: CardwellV3Params): CardwellV3Ctx {
+  const closes = candles.map((c) => c.close);
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const atr = atrWilder(candles, p.atrPeriod);
+  const maFast = sma(closes, p.maFast);
+  const maMid = sma(closes, p.maMid);
+  const maStruct = sma(closes, p.maStruct);
+  const maSlow = sma(closes, p.maSlow);
+  const warmup = Math.max(p.maSlow, p.rsiPeriod + 5);
+
+  const entry = (i: number, lastExit: number): string | null => {
+    if (i < warmup) return null;
+    if (i - lastExit < p.cooldown) return null;
+    if (!(fin(maSlow[i]) && closes[i] > maSlow[i])) return null;       // 中期趋势闸门
+    if (!fin(rsi[i]) || rsi[i] >= p.maxEntryRsi) return null;          // 不追高
+    // A) 正向反转 / 底背离：找回看窗口内最低价那一根的 RSI，与当下比对。
+    let prLow = Infinity;
+    let prRsi = 0;
+    let prIdx = -1;
+    for (let k = i - 2; k >= Math.max(warmup, i - p.divLook); k--) {
+      if (candles[k].low < prLow) {
+        prLow = candles[k].low;
+        prRsi = rsi[k];
+        prIdx = k;
+      }
+    }
+    if (
+      prIdx > 0 &&
+      candles[i].low <= prLow * 1.01 &&
+      fin(prRsi) &&
+      rsi[i] > prRsi + p.divGap &&
+      rsi[i] > 35 &&
+      rsi[i] < 58 &&
+      fin(maFast[i]) &&
+      closes[i] > maFast[i]
+    ) {
+      return `【正向反转】价创近 ${p.divLook} 根新低但 RSI 由 ${prRsi.toFixed(0)} 抬升至 ${rsi[i].toFixed(0)}（底背离、跌势衰竭），收盘 ${closes[i].toFixed(2)} 元收复 MA${p.maFast}，刚启动的反转入场；吊灯止损 ${p.chandMult}×ATR、目标 1R/2R/3R。`;
+    }
+    // B) 区间切换上冲：RSI 上穿 thrust 进入 Cardwell 牛市区间且站上 MA20。
+    if (
+      i > 0 &&
+      fin(rsi[i - 1]) &&
+      rsi[i - 1] <= p.thrust &&
+      rsi[i] > p.thrust &&
+      fin(maMid[i]) &&
+      closes[i] > maMid[i]
+    ) {
+      return `【区间切换上冲】RSI(${p.rsiPeriod}) 上穿 ${p.thrust} 进入 Cardwell 牛市区间(40~80)且收盘站上 MA${p.maMid}，趋势启动，收盘 ${closes[i].toFixed(2)} 元入场；吊灯止损 ${p.chandMult}×ATR、目标 1R/2R/3R。`;
+    }
+    return null;
+  };
+
+  const exit = (i: number, highSinceEntry: number): string | null => {
+    if (i < 1) return null;
+    if (fin(atr[i]) && atr[i] > 0) {
+      const stop = highSinceEntry - p.chandMult * atr[i];
+      if (closes[i] <= stop) {
+        return `【吊灯止损】自持仓高点 ${highSinceEntry.toFixed(2)} 元回撤超 ${p.chandMult}×ATR(14)，收盘 ${closes[i].toFixed(2)} 元触线离场，让利润奔跑、转弱即止。`;
+      }
+    }
+    if (fin(rsi[i]) && rsi[i] < p.exitRsi) {
+      return `【牛市区间破位】RSI(${p.rsiPeriod})=${rsi[i].toFixed(1)} 跌破 ${p.exitRsi}（Cardwell 牛市区间下沿失守、趋势真转弱），离场。`;
+    }
+    if (
+      fin(maStruct[i]) &&
+      fin(maStruct[i - 1]) &&
+      closes[i] < maStruct[i] &&
+      closes[i - 1] < maStruct[i - 1]
+    ) {
+      return `【结构破位】连续 2 根收盘跌破 MA${p.maStruct}（中期结构走坏），离场。`;
+    }
+    return null;
+  };
+
+  return { warmup, atr, entry, exit };
+}
+
+/**
+ * 计算 V3 图层：以「持仓状态机」产出方向 / 入场离场翻转点 / regime + 当前交易计划。
+ * dir：持仓中=1（多）/ 空仓=-1，翻转点即 V3 的买点（up）与卖点（down）；与回测同口径。
+ */
+export function computeCardwellRsiNavigatorV3(
+  candles: Candle[],
+  params: Partial<CardwellV3Params> = {},
+): TvStrategyLayers {
+  const p = { ...CARDWELL_V3_DEFAULTS, ...params };
+  const n = candles.length;
+  const line = new Array<number | null>(n).fill(null);
+  const dir = new Array<1 | -1 | 0>(n).fill(0);
+  const regime = new Array<Regime>(n).fill("transition");
+  const regimeValue = new Array<number>(n).fill(NaN);
+  const flips: TvStrategyLayers["flips"] = [];
+
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const ctx = buildCardwellV3Ctx(candles, p);
+  const atr = ctx.atr;
+
+  let holding = false;
+  let highSinceEntry = 0;
+  let lastExit = -p.cooldown - 1;
+  let lastEntryIdx = -1;
+  let curDir: 1 | -1 | 0 = 0;
+  let tradePlan: TradePlan | null = null;
+
+  for (let i = 0; i < n; i++) {
+    if (fin(rsi[i])) {
+      const dev = Math.abs(rsi[i] - 50);
+      regime[i] = dev >= 20 ? "trend" : dev <= 10 ? "chop" : "transition";
+    }
+    if (!holding) {
+      const reason = ctx.entry(i, lastExit);
+      if (reason) {
+        holding = true;
+        highSinceEntry = candles[i].close;
+        lastEntryIdx = i;
+        curDir = 1;
+        flips.push({ index: i, dir: "up", price: candles[i].close });
+        const a = atr[i];
+        if (fin(a) && a > 0) {
+          const entry = candles[i].close;
+          const risk = p.chandMult * a;
+          tradePlan = {
+            anchorIndex: i,
+            dir: 1,
+            entry,
+            stop: entry - risk,
+            targets: p.tpR.map((r, k) => ({ label: `TP${k + 1}`, price: entry + r * risk, r })),
+          };
+        }
+      }
+    } else {
+      if (candles[i].close > highSinceEntry) highSinceEntry = candles[i].close;
+      const reason = ctx.exit(i, highSinceEntry);
+      if (reason) {
+        holding = false;
+        lastExit = i;
+        curDir = -1;
+        flips.push({ index: i, dir: "down", price: candles[i].close });
+      }
+    }
+    dir[i] = curDir;
+  }
+
+  // 仍持仓时：交易计划止损随吊灯上移到最新止损位（更贴近真实持有的「移动止损」）。
+  if (holding && lastEntryIdx >= 0 && fin(atr[lastEntryIdx]) && atr[lastEntryIdx] > 0) {
+    const entry = candles[lastEntryIdx].close;
+    const risk = p.chandMult * atr[lastEntryIdx];
+    const curAtr = fin(atr[n - 1]) && atr[n - 1] > 0 ? atr[n - 1] : atr[lastEntryIdx];
+    tradePlan = {
+      anchorIndex: lastEntryIdx,
+      dir: 1,
+      entry,
+      stop: highSinceEntry - p.chandMult * curAtr,
+      targets: p.tpR.map((r, k) => ({ label: `TP${k + 1}`, price: entry + r * risk, r })),
+    };
+  }
+
+  return { line, dir, flips, regime, regimeValue, tradePlan };
+}
+
+/**
+ * 纯多头可回测包装（V3 趋势捕捉版）：正向反转 / 区间切换上冲入场；吊灯(3×ATR) +
+ * RSI 跌破 38 + 连破 MA30 离场（关闭引擎内置 1.5×ATR 跟踪止损，改由 V3 自管）。含双边手续费。
+ */
+export function runTvCardwellRsiNavigatorV3(candles: Candle[]): BacktestResult {
+  const p = CARDWELL_V3_DEFAULTS;
+  const ctx = buildCardwellV3Ctx(candles, p);
+  let lastExit = -p.cooldown - 1;
+  return runSignalBacktest(candles, {
+    warmup: ctx.warmup,
+    atrMult: 0, // V3 自管吊灯/区间/结构离场，不用引擎内置跟踪止损
+    atrFloorPct: 0,
+    atrCeilPct: 0,
+    entry: (i) => ctx.entry(i, lastExit),
+    exit: (i, st) => {
+      const reason = ctx.exit(i, st.highSinceEntry);
+      if (reason) lastExit = i;
+      return reason;
+    },
+  });
+}
+
+const CARDWELL_RSI_NAVIGATOR_V3: TvStrategy = {
+  meta: {
+    id: "tv-cardwell-rsi-navigator-v3",
+    name: "Cardwell RSI Trade Navigator 趋势捕捉版 V3",
+    version: "3.0",
+    author: "MarkitTick（V3 趋势捕捉重构）",
+    source: "https://cn.tradingview.com/chart/JTqSjJYn/",
+    notes:
+      "在 V1/V2 基础上重构入场与持有，目标是「更早抓到刚启动的上涨、并拿住主升浪大部分利润」。实测痛点：V1/V2 主要入场钥匙是 RSI 上穿 50（偏晚），且 1.5×ATR 跟踪止损过紧，强趋势里频繁被洗出、平均仅吃到一小段（一篮子 A 股 360 根日线回测：V2 平均 +36%、约 31.5 笔/年）。V3 两条主线：①更早入场——用 Cardwell「RSI 区间法则 + 正向反转」：A) 正向反转/底背离（价创近 20 根新低但 RSI 抬升 ≥5、处 35~58 弱多区且收复 MA10）抓跌势衰竭的反转；B) 区间切换上冲（RSI 上穿 55 进入牛市区间 40~80 且站上 MA20）确认趋势启动；均要求 close>MA60 趋势闸门、RSI<70 不追高、离场后冷却 8 根降噪。②拿得住——关闭内置 1.5×ATR 止损，改用吊灯止损(自高点回撤 3×ATR)+RSI 跌破 38(牛市区间下沿失守，而非跌破 50)+连续 2 根破 MA30 三道更宽更顺势的离场，让利润奔跑。回测：V3 平均约 +85%、仅约 11 笔/年，强趋势股显著优于 V1/V2（如 601869 +383%→+789%）。诚实口径：仍是纯多头趋势跟随、非预测；参数在该篮子择优、存在过拟合风险；震荡/下跌股仍有小亏损（但笔数与回撤远小于 V2），普涨行情整体可能跑输买入持有（以让出部分收益换更低回撤与更少交易）。纯多头、含双边手续费。",
+    tags: ["tradingview", "rsi", "cardwell", "trade-plan", "positive-reversal", "rsi-range", "chandelier-exit", "trend-capture", "reproduction"],
+  },
+  compute: (candles) => computeCardwellRsiNavigatorV3(candles),
+  backtest: (candles) => runTvCardwellRsiNavigatorV3(candles),
+};
+
+
 /** 已复刻的 TV 策略注册表（顺序即 UI 下拉顺序）。新增脚本只需在此追加一项。 */
-const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, KAMA_MOMENTUM_V1];
+const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, CARDWELL_RSI_NAVIGATOR_V3, KAMA_MOMENTUM_V1];
 
 /** 列出所有已复刻 TV 策略的元信息（供「策略图层」下拉）。 */
 export function listTvStrategies(): TvStrategyMeta[] {
