@@ -63,16 +63,49 @@ class ChipRenderer implements IPrimitivePaneRenderer {
       }
 
       ctx.save();
-      // 1) 各价位筹码横条
+      // 成本相同带：临近现价 ±band 的筹码视为「成本相同」（第三色）。
+      const cp = data.currentPrice;
+      const band = cp != null ? Math.max(cp * 0.0075, 0.01) : 0;
+      // 1) 各价位筹码横条（三色：盈利红 / 亏损蓝 / 成本相同黄）
       for (const b of data.bins) {
         if (b.volume <= 0) continue;
         const y = series.priceToCoordinate(b.price);
         if (y == null) continue;
         const w = maxW * (b.volume / data.maxVolume);
         if (w < 0.5) continue;
-        const profit = data.currentPrice != null && b.price <= data.currentPrice;
-        ctx.fillStyle = profit ? "rgba(239, 68, 68, 0.34)" : "rgba(56, 189, 248, 0.30)";
+        let color: string;
+        if (cp != null && Math.abs(b.price - cp) <= band) {
+          color = "rgba(234, 179, 8, 0.52)"; // 成本相同（黄）
+        } else if (cp != null && b.price < cp) {
+          color = "rgba(239, 68, 68, 0.40)"; // 盈利（红）
+        } else {
+          color = "rgba(56, 189, 248, 0.36)"; // 亏损（蓝）
+        }
+        ctx.fillStyle = color;
         ctx.fillRect(rightX - w, y - thickness / 2, w, thickness);
+      }
+
+      // 1b) 现价线：在筹码区画一条贯穿的虚线 + 价签，标明盈利/亏损分界
+      if (cp != null) {
+        const cy = series.priceToCoordinate(cp);
+        if (cy != null) {
+          ctx.beginPath();
+          ctx.setLineDash([2, 2]);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = "rgba(226, 232, 240, 0.85)";
+          ctx.moveTo(rightX - maxW, cy);
+          ctx.lineTo(rightX, cy);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          const tag = `现价 ${cp.toFixed(2)}`;
+          ctx.font = "9px sans-serif";
+          const tw = ctx.measureText(tag).width + 6;
+          ctx.fillStyle = "rgba(226, 232, 240, 0.92)";
+          ctx.fillRect(rightX - maxW - tw - 2, cy - 7, tw, 14);
+          ctx.fillStyle = "#1a1a1a";
+          ctx.textBaseline = "middle";
+          ctx.fillText(tag, rightX - maxW - tw + 1, cy);
+        }
       }
 
       // 2) 高量日价格 → 筹码条纹（贯穿直方图区的琥珀色横纹 + 价签）

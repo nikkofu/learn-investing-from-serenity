@@ -50,8 +50,9 @@ class LabelView implements IPrimitivePaneView {
 export class PaneLabelPrimitive implements ISeriesPrimitive<Time> {
   chart: IChartApi | null = null;
   series: ISeriesApi<SeriesType> | null = null;
-  readonly text: string;
+  text: string;
   readonly color: string;
+  private _requestUpdate: (() => void) | null = null;
   private readonly _views: LabelView[];
 
   constructor(text: string, color: string) {
@@ -59,13 +60,21 @@ export class PaneLabelPrimitive implements ISeriesPrimitive<Time> {
     this.color = color;
     this._views = [new LabelView(this)];
   }
+  /** 更新标签文字（随光标显示当前数值），触发轻量重绘。 */
+  setText(text: string): void {
+    if (text === this.text) return;
+    this.text = text;
+    this._requestUpdate?.();
+  }
   attached(param: SeriesAttachedParameter<Time, SeriesType>): void {
     this.chart = param.chart;
     this.series = param.series;
+    this._requestUpdate = param.requestUpdate;
   }
   detached(): void {
     this.chart = null;
     this.series = null;
+    this._requestUpdate = null;
   }
   updateAllViews(): void {}
   paneViews(): readonly IPrimitivePaneView[] {
