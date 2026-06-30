@@ -41,6 +41,10 @@ export interface RegressionChannelData {
   upperStroke: string;
   /** 下轨描边色（rgba）。 */
   lowerStroke: string;
+  /** 每根 K 线的中轨价位位移（= slope×周期折算），用于向右线性外推预测段。 */
+  slopePerBar: number;
+  /** 预测段根数：自最后一根向右外推多少根（回归通道延伸/预测区）。 */
+  projectBars: number;
 }
 
 // 中轨色跟随主题 `--faint`（与经典 SVG 的 stroke="var(--faint)" opacity 0.5 同口径）；
@@ -62,29 +66,49 @@ class ChannelRenderer implements IPrimitivePaneRenderer {
     const ts = chart.timeScale();
     target.useMediaCoordinateSpace((scope) => {
       const ctx = scope.context;
-      // 把每根可定位的点换算成画布坐标（off-screen / 回放未到的点 timeToCoordinate 返回 null，跳过）。
-      const cols: { x: number; yU: number; yM: number; yL: number }[] = [];
+      type Col = { x: number; yU: number; yM: number; yL: number };
+      // 历史段：把每根可定位的点换算成画布坐标（off-screen / 回放未到的点 timeToCoordinate 返回 null，跳过）。
+      const hist: Col[] = [];
       for (const p of data.points) {
         const x = ts.timeToCoordinate(p.time);
         const yU = series.priceToCoordinate(p.upper);
         const yM = series.priceToCoordinate(p.mid);
         const yL = series.priceToCoordinate(p.lower);
         if (x == null || yU == null || yM == null || yL == null) continue;
-        cols.push({ x, yU, yM, yL });
+        hist.push({ x, yU, yM, yL });
       }
-      if (cols.length < 2) return;
+      if (hist.length < 2) return;
 
-      // 1) 轨间填充带：沿上轨左→右，再沿下轨右→左闭合。
+      // 预测段：自最后一根已结算点起按每根斜率向右线性外推 projectBars 根（回归通道延伸/预测区）。
+      // x 用 barSpacing 推进（未来根无数据点、timeToCoordinate 取不到），y 仍用 priceToCoordinate 以兼容对数/百分比标度。
+      const proj: Col[] = [];
+      const last = data.points[data.points.length - 1];
+      const upperDiff = last.upper - last.mid;
+      const lowerDiff = last.mid - last.lower;
+      const bs = ts.options().barSpacing;
+      const xLast = hist[hist.length - 1].x;
+      for (let k = 1; k <= data.projectBars && bs > 0; k++) {
+        const midP = last.mid + data.slopePerBar * k;
+        const yU = series.priceToCoordinate(midP + upperDiff);
+        const yM = series.priceToCoordinate(midP);
+        const yL = series.priceToCoordinate(midP - lowerDiff);
+        if (yU == null || yM == null || yL == null) continue;
+        proj.push({ x: xLast + k * bs, yU, yM, yL });
+      }
+      const all = proj.length ? hist.concat(proj) : hist;
+
+      // 1) 轨间填充带（历史 + 预测整体），沿上轨左→右、下轨右→左闭合。
       ctx.beginPath();
-      ctx.moveTo(cols[0].x, cols[0].yU);
-      for (let i = 1; i < cols.length; i++) ctx.lineTo(cols[i].x, cols[i].yU);
-      for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i].x, cols[i].yL);
+      ctx.moveTo(all[0].x, all[0].yU);
+      for (let i = 1; i < all.length; i++) ctx.lineTo(all[i].x, all[i].yU);
+      for (let i = all.length - 1; i >= 0; i--) ctx.lineTo(all[i].x, all[i].yL);
       ctx.closePath();
       ctx.fillStyle = data.areaFill;
       ctx.fill();
 
-      // 2) 三轨描边：上/下轨虚线（dash 2 3），中轨更淡点线（dash 1 4，opacity 0.5）。
-      const stroke = (key: "yU" | "yM" | "yL", color: string, dash: number[], width: number, alpha: number) => {
+      // 2) 三轨描边：历史段实显，预测段更长虚线 + 更低不透明度以示「外推预测」。
+      const strokeRun = (cols: Col[], key: "yU" | "yM" | "yL", color: string, dash: number[], width: number, alpha: number) => {
+        if (cols.length < 2) return;
         ctx.save();
         ctx.beginPath();
         ctx.setLineDash(dash);
@@ -96,9 +120,16 @@ class ChannelRenderer implements IPrimitivePaneRenderer {
         ctx.stroke();
         ctx.restore();
       };
-      stroke("yU", data.upperStroke, [2, 3], 1.2, 1);
-      stroke("yL", data.lowerStroke, [2, 3], 1.2, 1);
-      stroke("yM", faintColor(), [1, 4], 0.8, 0.5);
+      const fc = faintColor();
+      strokeRun(hist, "yU", data.upperStroke, [2, 3], 1.6, 1);
+      strokeRun(hist, "yL", data.lowerStroke, [2, 3], 1.6, 1);
+      strokeRun(hist, "yM", fc, [1, 4], 1, 0.6);
+      if (proj.length) {
+        const pj = [hist[hist.length - 1], ...proj];
+        strokeRun(pj, "yU", data.upperStroke, [6, 4], 1.4, 0.7);
+        strokeRun(pj, "yL", data.lowerStroke, [6, 4], 1.4, 0.7);
+        strokeRun(pj, "yM", fc, [2, 5], 0.9, 0.45);
+      }
     });
   }
 }

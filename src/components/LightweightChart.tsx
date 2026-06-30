@@ -92,7 +92,8 @@ const patColor = (k: PatternSignal["kind"]) =>
   k === "topDivergence" ? PAT_TOP : k === "bottomDivergence" ? PAT_BOTTOM : k === "volumeClimax" ? PAT_CLIMAX : PAT_DRY;
 
 // 默认可视范围 ≈ 近 6 个月（按周期换算的 K 线根数）；右侧再留若干根空白便于看清最新走势与标签。
-const RIGHT_MARGIN_BARS = 8;
+const PROJECT_BARS = 18; // 预测/投影区根数：回归通道与交易计划 TP/SL/Entry 标记向右外推的交易日数（约 10–20 日）。
+const RIGHT_MARGIN_BARS = PROJECT_BARS + 4; // 右侧留白容纳预测区 + 少量边距。
 function defaultVisibleBars(tf: Timeframe): number {
   if (tf === "1W") return 28; // ≈半年周线
   if (tf === "1M") return 8; // ≈半年月线
@@ -186,7 +187,7 @@ const ZONE_RISK = "239,68,68"; // 红
 const ZONE_REWARD = "16,185,129"; // 绿
 const ZONE_TP_SYM = ["●", "★", "▲"];
 const ZONE_REWARD_ALPHA = [0.2, 0.15, 0.11, 0.08];
-function buildTradeZones(plan: TradePlan, anchorTime: Time): TradeZonesData {
+function buildTradeZones(plan: TradePlan, anchorTime: Time, nowTime: Time): TradeZonesData {
   const f = (v: number) => v.toFixed(2);
   const bands: TradeZoneBand[] = [{ from: plan.entry, to: plan.stop, fill: `rgba(${ZONE_RISK},0.16)` }];
   const ladder = [plan.entry, ...plan.targets.map((t) => t.price)];
@@ -204,7 +205,7 @@ function buildTradeZones(plan: TradePlan, anchorTime: Time): TradeZonesData {
       axisFg: "#fff",
     })),
   ];
-  return { anchorTime, bands, levels };
+  return { anchorTime, nowTime, projectBars: PROJECT_BARS, bands, levels };
 }
 
 export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], trendChannel, initialTvStrategyId = "", engineSlot, liveQuote = null }: LightweightChartProps) {
@@ -298,9 +299,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     const up = type === "up"; // 上行通道红、其余（down/range）绿，与经典 SVG 同色口径
     return {
       points,
-      areaFill: up ? "rgba(239,68,68,0.08)" : "rgba(16,185,129,0.08)",
-      upperStroke: up ? "rgba(239,68,68,0.22)" : "rgba(16,185,129,0.18)",
-      lowerStroke: up ? "rgba(239,68,68,0.18)" : "rgba(16,185,129,0.22)",
+      slopePerBar: slope * factor,
+      projectBars: PROJECT_BARS,
+      areaFill: up ? "rgba(239,68,68,0.10)" : "rgba(16,185,129,0.10)",
+      upperStroke: up ? "rgba(239,68,68,0.6)" : "rgba(16,185,129,0.5)",
+      lowerStroke: up ? "rgba(239,68,68,0.5)" : "rgba(16,185,129,0.6)",
     };
   }, [trendChannel, intraday, period, candles, toTime]);
   const resonance = useMemo(() => computeResonance(candles, macd, rsi, kdj, boll), [candles, macd, rsi, kdj, boll]);
@@ -476,12 +479,16 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     // 临时今日蜡烛仅日线口径；周/月线由已结算日 K 重采样，盘中不补合成 bar。
     if (period === "1D" && liveDate > lastDate) {
       const open = q.open || q.prevClose || q.price;
+      const liveUp = q.price >= open;
       const bar: CandlestickData = {
         time: liveDate as unknown as Time,
         open,
         high: Math.max(q.high || q.price, q.price, open),
         low: Math.min(q.low || q.price, q.price, open),
         close: q.price,
+        // 盘中未结算「临时今日蜡烛」：半透明实体 + 琥珀色影线，与已结算蜡烛区分。
+        color: (liveUp ? UP : DOWN) + "66",
+        wickColor: "#f59e0b",
       };
       liveBarRef.current = bar;
       series.update(bar);
@@ -608,7 +615,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     const volSeries = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, color: UP });
     volSeriesRef.current = volSeries;
     paintersRef.current.push((vc) => volSeries.setData(vc.map((c) => ({ time: toTime(c.date), value: c.volume || 0, color: (c.close >= c.open ? UP : DOWN) + "66" }))));
-    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.893, bottom: 0 } });
 
     // 均线：始终创建全部 MA 序列并存引用，仅按 maOn 切换 visible。
     // 这样勾选/取消 MA 只切换该线可见性（见下方独立 effect），不触发图表重建，避免布局（缩放/平移/时间位置）被重置。
@@ -697,7 +704,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     // 向右画风险带(红)/盈利带(绿) + 各价位右轴标签（× SL / ► Entry / ● TP1 / ★ TP2 / ▲ TP3）。
     const plan = tvLayers?.tradePlan;
     if (plan && plan.anchorIndex >= 0 && plan.anchorIndex < candles.length) {
-      const zones = buildTradeZones(plan, toTime(candles[plan.anchorIndex].date));
+      const zones = buildTradeZones(plan, toTime(candles[plan.anchorIndex].date), toTime(candles[candles.length - 1].date));
       candleSeries.attachPrimitive(new TradeZonesPrimitive(zones));
     }
 
@@ -736,9 +743,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       guide(s, 20);
     }
     const panes = chart.panes();
-    // 主图相对更高更大；副图（量价/MACD/RSI/KDJ）高度较此前缩小约 25%（1.4→1.05）。
+    // 副图（MACD/RSI/KDJ）高度在原基础上再缩 1/3（1.05→0.70），释放的高度全部归主 K 线图。
     if (panes[0]) panes[0].setStretchFactor(4);
-    for (let pi = 1; pi < panes.length; pi++) panes[pi]?.setStretchFactor(1.05);
+    for (let pi = 1; pi < panes.length; pi++) panes[pi]?.setStretchFactor(0.7);
 
     // AI 画图叠加层（仅日线口径；横线/区间走价格线，趋势线走两点序列，标注走 marker）
     if (!intraday && drawings.length > 0) {

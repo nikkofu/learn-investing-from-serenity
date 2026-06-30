@@ -49,8 +49,12 @@ export interface TradeZoneLevel {
 
 /** 交易计划色块的全部绘制数据。 */
 export interface TradeZonesData {
-  /** 入场锚定根的时间：矩形带从这里向右画到画布右沿。 */
+  /** 入场锚定根的时间：风险/盈利带从这里向右铺到预测区右沿。 */
   anchorTime: Time;
+  /** 当前根（最后一根已结算 K）的时间：TP/Entry/SL 虚线段与价签自此向右延伸至预测区。 */
+  nowTime: Time;
+  /** 预测区根数：TP/Entry/SL 标记自当前根向右外推的交易日数。 */
+  projectBars: number;
   bands: TradeZoneBand[];
   levels: TradeZoneLevel[];
 }
@@ -67,34 +71,56 @@ class ZonesRenderer implements IPrimitivePaneRenderer {
     target.useMediaCoordinateSpace((scope) => {
       const ctx = scope.context;
       const width = scope.mediaSize.width;
-      // 锚定根不在当前序列数据里（如逐根回放游标尚未到入场根）→ 不画，避免色块铺满全图。
-      const xc = ts.timeToCoordinate(data.anchorTime);
-      if (xc == null) return;
-      const x0 = xc;
+      // 锚定根 / 当前根坐标（回放游标尚未到对应根 → 取不到则不画，避免铺满全图）。
+      const x0 = ts.timeToCoordinate(data.anchorTime);
+      const xNow = ts.timeToCoordinate(data.nowTime);
+      if (x0 == null || xNow == null) return;
       if (x0 >= width) return;
+      // 预测区右沿：自当前根按 barSpacing 向右推 projectBars 根（未来根无数据点、timeToCoordinate 取不到）。
+      const bs = ts.options().barSpacing;
+      const projEndX = xNow + data.projectBars * bs;
 
       if (this._mode === "fill") {
+        const rightX = Math.min(projEndX, width);
         for (const b of data.bands) {
           const yA = series.priceToCoordinate(b.from);
           const yB = series.priceToCoordinate(b.to);
           if (yA == null || yB == null) continue;
           ctx.fillStyle = b.fill;
-          ctx.fillRect(x0, Math.min(yA, yB), width - x0, Math.abs(yA - yB));
+          ctx.fillRect(x0, Math.min(yA, yB), Math.max(0, rightX - x0), Math.abs(yA - yB));
         }
         return;
       }
 
+      // line 模式：TP/Entry/SL 改为「自当前价向右延伸至预测区」的虚线段 + 段末图内浮动价签，
+      // 不再依附右侧价格轴（priceAxisViews 已置空）。
       ctx.save();
-      ctx.setLineDash([5, 3]);
-      ctx.lineWidth = 1;
+      ctx.font = "10px monospace";
+      ctx.textBaseline = "middle";
       for (const lv of data.levels) {
         const y = series.priceToCoordinate(lv.price);
         if (y == null) continue;
+        // 虚线段：当前根 → 预测区右沿。
+        ctx.save();
+        ctx.setLineDash([5, 3]);
+        ctx.lineWidth = 1.2;
         ctx.strokeStyle = lv.lineColor;
         ctx.beginPath();
-        ctx.moveTo(x0, y);
-        ctx.lineTo(width, y);
+        ctx.moveTo(xNow, y);
+        ctx.lineTo(projEndX, y);
         ctx.stroke();
+        ctx.restore();
+        // 图内浮动价签：贴在虚线段右端（预测区内），随平移/缩放跟随，不压价格轴。
+        const text = lv.axisText;
+        const padX = 5;
+        const boxH = 14;
+        const boxW = ctx.measureText(text).width + padX * 2;
+        let bx = projEndX + 4;
+        if (bx + boxW > width) bx = projEndX - 4 - boxW;
+        ctx.fillStyle = lv.axisBg;
+        ctx.fillRect(bx, y - boxH / 2, boxW, boxH);
+        ctx.fillStyle = lv.axisFg;
+        ctx.fillText(text, bx + padX, y);
       }
       ctx.restore();
     });
@@ -154,6 +180,7 @@ export class TradeZonesPrimitive implements ISeriesPrimitive<Time> {
   }
 
   priceAxisViews(): readonly ISeriesPrimitiveAxisView[] {
-    return this._axisViews;
+    // TP/Entry/SL 改为图内浮动价签（见 ZonesRenderer line 模式），不再依附右侧价格轴。
+    return [];
   }
 }
