@@ -4,6 +4,24 @@
 
 ---
 
+## [0.56.0] - 2026-06-30
+
+> **新增策略 Cardwell RSI Trade Navigator 分批止盈版 V5（`tv-cardwell-rsi-navigator-v5`）**，并写设计文档 `docs/cardwell-v5-design.md` 存档。基于 87 笔 V4 交易的逐笔诊断（赢家/输家在入场那一刻几乎不可区分，继续在入场端加指标过滤会连大赢家一起滤掉、降低每笔期望），把优化杠杆全部放到**出场管理 + 趋势判断**：Tier 1 分批止盈 + 保本 + TP1 前紧止损；Tier 2 ADX 趋势闸门 + 再入场质量闸门。**回测达成设计目标——平均最大回撤从 V4 −23% 砍到 −11.5%、胜率升到 38%（最高）**；代价是总收益从 +87% 降到 +22%（分批/紧止损在控制风险的同时封顶了极少数大牛股尾段）。**默认 Pro 策略仍保持 V3**，V5 作为「低回撤/高一致性」可选变体提供。
+
+### 新增
+- `src/lib/indicators.ts`：新增 `computeADX(candles, period=14)`（Wilder 口径：+DM/−DM/TR → +DI/−DI → DX → ADX 二次平滑），用于趋势强度闸门。
+- `src/lib/tvStrategies.ts`：新增 `CardwellV5Params` / `computeCardwellRsiNavigatorV5` / `runTvCardwellRsiNavigatorV5(Params)`。在 V4 入场与稳定 R 计划之上叠加：①**分批止盈 + 保本**——TP1(+1R) 卖 1/3 并把止损上移到成本、TP2(+1.5R) 再卖 1/3、剩 1/3 吊灯(3×ATR)跟；②**TP1 前紧初始止损**——命中 TP1 前用稳定 R 计划止损(约 1R)，命中后才放宽到吊灯；③**ADX(14)≥20 趋势闸门**——没趋势不做；④**再入场质量闸门**——冷却窗口内强反包豁免仅当前一笔非亏损时允许。
+- `src/lib/strategies.ts`：注册 V5 策略卡（`compute` + `backtest`），`/chart` 策略图层、`/analyze`、`/backtest/strategy` 均可选。
+- `docs/cardwell-v5-design.md`：V5 设计文档（诊断依据、Tier 1/2 规格、回测结论、参数表）。
+
+### 修复
+- `src/lib/quant.ts`：`executeTradesNextOpen` 权益口径修复——旧实现 `worth = shares>0 ? shares*close : cash` 在**部分卖出后仍持仓时忽略了已落袋现金**，导致任何分批止盈策略在权益曲线上出现**虚假断崖式回撤**、收益被低估；改为 `worth = cash + shares*close`（对全仓/空仓结果不变，仅修正部分持仓那几根）。同时让既有分批策略（chokepoint v6/v7/v8）的回撤/收益统计更准确。
+
+### 回测（12 只 A 股 · 400 根日线 · 含双边手续费 · 次日开盘撮合）
+- 平均收益 V5 **+22.1%** vs V4 +86.7% vs V3 +71.5%（买入持有 +138.8%）；平均最大回撤 V5 **−11.5%** vs V4 −23.2% vs V3 −21.1%；胜率 V5 **38.1%** vs V4 30.7% vs V3 35.0%。诚实口径：V5 是「低回撤/高一致性」变体而非收益升级——同一套分批/紧止损在压低回撤的同时封顶了极少数大牛股尾段(601869 +247% vs V4 +912%)，而 V3/V4 的高均值几乎全靠这些长尾。
+
+---
+
 ## [0.55.0] - 2026-06-29
 
 > **新增策略 Cardwell RSI Trade Navigator 拐点先行版 V4（`tv-cardwell-rsi-navigator-v4`）**。针对 V3 在 300024 上「等到 6/29 一根 +18.9% 巨阳走完、RSI 才上穿 55 才出 B」的实测硬伤迭代：用智能冷却（V 型反包豁免）抢更早的趋势再入场、用「离 MA20 ≤ +8%」反追高闸门挡掉巨阳追高、用抗尖刺的稳定 R 单位重算 TP/SL。**默认 Pro 策略仍保持 V3**——V4 经一篮子回测并非全面占优（更高均值几乎全由单只强趋势票贡献），作为可选「更激进/强趋势捕捉」变体提供。

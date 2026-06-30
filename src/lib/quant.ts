@@ -170,7 +170,8 @@ export function executeTradesNextOpen(candles: Candle[], base: BacktestResult): 
         }
       }
     }
-    const worth = shares > 1e-9 ? shares * c.close : cash;
+    // 分批/部分平仓后仍持有部分仓位时，已落袋现金也要计入净值（否则部分卖出会在权益曲线上造成虚假断崖式回撤）。
+    const worth = cash + shares * c.close;
     history.push({
       date: c.date,
       strategyWorth: Number(worth.toFixed(0)),
@@ -178,7 +179,7 @@ export function executeTradesNextOpen(candles: Candle[], base: BacktestResult): 
     });
   }
 
-  const finalWorth = shares > 1e-9 ? shares * candles[n - 1].close : cash;
+  const finalWorth = cash + shares * candles[n - 1].close;
   const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
   const stockReturn = ((candles[n - 1].close - initialStockWorth) / initialStockWorth) * 100;
   const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;

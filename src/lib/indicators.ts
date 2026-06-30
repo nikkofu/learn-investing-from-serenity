@@ -384,3 +384,61 @@ export function computePatternSignals(
   out.sort((x, y) => x.index - y.index);
   return out;
 }
+
+/**
+ * Wilder ADX(14)：趋势强度指标。返回与 K 线等长数组，预热不足处为 NaN。
+ * 口径对齐通达信/同花顺：先算 +DM/-DM/TR，按 Wilder 平滑得 +DI/-DI，
+ * DX=100×|+DI−−DI|/(+DI+−DI)，ADX=DX 的 Wilder 均值（约需 2×period 根预热）。
+ */
+export function computeADX(candles: Candle[], period = 14): number[] {
+  const n = candles.length;
+  const adx: number[] = new Array(n).fill(NaN);
+  if (n < period * 2 + 1) return adx;
+
+  const tr: number[] = new Array(n).fill(0);
+  const pDM: number[] = new Array(n).fill(0);
+  const mDM: number[] = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const up = candles[i].high - candles[i - 1].high;
+    const dn = candles[i - 1].low - candles[i].low;
+    pDM[i] = up > dn && up > 0 ? up : 0;
+    mDM[i] = dn > up && dn > 0 ? dn : 0;
+    const h = candles[i].high;
+    const l = candles[i].low;
+    const pc = candles[i - 1].close;
+    tr[i] = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+  }
+
+  const dx: number[] = new Array(n).fill(NaN);
+  const dxOf = (trv: number, pv: number, mv: number): number => {
+    if (trv <= 0) return 0;
+    const pdi = (100 * pv) / trv;
+    const mdi = (100 * mv) / trv;
+    const s = pdi + mdi;
+    return s <= 0 ? 0 : (100 * Math.abs(pdi - mdi)) / s;
+  };
+
+  let trS = 0;
+  let pS = 0;
+  let mS = 0;
+  for (let i = 1; i <= period; i++) {
+    trS += tr[i];
+    pS += pDM[i];
+    mS += mDM[i];
+  }
+  dx[period] = dxOf(trS, pS, mS);
+  for (let i = period + 1; i < n; i++) {
+    trS = trS - trS / period + tr[i];
+    pS = pS - pS / period + pDM[i];
+    mS = mS - mS / period + mDM[i];
+    dx[i] = dxOf(trS, pS, mS);
+  }
+
+  let seed = 0;
+  for (let i = period; i < period * 2; i++) seed += dx[i];
+  adx[period * 2 - 1] = seed / period;
+  for (let i = period * 2; i < n; i++) {
+    adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period;
+  }
+  return adx;
+}

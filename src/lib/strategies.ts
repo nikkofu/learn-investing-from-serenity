@@ -26,7 +26,7 @@ import {
   runFibKdjPullbackV1,
   runConfluenceV1,
 } from "./indicatorStrategies";
-import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvCardwellRsiNavigatorV4, runTvKamaMomentumV1 } from "./tvStrategies";
+import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvCardwellRsiNavigatorV4, runTvCardwellRsiNavigatorV5, runTvKamaMomentumV1 } from "./tvStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -215,6 +215,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["tradingview", "rsi", "cardwell", "trade-plan", "early-entry", "momentum-thrust", "pullback", "stable-atr", "chandelier-exit", "reproduction"],
     },
     run: (candles) => runTvCardwellRsiNavigatorV4(candles),
+  },
+  {
+    meta: {
+      id: "tv-cardwell-rsi-navigator-v5",
+      name: "Cardwell RSI Trade Navigator 分批止盈版 V5",
+      version: "5.0",
+      description:
+        "在 V4 之上做 Tier1+Tier2 优化（基于 87 笔 V4 交易诊断：赢家/输家入场时几乎不可区分，继续加入场过滤会滤掉大赢家、降低每笔期望；真正杠杆在出场管理与趋势判断）。Tier1（仓位/出场）：①分批止盈+保本——TP1(+1R) 卖 1/3 并把止损上移到成本(立于不败)、TP2(+1.5R) 再卖 1/3、剩 1/3 用吊灯(3×ATR)跟吃主升尾段；②TP1 前用更紧的初始止损——开仓即 3×ATR 吊灯太宽(输家平均 −3.7%)，改为 TP1 前用「入场−1.8R 与近 6 根 swing low 取更紧者」的稳定 R 计划止损，命中 TP1 后才放宽到吊灯。Tier2（趋势判断）：③ADX(14)≥20 趋势闸门——没趋势就不做，避开 V4 在震荡/阴跌票里反复换手挨刀；④再入场质量闸门——只在「前一笔非亏损」时才允许 V4 智能冷却窗口内的强反包豁免，杜绝「刚止损就更高价追回」的亏损。入场触发与稳定 R 计划完全沿用 V4。设计意图：用「分批落袋+保本+紧止损」压低 V4 −23% 的平均回撤、让更多笔以绿色收尾，代价是封顶极端单边里卖飞的 2/3。诚实口径：纯多头趋势跟随、非预测；参数择优有过拟合风险；分批止盈在极端连续单边里会少赚。纯多头、含双边手续费、次日开盘撮合。",
+      tags: ["tradingview", "rsi", "cardwell", "trade-plan", "scale-out", "breakeven-stop", "adx-gate", "stable-atr", "chandelier-exit", "reproduction"],
+    },
+    run: (candles) => runTvCardwellRsiNavigatorV5(candles),
   },
   {
     meta: {

@@ -14,9 +14,10 @@
  *     在 strategies.ts 登记后自动接入 /backtest/strategy 证明引擎与 /analyze。
  */
 import type { Candle } from "./types";
-import { atrWilder, type BacktestResult } from "./quant";
+import { atrWilder, type BacktestResult, type TradeAction } from "./quant";
+import { DEFAULT_COST_MODEL, buyShares, sellProceeds } from "./costs";
 import { runSignalBacktest } from "./indicatorStrategies";
-import { computeRSI, computeKDJ, computeMACD, sma } from "./indicators";
+import { computeRSI, computeKDJ, computeMACD, sma, computeADX } from "./indicators";
 
 /** 市场状态（自适应带宽用）：趋势 / 震荡 / 转折。 */
 export type Regime = "trend" | "chop" | "transition";
@@ -1366,8 +1367,308 @@ const CARDWELL_RSI_NAVIGATOR_V4: TvStrategy = {
 };
 
 
+/* ==========================================================================
+ * Cardwell RSI Trade Navigator V5 —— Tier1 分批止盈+保本+紧止损 / Tier2 ADX 趋势闸门
+ *
+ * 缘起（基于 87 笔 V4 交易的逐笔诊断）：V4 是「低胜率(≈29%)、高赔率(赢/亏≈6:1)、
+ * 靠少数大牛股赚钱」的趋势系统，赢家与输家在「入场那一刻」几乎不可区分（MA 斜率/
+ * 放量/RSI/MACD 都分不开）——继续在入场端加指标过滤，反而会滤掉大赢家、降低每笔
+ * 期望。真正的优化杠杆在「出场 + 仓位管理」与「先判断有没有趋势」：
+ *
+ *   Tier1（最高杠杆）
+ *     1) 分批止盈 + 保本：TP1 卖 1/3 并把止损上移到成本（这笔从此立于不败）、TP2
+ *        再卖 1/3、剩 1/3 用吊灯(3×ATR)一路跟吃主升尾段——直接压低平均回撤、让更
+ *        多笔以绿色收尾（胜率口径=整笔仓位是否净赚）。
+ *     2) TP1 前用更紧的初始止损：开仓即用 3×ATR 吊灯太宽（输家平均 −3.7%）。TP1
+ *        命中前改用「入场−1.8R 与近 6 根 swing low 取更紧者」（即 V4 的稳定 R 计划
+ *        止损）做硬止损，命中 TP1 后才放宽到吊灯——缩小单笔亏损。
+ *   Tier2（专治那些震荡/阴跌票）
+ *     3) ADX(14) ≥ 阈值趋势闸门：没趋势(ADX<阈值)就干脆不做，避开 V4 在震荡票里
+ *        反复换手挨刀。
+ *     4) 再入场质量闸门：V4「智能冷却豁免」在抓到 V 型反包的同时也制造了「刚止损
+ *        就更高价追回」的亏损。改为只在「前一笔非亏损」时才允许冷却窗口内的强反包
+ *        豁免，不允许即时高价追亏。
+ *
+ * 入场触发与稳定 R 计划完全沿用 V4（区间切换上冲 + 正向反转；R=近 20 根 ATR 中位
+ * 数；TP1/2/3=入场+1/1.5/2.5R）。仅在其上叠加 ADX 闸门、再入场闸门与分批/保本/紧
+ * 止损的出场管理。诚实口径：纯多头趋势跟随、非预测；参数在该篮子择优、有过拟合风
+ * 险。纯多头、含双边手续费、次日开盘撮合。
+ * ==========================================================================*/
+
+interface CardwellV5Params extends CardwellV4Params {
+  adxPeriod: number;          // ADX 周期（默认 14）
+  adxMin: number;             // ADX 趋势闸门阈值（默认 20；0=关闭闸门）
+  scaleOut: boolean;          // 分批止盈（默认 true）
+  breakevenAfterTP1: boolean; // TP1 命中后止损上移到成本（默认 true）
+  tightInitStop: boolean;     // TP1 前用紧初始止损=plan.stop（默认 true，false 则一直用吊灯）
+  reentryNeedProfit: boolean; // 冷却窗口内强反包豁免需前一笔非亏损（默认 true）
+}
+
+const CARDWELL_V5_DEFAULTS: CardwellV5Params = {
+  ...CARDWELL_V4_DEFAULTS,
+  adxPeriod: 14,
+  adxMin: 20,
+  scaleOut: true,
+  breakevenAfterTP1: true,
+  tightInitStop: true,
+  reentryNeedProfit: true,
+};
+
+/** 简易年化夏普（与全站口径一致：日收益、无风险=0、年化 √252、样本方差 n−1）。 */
+function sharpeOfHistory(history: { strategyWorth: number }[]): number {
+  const rets: number[] = [];
+  for (let k = 1; k < history.length; k++) {
+    const prev = history[k - 1].strategyWorth;
+    if (prev > 0) rets.push(history[k].strategyWorth / prev - 1);
+  }
+  if (rets.length < 2) return 0;
+  const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
+  const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
+  const sd = Math.sqrt(variance);
+  if (sd <= 0) return 0;
+  return Number(((mean / sd) * Math.sqrt(252)).toFixed(2));
+}
+
+/**
+ * V5 参数化回测：在 V4 入场/稳定 R 计划之上叠加 ADX 趋势闸门、再入场质量闸门，
+ * 并用「分批止盈 + 保本 + TP1 前紧止损 + TP1 后吊灯」的出场管理。
+ * 产出 close 口径自洽的 BacktestResult；trades 为信号序列（date=信号根），
+ * 全站统一经 executeTradesNextOpen 次日开盘重撮合。
+ */
+export function runTvCardwellRsiNavigatorV5Params(candles: Candle[], params: Partial<CardwellV5Params>): BacktestResult {
+  const p = { ...CARDWELL_V5_DEFAULTS, ...params };
+  const n = candles.length;
+  const ctx = buildCardwellV4Ctx(candles, p);
+  const EMPTY: BacktestResult = { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+  if (n < ctx.warmup + 5) return EMPTY;
+
+  const closes = candles.map((c) => c.close);
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const maStruct = sma(closes, p.maStruct);
+  const adx = computeADX(candles, p.adxPeriod);
+  const atr = ctx.atr;
+
+  const trades: TradeAction[] = [];
+  const history: BacktestResult["history"] = [];
+  let cash = 100000;
+  let shares = 0;
+  let avgCost = 0;
+  let posDeployed = 0;
+  let posProceeds = 0;
+  let winCount = 0;
+  let tradeCount = 0;
+
+  const start = ctx.warmup;
+  const initialStockWorth = closes[start];
+
+  let holding = false;
+  let lastExit = -p.cooldownBase - 1;
+  let lastExitHigh = NaN;
+  let lastExitProfit = 1; // 首笔不受再入场闸门限制
+  let entryPrice = 0;
+  let highSinceEntry = 0;
+  let tranche = 0; // 0=未到 TP1；1=已卖 TP1；2=已卖 TP2（剩底仓吊灯跟）
+  let plan: { entry: number; stop: number; targets: TradeTarget[] } | null = null;
+
+  const adxOk = (i: number) => p.adxMin <= 0 || (fin(adx[i]) && adx[i] >= p.adxMin);
+
+  const doSell = (i: number, sizePct: number, reason: string) => {
+    const sold = sizePct >= 1 ? shares : shares * sizePct;
+    if (sold <= 1e-12) return;
+    const proceeds = sellProceeds(sold, closes[i], DEFAULT_COST_MODEL);
+    cash += proceeds;
+    shares -= sold;
+    posProceeds += proceeds;
+    trades.push({ type: "sell", date: candles[i].date, price: closes[i], reason, profitPct: avgCost > 0 ? ((closes[i] - avgCost) / avgCost) * 100 : 0, sizePct });
+    if (shares <= 1e-6) {
+      tradeCount++;
+      if (posProceeds > posDeployed) winCount++;
+      lastExitProfit = posProceeds - posDeployed;
+      holding = false;
+      lastExit = i;
+      lastExitHigh = candles[i].high;
+      shares = 0;
+      avgCost = 0;
+      posDeployed = 0;
+      posProceeds = 0;
+    }
+  };
+
+  for (let i = start; i < n; i++) {
+    if (!holding) {
+      let reason = adxOk(i) ? ctx.entry(i, lastExit, lastExitHigh) : null;
+      // 再入场质量闸门：冷却窗口内能进，只因 V4 强反包豁免；要求前一笔非亏损。
+      if (reason && i - lastExit < p.cooldownBase && p.reentryNeedProfit && lastExitProfit <= 0) reason = null;
+      if (reason) {
+        const pl = ctx.plan(i);
+        if (pl) {
+          const bought = buyShares(cash, closes[i], DEFAULT_COST_MODEL);
+          if (bought > 0) {
+            const adxTxt = fin(adx[i]) ? `，ADX(${p.adxPeriod})=${adx[i].toFixed(0)}≥${p.adxMin} 趋势成立` : "";
+            avgCost = closes[i];
+            shares = bought;
+            posDeployed = cash;
+            cash = 0;
+            holding = true;
+            entryPrice = closes[i];
+            highSinceEntry = closes[i];
+            tranche = 0;
+            plan = pl;
+            trades.push({ type: "buy", date: candles[i].date, price: closes[i], reason: `${reason}${adxTxt} 分批管理：TP1 卖 1/3 并保本、TP2 再卖 1/3、剩 1/3 吊灯跟。` });
+          }
+        }
+      }
+    } else {
+      if (closes[i] > highSinceEntry) highSinceEntry = closes[i];
+      const a = fin(atr[i]) && atr[i] > 0 ? atr[i] : NaN;
+      const chand = fin(a) ? highSinceEntry - p.chandMult * a : -Infinity;
+      // 止损位：TP1 前用紧初始计划止损；TP1 后取「保本/计划」与吊灯更高者。
+      let stopLevel: number;
+      if (tranche === 0) stopLevel = p.tightInitStop && plan ? plan.stop : chand;
+      else stopLevel = Math.max(p.breakevenAfterTP1 ? entryPrice : (plan ? plan.stop : -Infinity), chand);
+
+      if (closes[i] <= stopLevel) {
+        const why = tranche === 0
+          ? `【紧初始止损】TP1 前用稳定 R 计划止损 ${stopLevel.toFixed(2)} 元护盘，收盘 ${closes[i].toFixed(2)} 元触线，单笔小亏离场。`
+          : (p.breakevenAfterTP1 && stopLevel <= entryPrice * 1.001
+            ? `【保本止损】已分批落袋、止损上移至成本 ${entryPrice.toFixed(2)} 元，收盘 ${closes[i].toFixed(2)} 元回踩保本线，剩余仓位无损离场。`
+            : `【吊灯止损】自持仓高点 ${highSinceEntry.toFixed(2)} 元回撤超 ${p.chandMult}×ATR(14)，收盘 ${closes[i].toFixed(2)} 元触线，剩余仓位离场。`);
+        doSell(i, 1, why);
+      } else if (fin(rsi[i]) && rsi[i] < p.exitRsi) {
+        doSell(i, 1, `【牛市区间破位】RSI(${p.rsiPeriod})=${rsi[i].toFixed(1)} 跌破 ${p.exitRsi}（趋势真转弱），剩余仓位离场。`);
+      } else if (i >= 1 && fin(maStruct[i]) && fin(maStruct[i - 1]) && closes[i] < maStruct[i] && closes[i - 1] < maStruct[i - 1]) {
+        doSell(i, 1, `【结构破位】连续 2 根收盘跌破 MA${p.maStruct}（中期结构走坏），剩余仓位离场。`);
+      } else if (p.scaleOut && plan) {
+        if (tranche === 0 && closes[i] >= plan.targets[0].price) {
+          tranche = 1;
+          doSell(i, 1 / 3, `【TP1 保本】触及 TP1 ${plan.targets[0].price.toFixed(2)} 元（+1R），卖出 1/3 落袋，止损上移到成本 ${entryPrice.toFixed(2)} 元，本笔从此立于不败。`);
+        } else if (tranche === 1 && closes[i] >= plan.targets[1].price) {
+          tranche = 2;
+          doSell(i, 0.5, `【TP2 减仓】触及 TP2 ${plan.targets[1].price.toFixed(2)} 元（+1.5R），再卖 1/3，剩 1/3 底仓用吊灯(${p.chandMult}×ATR)跟吃主升尾段。`);
+        }
+      }
+    }
+
+    const worth = cash + shares * closes[i];
+    history.push({
+      date: candles[i].date,
+      strategyWorth: Number(worth.toFixed(0)),
+      stockWorth: Number(((closes[i] / initialStockWorth) * 100000).toFixed(0)),
+    });
+  }
+
+  const finalWorth = cash + shares * closes[n - 1];
+  const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
+  const stockReturn = ((closes[n - 1] - initialStockWorth) / initialStockWorth) * 100;
+  const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
+
+  return {
+    winRate: Number(winRate.toFixed(1)),
+    sharpe: sharpeOfHistory(history),
+    strategyReturn: Number(strategyReturn.toFixed(2)),
+    stockReturn: Number(stockReturn.toFixed(2)),
+    trades,
+    history,
+  };
+}
+
+/** 纯多头可回测包装（V5 分批止盈+ADX 趋势闸门版），默认参数即 CARDWELL_V5_DEFAULTS。 */
+export function runTvCardwellRsiNavigatorV5(candles: Candle[]): BacktestResult {
+  return runTvCardwellRsiNavigatorV5Params(candles, {});
+}
+
+/**
+ * 计算 V5 图层：在 V4 持仓状态机之上叠加 ADX 趋势闸门与再入场质量闸门，
+ * 产出方向 / 翻多翻空点 / regime + 稳定 R 交易计划（分批/保本为回测口径，图层沿用 V4 计划展示）。
+ */
+export function computeCardwellRsiNavigatorV5(
+  candles: Candle[],
+  params: Partial<CardwellV5Params> = {},
+): TvStrategyLayers {
+  const p = { ...CARDWELL_V5_DEFAULTS, ...params };
+  const n = candles.length;
+  const line = new Array<number | null>(n).fill(null);
+  const dir = new Array<1 | -1 | 0>(n).fill(0);
+  const regime = new Array<Regime>(n).fill("transition");
+  const regimeValue = new Array<number>(n).fill(NaN);
+  const flips: TvStrategyLayers["flips"] = [];
+
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const adx = computeADX(candles, p.adxPeriod);
+  const ctx = buildCardwellV4Ctx(candles, p);
+  const atr = ctx.atr;
+  const adxOk = (i: number) => p.adxMin <= 0 || (fin(adx[i]) && adx[i] >= p.adxMin);
+
+  let holding = false;
+  let highSinceEntry = 0;
+  let lastExit = -p.cooldownBase - 1;
+  let lastExitHigh = NaN;
+  let lastEntryIdx = -1;
+  let lastPlan: { entry: number; stop: number; targets: TradeTarget[] } | null = null;
+  let curDir: 1 | -1 | 0 = 0;
+  let tradePlan: TradePlan | null = null;
+
+  for (let i = 0; i < n; i++) {
+    if (fin(rsi[i])) {
+      const dev = Math.abs(rsi[i] - 50);
+      regime[i] = dev >= 20 ? "trend" : dev <= 10 ? "chop" : "transition";
+    }
+    if (!holding) {
+      let reason = adxOk(i) ? ctx.entry(i, lastExit, lastExitHigh) : null;
+      if (reason && i - lastExit < p.cooldownBase && p.reentryNeedProfit) {
+        // 图层无逐笔盈亏追踪，保守起见：冷却窗口内的强反包不在此着色（与回测口径方向一致）。
+        reason = null;
+      }
+      if (reason) {
+        holding = true;
+        highSinceEntry = candles[i].close;
+        lastEntryIdx = i;
+        curDir = 1;
+        flips.push({ index: i, dir: "up", price: candles[i].close });
+        lastPlan = ctx.plan(i);
+        if (lastPlan) tradePlan = { anchorIndex: i, dir: 1, entry: lastPlan.entry, stop: lastPlan.stop, targets: lastPlan.targets };
+      }
+    } else {
+      if (candles[i].close > highSinceEntry) highSinceEntry = candles[i].close;
+      const reason = ctx.exit(i, highSinceEntry);
+      if (reason) {
+        holding = false;
+        lastExit = i;
+        lastExitHigh = candles[i].high;
+        curDir = -1;
+        flips.push({ index: i, dir: "down", price: candles[i].close });
+      }
+    }
+    dir[i] = curDir;
+  }
+
+  if (holding && lastEntryIdx >= 0 && lastPlan) {
+    const curAtr = fin(atr[n - 1]) && atr[n - 1] > 0 ? atr[n - 1] : atr[lastEntryIdx];
+    const chandStop = fin(curAtr) && curAtr > 0 ? highSinceEntry - p.chandMult * curAtr : lastPlan.stop;
+    tradePlan = { anchorIndex: lastEntryIdx, dir: 1, entry: lastPlan.entry, stop: Math.max(lastPlan.stop, chandStop), targets: lastPlan.targets };
+  }
+
+  return { line, dir, flips, regime, regimeValue, tradePlan };
+}
+
+const CARDWELL_RSI_NAVIGATOR_V5: TvStrategy = {
+  meta: {
+    id: "tv-cardwell-rsi-navigator-v5",
+    name: "Cardwell RSI Trade Navigator 分批止盈版 V5",
+    version: "5.0",
+    author: "MarkitTick（V5 分批止盈+ADX 闸门重构）",
+    source: "https://cn.tradingview.com/chart/JTqSjJYn/",
+    notes:
+      "在 V4 之上做 Tier1+Tier2 优化（基于 87 笔 V4 交易诊断：赢家/输家入场时几乎不可区分，继续加入场过滤会滤掉大赢家、降低每笔期望；真正杠杆在出场管理与趋势判断）。Tier1（仓位/出场）：①分批止盈+保本——TP1(+1R) 卖 1/3 并把止损上移到成本(立于不败)、TP2(+1.5R) 再卖 1/3、剩 1/3 用吊灯(3×ATR)跟吃主升尾段；②TP1 前用更紧的初始止损——开仓即 3×ATR 吊灯太宽(输家平均 −3.7%)，改为 TP1 前用「入场−1.8R 与近 6 根 swing low 取更紧者」的稳定 R 计划止损，命中 TP1 后才放宽到吊灯。Tier2（趋势判断）：③ADX(14)≥20 趋势闸门——没趋势就不做，避开 V4 在震荡/阴跌票里反复换手挨刀；④再入场质量闸门——V4 的智能冷却豁免在抓 V 型反包的同时也制造了「刚止损就更高价追回」的亏损，改为只在「前一笔非亏损」时才允许冷却窗口内的强反包豁免。入场触发与稳定 R 计划完全沿用 V4(区间切换上冲 RSI 上穿 55+站上 MA20 / 正向反转；R=近 20 根 ATR 中位数；TP1/2/3=入场+1/1.5/2.5R)。设计意图是用「分批落袋+保本+紧止损」把 V4 −23% 的平均回撤往下压、让更多笔以绿色收尾(胜率口径=整笔仓位是否净赚)，代价是封顶极端单边里卖飞的那 2/3。诚实口径：纯多头趋势跟随、非预测；参数在该篮子择优、有过拟合风险；分批止盈在极端连续单边里会少赚。纯多头、含双边手续费、次日开盘撮合。对应 /chart「策略图层」可叠加稳定 R 交易计划色块 + 买卖翻转标记。",
+    tags: ["tradingview", "rsi", "cardwell", "trade-plan", "scale-out", "breakeven-stop", "adx-gate", "stable-atr", "chandelier-exit", "reproduction"],
+  },
+  compute: (candles) => computeCardwellRsiNavigatorV5(candles),
+  backtest: (candles) => runTvCardwellRsiNavigatorV5(candles),
+};
+
+
 /** 已复刻的 TV 策略注册表（顺序即 UI 下拉顺序）。新增脚本只需在此追加一项。 */
-const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, CARDWELL_RSI_NAVIGATOR_V3, CARDWELL_RSI_NAVIGATOR_V4, KAMA_MOMENTUM_V1];
+const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, CARDWELL_RSI_NAVIGATOR_V3, CARDWELL_RSI_NAVIGATOR_V4, CARDWELL_RSI_NAVIGATOR_V5, KAMA_MOMENTUM_V1];
 
 /** 列出所有已复刻 TV 策略的元信息（供「策略图层」下拉）。 */
 export function listTvStrategies(): TvStrategyMeta[] {
