@@ -19,8 +19,9 @@ import {
   type CandlestickData,
   type LineData,
   type WhitespaceData,
+  type IPriceLine,
 } from "lightweight-charts";
-import type { Candle } from "@/lib/types";
+import type { Candle, StockQuote } from "@/lib/types";
 import { tradeSizeTag, type TradeAction, type TechnicalAssessment } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance, computePatternSignals, type ResonancePoint, type PatternSignal } from "@/lib/indicators";
@@ -42,6 +43,8 @@ interface LightweightChartProps {
   initialTvStrategyId?: string;
   /** 引擎控件插槽：父级「图表引擎 / 买卖引擎」控件渲染进工具栏首行，与策略图层/回放同处一行，省出一行高度。 */
   engineSlot?: ReactNode;
+  /** 单股实时报价（来自 /chart 的 SSE 实时层）：仅用于实时层（顶部报价/现价线/盘中临时今日蜡烛），不参与历史/指标/策略计算。 */
+  liveQuote?: StockQuote | null;
 }
 
 // AI 画图叠加层配色（语义色，与蜡烛涨跌色区分开）
@@ -204,11 +207,17 @@ function buildTradeZones(plan: TradePlan, anchorTime: Time): TradeZonesData {
   return { anchorTime, bands, levels };
 }
 
-export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], trendChannel, initialTvStrategyId = "", engineSlot }: LightweightChartProps) {
+export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], trendChannel, initialTvStrategyId = "", engineSlot, liveQuote = null }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const markersApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  // 实时层引用：成交量序列 / 现价线 / 盘中临时今日蜡烛 + 量柱 / 最新报价（解耦于历史与策略，单独高频更新）。
+  const volSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const priceLineRef = useRef<IPriceLine | null>(null);
+  const liveBarRef = useRef<CandlestickData | null>(null);
+  const liveVolRef = useRef<{ time: Time; value: number; color: string } | null>(null);
+  const liveQuoteRef = useRef<StockQuote | null>(null);
   // 每个序列携带自己的「按可见 K 线重绘」闭包，回放时仅重绘数据、不重建图表。
   const paintersRef = useRef<((vc: Candle[]) => void)[]>([]);
   // 均线序列引用（按 key），勾选 MA 时仅切换其可见性、不重建图表，避免重置缩放/平移/时间位置。
@@ -245,6 +254,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [replayN, setReplayN] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [speedMs, setSpeedMs] = useState(350);
+  // 实时层读取回放游标的镜像（避免把 replayN 放进 applyLive 依赖而触发结构层整图重建）。
+  const replayNRef = useRef<number | null>(null);
+  replayNRef.current = replayN;
 
   // 日内分时：选中 5/15/30/60m 时按需拉取（不走日线 props）
   const [intradayCandles, setIntradayCandles] = useState<Candle[] | null>(null);
@@ -437,6 +449,51 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     };
   }, [intraday, code, period, fq]);
 
+  // 实时层：把最新报价应用为「现价线 + 盘中临时今日蜡烛（未结算）」，与历史/指标/策略完全解耦。
+  // 仅日线、前复权、非分时、非回放，且报价日严格晚于最后已结算 bar（今日尚未结算）时叠加临时蜡烛；现价线在日/周/月口径均叠加。
+  const applyLive = useCallback(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    if (priceLineRef.current) {
+      try { series.removePriceLine(priceLineRef.current); } catch { /* 旧序列已随重建销毁 */ }
+      priceLineRef.current = null;
+    }
+    liveBarRef.current = null;
+    liveVolRef.current = null;
+    const q = liveQuoteRef.current;
+    if (!q || fq === "hfq" || intraday || candles.length === 0 || replayNRef.current !== null) return;
+    const up = q.changePct >= 0;
+    priceLineRef.current = series.createPriceLine({
+      price: q.price,
+      color: up ? UP : DOWN,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: `现价 ${up ? "+" : ""}${q.changePct.toFixed(2)}%`,
+    });
+    const lastDate = candles[candles.length - 1].date;
+    const liveDate = (q.time || "").slice(0, 10) || lastDate;
+    // 临时今日蜡烛仅日线口径；周/月线由已结算日 K 重采样，盘中不补合成 bar。
+    if (period === "1D" && liveDate > lastDate) {
+      const open = q.open || q.prevClose || q.price;
+      const bar: CandlestickData = {
+        time: liveDate as unknown as Time,
+        open,
+        high: Math.max(q.high || q.price, q.price, open),
+        low: Math.min(q.low || q.price, q.price, open),
+        close: q.price,
+      };
+      liveBarRef.current = bar;
+      series.update(bar);
+      const vol = (q.volume || 0) * 100; // 报价量为手，K 线量为股（手×100）。
+      if (vol > 0 && volSeriesRef.current) {
+        const vbar = { time: liveDate as unknown as Time, value: vol, color: (q.price >= open ? UP : DOWN) + "66" };
+        liveVolRef.current = vbar;
+        volSeriesRef.current.update(vbar);
+      }
+    }
+  }, [candles, period, intraday, fq]);
+
   // 将当前可见 K 线刷到所有序列 + 标记 + 读数条
   const paint = useCallback((vc: Candle[]) => {
     for (const p of paintersRef.current) p(vc);
@@ -515,7 +572,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       const pat = patternByDate.get(last.date);
       setLegend({ date: last.date, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume || 0, chg: last.changePct ?? 0, reso: rl?.text, resoColor: rl?.color, st: tvReadout(vc.length - 1), pat: pat ? `${pat.label}：${pat.detail}` : undefined, patColor: pat ? patColor(pat.kind) : undefined });
     }
-  }, [trades, toTime, drawings, intraday, showResonance, resonance, showPatterns, patterns, candles, resoByDate, patternByDate, tvLayers, tvReadout]);
+    // 重绘末尾恢复实时层（现价线 + 盘中临时蜡烛），使其在结构重建/回放刷新后仍保持。
+    applyLive();
+  }, [trades, toTime, drawings, intraday, showResonance, resonance, showPatterns, patterns, candles, resoByDate, patternByDate, tvLayers, tvReadout, applyLive]);
 
   // 结构层：仅在「指标/周期/纵轴/副图」变化时重建图表与序列（不随回放游标变动）
   useEffect(() => {
@@ -547,6 +606,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
 
     // 成交量（主图底部叠加，独立隐藏价格轴）
     const volSeries = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, color: UP });
+    volSeriesRef.current = volSeries;
     paintersRef.current.push((vc) => volSeries.setData(vc.map((c) => ({ time: toTime(c.date), value: c.volume || 0, color: (c.close >= c.open ? UP : DOWN) + "66" }))));
     chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
 
@@ -744,6 +804,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       chartRef.current = null;
       candleSeriesRef.current = null;
       markersApiRef.current = null;
+      volSeriesRef.current = null;
+      priceLineRef.current = null;
       paintersRef.current = [];
     };
     // 故意不依赖 viewCandles：回放游标变化由下方数据层处理，避免重建图表导致闪烁。
@@ -762,6 +824,12 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     paint(viewCandles);
     if (replayN !== null) chartRef.current.timeScale().scrollToRealTime();
   }, [viewCandles, replayN, paint]);
+
+  // 实时层：报价变化时仅更新现价线 + 盘中临时蜡烛（series.update 增量，不触发整图 setData / React 整页重渲染）。
+  useEffect(() => {
+    liveQuoteRef.current = liveQuote ?? null;
+    applyLive();
+  }, [liveQuote, applyLive]);
 
   // 自动播放：按速度逐根推进，到末根自动停。
   useEffect(() => {

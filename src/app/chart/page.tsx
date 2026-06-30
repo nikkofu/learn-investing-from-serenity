@@ -95,6 +95,8 @@ function ChartInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<AnalyzeResponse | null>(null);
+  // /chart 实时层：单股 SSE 实时报价（顶部报价 + 现价线 + 盘中临时今日蜡烛），与历史/策略加载解耦。
+  const [liveQuote, setLiveQuote] = useState<StockQuote | null>(null);
   const [searchFocused, setSearchFocused] = useState(false);
   
   // AI 后台加载状态
@@ -203,12 +205,53 @@ function ChartInner() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // /chart 实时层订阅：按当前个股代码连接 SSE 报价流，仅更新实时报价 state（顶部报价 + 传给图表的实时层）。
+  // 页签切到后台时断开、回到前台重连；收盘/非交易时段服务端推完即收（前端不再重连）。历史/策略加载完全不受影响。
+  const liveCode = data?.quote.code;
+  useEffect(() => {
+    if (!liveCode || !/^\d{6}$/.test(liveCode)) return;
+    let es: EventSource | null = null;
+    let stopped = false;
+    const connect = () => {
+      if (stopped || es || document.visibilityState === "hidden") return;
+      es = new EventSource(`/api/market/quote-stream?code=${liveCode}`);
+      es.addEventListener("quote", (e) => {
+        try {
+          setLiveQuote(JSON.parse((e as MessageEvent).data) as StockQuote);
+        } catch {
+          /* 忽略坏帧 */
+        }
+      });
+      es.addEventListener("closed", () => {
+        es?.close();
+        es = null;
+      });
+    };
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        es?.close();
+        es = null;
+      } else {
+        connect();
+      }
+    };
+    connect();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      stopped = true;
+      document.removeEventListener("visibilitychange", onVis);
+      es?.close();
+      es = null;
+    };
+  }, [liveCode]);
+
   // 执行核心诊断与图表数据载入 (并行优化：行情秒开 + AI 诊断后台同时并发)
   async function loadStock(code: string, currentPeriod = period, currentFq = fq) {
     if (!/^\d{6}$/.test(code)) return;
     setLoading(true);
     setError("");
     setData(null);
+    setLiveQuote(null);
     setTuned(null);
     setTuneErr("");
     setSearchResults([]);
@@ -432,7 +475,9 @@ function ChartInner() {
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
   }, []);
 
-  const up = data ? data.quote.changePct >= 0 : true;
+  // 顶部报价：优先用实时层报价（盘中随盘跳动），无实时数据时回落到加载时的快照。
+  const shownQuote = liveQuote ?? data?.quote ?? null;
+  const up = shownQuote ? shownQuote.changePct >= 0 : true;
 
   // 策略图层（?layer=）与 Pro 画布买卖引擎：图层自动叠加 TV 复刻策略；买卖标记按所选策略切换（客户端即时，无需重新拉数）。
   const layerId = params.get("layer")?.trim() ?? "";
@@ -580,13 +625,13 @@ function ChartInner() {
             ))}
           </div>
 
-          {data && (
+          {shownQuote && (
             <div className="flex items-baseline gap-2 border-l border-[var(--border)] pl-3">
-              <span className="text-xs font-bold text-[var(--text)] font-mono">{data.quote.name}</span>
-              <span className="text-[10px] font-mono text-[var(--muted)]">{data.quote.code}</span>
-              <span className="text-xs font-black font-mono ml-1">{data.quote.price.toFixed(2)}</span>
+              <span className="text-xs font-bold text-[var(--text)] font-mono">{shownQuote.name}</span>
+              <span className="text-[10px] font-mono text-[var(--muted)]">{shownQuote.code}</span>
+              <span className="text-xs font-black font-mono ml-1">{shownQuote.price.toFixed(2)}</span>
               <span className={`text-[10px] font-mono font-bold ${up ? "text-red-500" : "text-emerald-500"}`}>
-                {up ? "+" : ""}{data.quote.changePct.toFixed(2)}%
+                {up ? "+" : ""}{shownQuote.changePct.toFixed(2)}%
               </span>
             </div>
           )}
@@ -688,6 +733,7 @@ function ChartInner() {
                     trendChannel={data.quant.technical?.trendChannel ?? null}
                     initialTvStrategyId={layerId}
                     engineSlot={engineControls}
+                    liveQuote={liveQuote}
                   />
                 </div>
               ) : (
