@@ -25,7 +25,8 @@ import type { Candle, StockQuote } from "@/lib/types";
 import { tradeSizeTag, type TradeAction, type TechnicalAssessment } from "@/lib/quant";
 import { candlesByPeriod } from "@/lib/candleAgg";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance, computePatternSignals, type ResonancePoint, type PatternSignal } from "@/lib/indicators";
-import type { ChartDrawing, MarkerDrawing, DrawingColor } from "@/lib/drawings";
+import type { ChartDrawing, MarkerDrawing, PatternDrawing, DrawingColor } from "@/lib/drawings";
+import { PatternOutlinePrimitive } from "./patternOutlinePrimitive";
 import { listTvStrategies, getTvStrategy, type TvStrategyLayers, type TradePlan } from "@/lib/tvStrategies";
 import { TradeZonesPrimitive, type TradeZonesData, type TradeZoneBand, type TradeZoneLevel } from "./tradeZonesPrimitive";
 import { TradeReasonsPrimitive, type TradeReasonLabel } from "./tradeReasonsPrimitive";
@@ -56,6 +57,14 @@ const DRAW_COLORS: Record<DrawingColor, string> = {
   bear: "#ef4444",
 };
 const drawColor = (c?: DrawingColor) => DRAW_COLORS[c ?? "neutral"];
+// 十六进制色 → 半透明 rgba（用于形态闭合填充）。
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 // 从交易理由首部的「【…】」中提取简短策略标签（去掉版本号如 -v7），用于 BS 标记角标 / 浮层标题。
 function reasonTag(reason: string): string | null {
@@ -751,18 +760,32 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     if (!intraday && drawings.length > 0) {
       for (const dr of drawings) {
         if (dr.type === "hline") {
-          candleSeries.createPriceLine({ price: dr.price, color: drawColor(dr.color), lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: dr.label });
+          candleSeries.createPriceLine({ price: dr.price, color: drawColor(dr.color), lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: dr.label });
         } else if (dr.type === "zone") {
           const col = drawColor(dr.color);
-          candleSeries.createPriceLine({ price: dr.priceHigh, color: col, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `${dr.label} 上` });
-          candleSeries.createPriceLine({ price: dr.priceLow, color: col, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `${dr.label} 下` });
+          candleSeries.createPriceLine({ price: dr.priceHigh, color: col, lineWidth: 2, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `${dr.label} 上` });
+          candleSeries.createPriceLine({ price: dr.priceLow, color: col, lineWidth: 2, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `${dr.label} 下` });
         } else if (dr.type === "trendline") {
-          const s = chart.addSeries(LineSeries, { color: drawColor(dr.color), lineWidth: 2, lineStyle: LineStyle.Solid, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+          const s = chart.addSeries(LineSeries, { color: drawColor(dr.color), lineWidth: 3, lineStyle: LineStyle.Solid, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
           s.setData([
             { time: toTime(dr.from.date), value: dr.from.price },
             { time: toTime(dr.to.date), value: dr.to.price },
           ]);
         }
+      }
+      // 形态轮廓（pattern）：把有序关键点连成多段线/闭合多边形（真正画出三角形/楔形等的边界）。
+      const patternShapes = (drawings.filter((d) => d.type === "pattern") as PatternDrawing[]).map((p) => {
+        const col = drawColor(p.color);
+        return {
+          points: p.points.map((pt) => ({ time: toTime(pt.date), price: pt.price })),
+          closed: p.closed,
+          stroke: col,
+          fill: p.closed ? hexToRgba(col, 0.1) : "",
+          label: p.label,
+        };
+      });
+      if (patternShapes.length > 0) {
+        candleSeries.attachPrimitive(new PatternOutlinePrimitive({ shapes: patternShapes }));
       }
     }
 

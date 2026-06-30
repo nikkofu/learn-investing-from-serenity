@@ -35,7 +35,15 @@ export interface MarkerDrawing {
   text: string;
   color?: DrawingColor;
 }
-export type ChartDrawing = HLineDrawing | TrendlineDrawing | ZoneDrawing | MarkerDrawing;
+export interface PatternDrawing {
+  type: "pattern";
+  shape: string; // triangle|wedge|flag|channel|head_shoulders|double_top|double_bottom|...
+  closed: boolean; // 是否闭合（连尾回首，形成多边形）
+  points: { date: string; price: number }[]; // 有序关键点（顺序即连线顺序，不排序）
+  label: string;
+  color?: DrawingColor;
+}
+export type ChartDrawing = HLineDrawing | TrendlineDrawing | ZoneDrawing | MarkerDrawing | PatternDrawing;
 
 export interface DrawPlan {
   rationale: string;
@@ -131,6 +139,29 @@ export function sanitizeDrawPlan(raw: unknown, candles: Candle[]): DrawPlan {
         const b = { date: td, price: clampP(tp) };
         const [first, second] = a.date < b.date ? [a, b] : [b, a];
         out.push({ type: "trendline", from: first, to: second, label: asStr(d.label) || "趋势线", color });
+        break;
+      }
+      case "pattern": {
+        const ptsRaw = Array.isArray(d.points) ? d.points : [];
+        const pts: { date: string; price: number }[] = [];
+        for (const p of ptsRaw) {
+          if (!p || typeof p !== "object") continue;
+          const pr = p as Record<string, unknown>;
+          const dd = snapDate(pr.date, candles, dateSet);
+          const pp = asNum(pr.price);
+          if (!dd || pp === null) continue;
+          pts.push({ date: dd, price: clampP(pp) });
+        }
+        if (pts.length < 2) break;
+        const closed = d.closed === true && pts.length >= 3;
+        out.push({
+          type: "pattern",
+          shape: asStr(d.shape, 24) || "pattern",
+          closed,
+          points: pts,
+          label: asStr(d.label) || "形态",
+          color,
+        });
         break;
       }
       case "marker": {
