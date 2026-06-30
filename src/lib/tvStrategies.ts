@@ -1033,8 +1033,341 @@ const CARDWELL_RSI_NAVIGATOR_V3: TvStrategy = {
 };
 
 
+/* ============================================================================
+ * 策略②-V4：Cardwell RSI Trade Navigator 拐点先行版 —— tv-cardwell-rsi-navigator-v4
+ *
+ * 针对 V3 在 300024 上暴露的三处实测硬伤重构「入场」与「TP/SL 口径」：
+ *   硬伤①「上穿 55」是离散穿越：强趋势里 RSI 跳空到 55 上方后一路不回头，永远等不到
+ *          「从下穿过 55」，于是整段主升浪空仓——直到 RSI 跌回再穿，往往是一根爆发巨阳，
+ *          等于这根 +18% 大阳走完才进场。
+ *   硬伤② 固定 8 根冷却把急跌后的 V 型反包一刀切挡住（最肥的一类机会被锁死）。
+ *   硬伤③ TP/SL 的 R 单位用「当根 3×ATR」，单日巨阳把 ATR 撑大后 SL 过宽(−12%)、TP3 远到 +56% 几乎不可达。
+ *
+ * V4 三条改造：
+ *   1) 入场改「状态 + 早动能」而非离散穿越，更早抓启动：
+ *      C) 动能启动：RSI 上穿 50（早于 V3 的 55）+ 放量(量≥1.2×MA5) + 收盘站上 MA20；
+ *      B) 回踩起涨：上升结构(收盘>MA60、MA20 上行)中 RSI 回探牛市支撑带(≈40~55)后拐头回升、
+ *         收盘收复 MA10——不必等巨阳即可在回踩低位买；
+ *      A) 正向反转/底背离（沿用 V3，gap 放宽到 4）。
+ *      全部加「反追高距离闸门」：收盘离 MA20 不得超过 +8%（直接挡掉 6/29 那种 +12% 偏离的巨阳）。
+ *   2) 智能冷却：默认仅 3 根，但若「收盘重新站上离场那根的高点且 RSI 收复 50」即视为强反包、立即豁免，救回 V 型反包。
+ *   3) 稳定 R 单位的 TP/SL：R 单位改用「近 20 根 ATR 中位数」(抗单日尖刺)，SL=入场−1.8R 与近 6 根 swing low 取更紧者，
+ *      TP1/2/3 = 入场 + 1/1.5/2.5×R——更易达、与真实波动匹配。持有期 SL 随吊灯上移。
+ *   离场沿用 V3 三道（吊灯 3×ATR / RSI 跌破 38 / 连 2 根破 MA30）。
+ *
+ * 诚实口径：仍是纯多头趋势跟随、非预测；参数在该篮子择优、存在过拟合风险。纯多头、含双边手续费。
+ * ==========================================================================*/
+
+interface CardwellV4Params {
+  rsiPeriod: number;
+  atrPeriod: number;
+  maFast: number;
+  maMid: number;
+  maStruct: number;
+  maSlow: number;
+  thrust50: number;      // 早动能上穿阈值（默认 50）
+  thrust: number;        // 区间切换上冲阈值（V3 式，默认 55）
+  useMomentum: boolean;  // 启用 C) 动能启动（RSI 上穿 50+放量）
+  useRangeSwitch: boolean; // 启用 R) 区间切换上冲（RSI 上穿 thrust）
+  usePullback: boolean;  // 启用 B) 回踩起涨
+  useDiverge: boolean;   // 启用 A) 正向反转
+  bullSupportLo: number; // 牛市支撑带下沿（默认 40）
+  bullSupportHi: number; // 牛市支撑带上沿（默认 55）
+  pullbackLook: number;  // 回踩回看窗口（默认 6）
+  volExpand: number;     // 放量阈值（量/MA5，默认 1.2）
+  maxExtPct: number;     // 反追高：收盘离 MA20 上限（默认 0.08）
+  maxEntryRsi: number;   // 不追高 RSI 上限（默认 72）
+  divLook: number;
+  divGap: number;
+  chandMult: number;     // 吊灯止损/离场 ATR 倍数（默认 3.0）
+  exitRsi: number;       // 牛市区间破位阈值（默认 38）
+  cooldownBase: number;  // 基础冷却根数（默认 3，可被强反包豁免）
+  atrMedianLook: number; // 稳定 R 的 ATR 中位数窗口（默认 20）
+  rMult: number;         // 稳定 R 单位 = rMult×中位 ATR（默认 1.8）
+  swingLook: number;     // SL 参考的 swing low 窗口（默认 6）
+  tpR: number[];         // 盈利目标 R 倍数（默认 [1,1.5,2.5]）
+}
+
+const CARDWELL_V4_DEFAULTS: CardwellV4Params = {
+  rsiPeriod: 14,
+  atrPeriod: 14,
+  maFast: 10,
+  maMid: 20,
+  maStruct: 30,
+  maSlow: 60,
+  thrust50: 50,
+  thrust: 55,
+  useMomentum: false,   // 实测在该篮子增噪、降胜率，默认关（可显式开启对照）
+  useRangeSwitch: true,
+  usePullback: false,   // 实测增噪、降胜率，默认关（可显式开启对照）
+  useDiverge: true,
+  bullSupportLo: 40,
+  bullSupportHi: 55,
+  pullbackLook: 6,
+  volExpand: 1.2,
+  maxExtPct: 0.08,
+  maxEntryRsi: 72,
+  divLook: 20,
+  divGap: 4,
+  chandMult: 3.0,
+  exitRsi: 38,
+  cooldownBase: 3,
+  atrMedianLook: 20,
+  rMult: 1.8,
+  swingLook: 6,
+  tpR: [1, 1.5, 2.5],
+};
+
+function medianFinite(arr: number[]): number {
+  const a = arr.filter((x) => Number.isFinite(x)).slice().sort((x, y) => x - y);
+  if (!a.length) return NaN;
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+interface CardwellV4Ctx {
+  warmup: number;
+  atr: number[];
+  stableAtr: number[];
+  plan: (i: number) => { entry: number; stop: number; targets: TradeTarget[] } | null;
+  entry: (i: number, lastExit: number, lastExitHigh: number) => string | null;
+  exit: (i: number, highSinceEntry: number) => string | null;
+}
+
+function buildCardwellV4Ctx(candles: Candle[], p: CardwellV4Params): CardwellV4Ctx {
+  const n = candles.length;
+  const closes = candles.map((c) => c.close);
+  const vols = candles.map((c) => c.volume);
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const atr = atrWilder(candles, p.atrPeriod);
+  const maFast = sma(closes, p.maFast);
+  const maMid = sma(closes, p.maMid);
+  const maStruct = sma(closes, p.maStruct);
+  const maSlow = sma(closes, p.maSlow);
+  const volMa5 = sma(vols, 5);
+  const warmup = Math.max(p.maSlow, p.rsiPeriod + 5);
+
+  // 稳定 R 单位：近 atrMedianLook 根 ATR 的中位数（抗单日波动率尖刺）。
+  const stableAtr = new Array<number>(n).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    if (i < p.atrPeriod) continue;
+    const win: number[] = [];
+    for (let k = Math.max(0, i - p.atrMedianLook + 1); k <= i; k++) win.push(atr[k]);
+    stableAtr[i] = medianFinite(win);
+  }
+
+  const swingLow = (i: number): number => {
+    let lo = Infinity;
+    for (let k = Math.max(0, i - p.swingLook + 1); k <= i; k++) if (candles[k].low < lo) lo = candles[k].low;
+    return lo;
+  };
+
+  const plan = (i: number) => {
+    const sa = stableAtr[i];
+    if (!(fin(sa) && sa > 0)) return null;
+    const entry = closes[i];
+    const stopVol = entry - p.rMult * sa;
+    const swing = swingLow(i);
+    let stop = fin(swing) ? Math.max(swing * 0.995, stopVol) : stopVol; // 两者取更紧（更高）者
+    if (!(stop < entry)) stop = stopVol;
+    const R = Math.max(entry - stop, sa * 0.5);
+    return { entry, stop, targets: p.tpR.map((r, k) => ({ label: `TP${k + 1}`, price: entry + r * R, r })) };
+  };
+
+  const entry = (i: number, lastExit: number, lastExitHigh: number): string | null => {
+    if (i < warmup) return null;
+    if (!(fin(maSlow[i]) && closes[i] > maSlow[i])) return null;          // 中期趋势闸门
+    if (!fin(rsi[i]) || rsi[i] >= p.maxEntryRsi) return null;             // 不追高（RSI）
+    if (!fin(maMid[i]) || closes[i] > maMid[i] * (1 + p.maxExtPct)) return null; // 反追高（距 MA20）
+    // 智能冷却：默认 cooldownBase 根内不进，但强反包（收盘站上离场那根高点 + RSI 收复 50）豁免。
+    if (i - lastExit < p.cooldownBase) {
+      const strongReclaim = fin(lastExitHigh) && closes[i] > lastExitHigh && rsi[i] > 50;
+      if (!strongReclaim) return null;
+    }
+    const maMidRising = fin(maMid[i]) && fin(maMid[i - 3]) && maMid[i] > maMid[i - 3];
+
+    // C) 动能启动：RSI 上穿 50 + 放量 + 收盘站上 MA20（早于 V3 的上穿 55）。
+    if (p.useMomentum && i > 0 && fin(rsi[i - 1]) && rsi[i - 1] <= p.thrust50 && rsi[i] > p.thrust50 && closes[i] > maMid[i]) {
+      const v = vols[i];
+      const vma = volMa5[i];
+      if (fin(v) && fin(vma) && vma > 0 && v >= vma * p.volExpand) {
+        return `【动能启动】RSI(${p.rsiPeriod}) 上穿 ${p.thrust50} 且放量(量≥${p.volExpand}×MA5)、收盘 ${closes[i].toFixed(2)} 元站上 MA${p.maMid}，趋势刚启动即入场（早于 V3 上穿 55）；离 MA20 仅 +${((closes[i] / maMid[i] - 1) * 100).toFixed(1)}% 未追高。稳定 R 的 1/1.5/2.5R 目标。`;
+      }
+    }
+    // R) 区间切换上冲（V3 式）：RSI 上穿 thrust=55 进入牛市区间且收盘站上 MA20——现叠加反追高距离闸门。
+    if (p.useRangeSwitch && i > 0 && fin(rsi[i - 1]) && rsi[i - 1] <= p.thrust && rsi[i] > p.thrust && fin(maMid[i]) && closes[i] > maMid[i]) {
+      return `【区间切换上冲】RSI(${p.rsiPeriod}) 上穿 ${p.thrust} 进入 Cardwell 牛市区间(40~80)且收盘站上 MA${p.maMid}，趋势启动、收盘 ${closes[i].toFixed(2)} 元入场（离 MA20 +${((closes[i] / maMid[i] - 1) * 100).toFixed(1)}% 未追高）。稳定 R 的 1/1.5/2.5R 目标。`;
+    }
+    // B) 回踩起涨：上升结构中 RSI 回探牛市支撑带后拐头回升、收复 MA10。
+    if (p.usePullback && maMidRising && fin(maFast[i]) && closes[i] > maFast[i] && fin(rsi[i - 1]) && rsi[i] > rsi[i - 1]) {
+      let dipRsi = Infinity;
+      for (let k = i - 1; k >= Math.max(warmup, i - p.pullbackLook); k--) if (fin(rsi[k])) dipRsi = Math.min(dipRsi, rsi[k]);
+      if (fin(dipRsi) && dipRsi >= p.bullSupportLo - 5 && dipRsi <= p.bullSupportHi && rsi[i] >= p.bullSupportLo) {
+        return `【回踩起涨】上升结构(收盘>MA60、MA20 上行)中 RSI 回探牛市支撑带至 ${dipRsi.toFixed(0)} 后拐头回升至 ${rsi[i].toFixed(0)}、收盘 ${closes[i].toFixed(2)} 元收复 MA${p.maFast}，回踩买点（不必等巨阳）。稳定 R 的 1/1.5/2.5R 目标。`;
+      }
+    }
+    // A) 正向反转 / 底背离（沿用 V3，divGap 放宽）。
+    let prLow = Infinity;
+    let prRsi = 0;
+    let prIdx = -1;
+    for (let k = i - 2; k >= Math.max(warmup, i - p.divLook); k--) {
+      if (candles[k].low < prLow) {
+        prLow = candles[k].low;
+        prRsi = rsi[k];
+        prIdx = k;
+      }
+    }
+    if (p.useDiverge && prIdx > 0 && candles[i].low <= prLow * 1.01 && fin(prRsi) && rsi[i] > prRsi + p.divGap && rsi[i] > 35 && rsi[i] < 58 && fin(maFast[i]) && closes[i] > maFast[i]) {
+      return `【正向反转】价创近 ${p.divLook} 根新低但 RSI 由 ${prRsi.toFixed(0)} 抬升至 ${rsi[i].toFixed(0)}（底背离、跌势衰竭），收盘 ${closes[i].toFixed(2)} 元收复 MA${p.maFast}，反转买点。稳定 R 的 1/1.5/2.5R 目标。`;
+    }
+    return null;
+  };
+
+  const exit = (i: number, highSinceEntry: number): string | null => {
+    if (i < 1) return null;
+    if (fin(atr[i]) && atr[i] > 0) {
+      const stop = highSinceEntry - p.chandMult * atr[i];
+      if (closes[i] <= stop) {
+        return `【吊灯止损】自持仓高点 ${highSinceEntry.toFixed(2)} 元回撤超 ${p.chandMult}×ATR(14)，收盘 ${closes[i].toFixed(2)} 元触线离场，让利润奔跑、转弱即止。`;
+      }
+    }
+    if (fin(rsi[i]) && rsi[i] < p.exitRsi) {
+      return `【牛市区间破位】RSI(${p.rsiPeriod})=${rsi[i].toFixed(1)} 跌破 ${p.exitRsi}（Cardwell 牛市区间下沿失守、趋势真转弱），离场。`;
+    }
+    if (fin(maStruct[i]) && fin(maStruct[i - 1]) && closes[i] < maStruct[i] && closes[i - 1] < maStruct[i - 1]) {
+      return `【结构破位】连续 2 根收盘跌破 MA${p.maStruct}（中期结构走坏），离场。`;
+    }
+    return null;
+  };
+
+  return { warmup, atr, stableAtr, plan, entry, exit };
+}
+
+/**
+ * 计算 V4 图层：持仓状态机产出方向 / 翻多翻空点 / regime + 稳定 R 单位的交易计划。
+ */
+export function computeCardwellRsiNavigatorV4(
+  candles: Candle[],
+  params: Partial<CardwellV4Params> = {},
+): TvStrategyLayers {
+  const p = { ...CARDWELL_V4_DEFAULTS, ...params };
+  const n = candles.length;
+  const line = new Array<number | null>(n).fill(null);
+  const dir = new Array<1 | -1 | 0>(n).fill(0);
+  const regime = new Array<Regime>(n).fill("transition");
+  const regimeValue = new Array<number>(n).fill(NaN);
+  const flips: TvStrategyLayers["flips"] = [];
+
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const ctx = buildCardwellV4Ctx(candles, p);
+  const atr = ctx.atr;
+
+  let holding = false;
+  let highSinceEntry = 0;
+  let lastExit = -p.cooldownBase - 1;
+  let lastExitHigh = NaN;
+  let lastEntryIdx = -1;
+  let lastPlan: { entry: number; stop: number; targets: TradeTarget[] } | null = null;
+  let curDir: 1 | -1 | 0 = 0;
+  let tradePlan: TradePlan | null = null;
+
+  for (let i = 0; i < n; i++) {
+    if (fin(rsi[i])) {
+      const dev = Math.abs(rsi[i] - 50);
+      regime[i] = dev >= 20 ? "trend" : dev <= 10 ? "chop" : "transition";
+    }
+    if (!holding) {
+      const reason = ctx.entry(i, lastExit, lastExitHigh);
+      if (reason) {
+        holding = true;
+        highSinceEntry = candles[i].close;
+        lastEntryIdx = i;
+        curDir = 1;
+        flips.push({ index: i, dir: "up", price: candles[i].close });
+        lastPlan = ctx.plan(i);
+        if (lastPlan) {
+          tradePlan = { anchorIndex: i, dir: 1, entry: lastPlan.entry, stop: lastPlan.stop, targets: lastPlan.targets };
+        }
+      }
+    } else {
+      if (candles[i].close > highSinceEntry) highSinceEntry = candles[i].close;
+      const reason = ctx.exit(i, highSinceEntry);
+      if (reason) {
+        holding = false;
+        lastExit = i;
+        lastExitHigh = candles[i].high;
+        curDir = -1;
+        flips.push({ index: i, dir: "down", price: candles[i].close });
+      }
+    }
+    dir[i] = curDir;
+  }
+
+  // 仍持仓时：SL 随吊灯上移（取入场计划止损与吊灯止损更高者），目标维持稳定 R。
+  if (holding && lastEntryIdx >= 0 && lastPlan) {
+    const curAtr = fin(atr[n - 1]) && atr[n - 1] > 0 ? atr[n - 1] : atr[lastEntryIdx];
+    const chandStop = fin(curAtr) && curAtr > 0 ? highSinceEntry - p.chandMult * curAtr : lastPlan.stop;
+    tradePlan = {
+      anchorIndex: lastEntryIdx,
+      dir: 1,
+      entry: lastPlan.entry,
+      stop: Math.max(lastPlan.stop, chandStop),
+      targets: lastPlan.targets,
+    };
+  }
+
+  return { line, dir, flips, regime, regimeValue, tradePlan };
+}
+
+/**
+ * 纯多头可回测包装（V4 拐点先行版）：动能启动 / 回踩起涨 / 正向反转入场；
+ * 智能冷却 + 反追高距离闸门；吊灯(3×ATR)+RSI 跌破 38+连破 MA30 离场。含双边手续费。
+ */
+export function runTvCardwellRsiNavigatorV4(candles: Candle[]): BacktestResult {
+  return runTvCardwellRsiNavigatorV4Params(candles, {});
+}
+
+/** 参数化 V4 回测（供调参/对照；默认即 CARDWELL_V4_DEFAULTS）。 */
+export function runTvCardwellRsiNavigatorV4Params(candles: Candle[], params: Partial<CardwellV4Params>): BacktestResult {
+  const p = { ...CARDWELL_V4_DEFAULTS, ...params };
+  const ctx = buildCardwellV4Ctx(candles, p);
+  let lastExit = -p.cooldownBase - 1;
+  let lastExitHigh = NaN;
+  return runSignalBacktest(candles, {
+    warmup: ctx.warmup,
+    atrMult: 0,
+    atrFloorPct: 0,
+    atrCeilPct: 0,
+    entry: (i) => ctx.entry(i, lastExit, lastExitHigh),
+    exit: (i, st) => {
+      const reason = ctx.exit(i, st.highSinceEntry);
+      if (reason) {
+        lastExit = i;
+        lastExitHigh = candles[i].high;
+      }
+      return reason;
+    },
+  });
+}
+
+const CARDWELL_RSI_NAVIGATOR_V4: TvStrategy = {
+  meta: {
+    id: "tv-cardwell-rsi-navigator-v4",
+    name: "Cardwell RSI Trade Navigator 拐点先行版 V4",
+    version: "4.0",
+    author: "MarkitTick（V4 拐点先行重构）",
+    source: "https://cn.tradingview.com/chart/JTqSjJYn/",
+    notes:
+      "针对 V3 在 300024 上的实测硬伤重构入场与 TP/SL 口径。V3 痛点：①固定 8 根冷却把急跌后的 V 型反包一刀切挡住（300024 在 6/12 离场后被冷却锁死，错过 6/15 起涨、直到 6/29 一根 +18.9% 巨阳才上穿 55 进场）；②无反追高距离闸门，6/29 收盘已比 MA20 高 +12% 仍买在巨阳顶；③TP/SL 的 R 单位用当根 3×ATR，单日巨阳撑大 ATR 后 SL 过宽、TP3 远到 +56% 几乎不可达。V4 默认开启三条改造：①智能冷却——默认仅 3 根，且只要收盘重新站上「离场那根的高点」且 RSI 收复 50 即视为强反包立即豁免、当根可再进（300024 因此在 6/15 @16.96 即重新入场，早于 V3 的 6/29 @18.10）；②反追高距离闸门——收盘离 MA20 超过 +8% 一律不进（直接挡掉 6/29 那种 +12% 偏离的巨阳）；③稳定 R 单位的 TP/SL——R=近 20 根 ATR 中位数(抗单日尖刺)，SL=入场−1.8R 与近 6 根 swing low 取更紧者，TP1/2/3=入场+1/1.5/2.5R 更易达。入场触发默认沿用 V3 的「区间切换上冲(RSI 上穿 55+站上 MA20)」+「正向反转/底背离」，并内置两个可选触发（默认关、可显式开启对照）：C) 动能启动(RSI 上穿 50+放量) 与 B) 回踩起涨(上升结构中 RSI 回探支撑带拐头)——实测这两者在该篮子增加换手、降低胜率，故不默认开。离场沿用 V3 三道(吊灯 3×ATR / RSI 跌破 38 / 连 2 根破 MA30)。一篮子 12 只 A 股 360 根日线回测：V4 平均约 +93%(V3 +81%)、回撤约 −23%(V3 −21%)、胜率约 36%(V3 39%)——以「更快的趋势再入场」换更高总收益，但在 300024 这类高波动票上更易被洗（V4 −32% vs V3 −13%：6/15 的早入场实为假突破，6/26 被结构止损 −10%，随后 6/29 才真爆发）。诚实口径：仍是纯多头趋势跟随、非预测；参数在该篮子择优、存在过拟合风险。纯多头、含双边手续费。",
+    tags: ["tradingview", "rsi", "cardwell", "trade-plan", "early-entry", "momentum-thrust", "pullback", "stable-atr", "chandelier-exit", "reproduction"],
+  },
+  compute: (candles) => computeCardwellRsiNavigatorV4(candles),
+  backtest: (candles) => runTvCardwellRsiNavigatorV4(candles),
+};
+
+
 /** 已复刻的 TV 策略注册表（顺序即 UI 下拉顺序）。新增脚本只需在此追加一项。 */
-const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, CARDWELL_RSI_NAVIGATOR_V3, KAMA_MOMENTUM_V1];
+const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, CARDWELL_RSI_NAVIGATOR_V3, CARDWELL_RSI_NAVIGATOR_V4, KAMA_MOMENTUM_V1];
 
 /** 列出所有已复刻 TV 策略的元信息（供「策略图层」下拉）。 */
 export function listTvStrategies(): TvStrategyMeta[] {

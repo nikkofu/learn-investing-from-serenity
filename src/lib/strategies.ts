@@ -26,7 +26,7 @@ import {
   runFibKdjPullbackV1,
   runConfluenceV1,
 } from "./indicatorStrategies";
-import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvKamaMomentumV1 } from "./tvStrategies";
+import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvCardwellRsiNavigatorV4, runTvKamaMomentumV1 } from "./tvStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -204,6 +204,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["tradingview", "rsi", "cardwell", "trade-plan", "positive-reversal", "rsi-range", "chandelier-exit", "trend-capture", "reproduction"],
     },
     run: (candles) => runTvCardwellRsiNavigatorV3(candles),
+  },
+  {
+    meta: {
+      id: "tv-cardwell-rsi-navigator-v4",
+      name: "Cardwell RSI Trade Navigator 拐点先行版 V4",
+      version: "4.0",
+      description:
+        "针对 V3 实测硬伤重构入场与 TP/SL。V3 痛点：①固定 8 根冷却把急跌后的 V 型反包一刀切挡住（300024 6/12 离场后被锁死、错过 6/15 起涨，直到 6/29 +18.9% 巨阳才上穿 55 进场）；②无反追高距离闸门，6/29 收盘已比 MA20 高 +12% 仍买在巨阳顶；③TP/SL 的 R 单位用当根 3×ATR，单日巨阳撑大 ATR 后 SL 过宽、TP3 远到 +56% 几乎不可达。V4 默认三条改造：①智能冷却——默认仅 3 根，且收盘重新站上「离场那根高点」且 RSI 收复 50 即强反包豁免、当根可再进（300024 因此 6/15 @16.96 即再入场，早于 V3 的 6/29 @18.10）；②反追高距离闸门——收盘离 MA20 超 +8% 一律不进（挡掉 6/29 +12% 偏离的巨阳）；③稳定 R 单位 TP/SL——R=近 20 根 ATR 中位数(抗单日尖刺)，SL=入场−1.8R 与近 6 根 swing low 取更紧者，TP1/2/3=入场+1/1.5/2.5R 更易达。入场触发默认沿用 V3「区间切换上冲(RSI 上穿 55+站上 MA20)+正向反转」，另内置可选触发「动能启动(RSI 上穿 50+放量)/回踩起涨」（默认关，实测增噪降胜率）。离场沿用 V3 三道(吊灯 3×ATR / RSI 跌破 38 / 连 2 根破 MA30)。一篮子 12 只 A 股 360 根日线回测：V4 平均约 +93%(V3 +81%)、回撤约 −23%(V3 −21%)、胜率约 36%(V3 39%)——以更快的趋势再入场换更高总收益，但高波动票(如 300024 −32% vs V3 −13%)更易被洗：6/15 早入场实为假突破、6/26 被结构止损 −10%，6/29 才真爆发。诚实口径：纯多头趋势跟随、非预测；参数择优有过拟合风险。纯多头、含双边手续费。对应 /chart「策略图层」可叠加稳定 R 交易计划色块 + 买卖翻转标记。",
+      tags: ["tradingview", "rsi", "cardwell", "trade-plan", "early-entry", "momentum-thrust", "pullback", "stable-atr", "chandelier-exit", "reproduction"],
+    },
+    run: (candles) => runTvCardwellRsiNavigatorV4(candles),
   },
   {
     meta: {

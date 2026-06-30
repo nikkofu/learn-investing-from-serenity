@@ -297,7 +297,9 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [speedMs, setSpeedMs] = useState(350);
   // 实时层读取回放游标的镜像（避免把 replayN 放进 applyLive 依赖而触发结构层整图重建）。
   const replayNRef = useRef<number | null>(null);
-  replayNRef.current = replayN;
+  useEffect(() => {
+    replayNRef.current = replayN;
+  }, [replayN]);
 
   // 日内分时：选中 5/15/30/60m 时按需拉取（不走日线 props）
   const [intradayCandles, setIntradayCandles] = useState<Candle[] | null>(null);
