@@ -27,6 +27,10 @@ import { candlesByPeriod } from "@/lib/candleAgg";
 import { computeMACD, computeRSI, computeKDJ, computeBOLL, computeResonance, computePatternSignals, type ResonancePoint, type PatternSignal } from "@/lib/indicators";
 import type { ChartDrawing, MarkerDrawing, PatternDrawing, DrawingColor } from "@/lib/drawings";
 import { PatternOutlinePrimitive } from "./patternOutlinePrimitive";
+import { PaneLabelPrimitive } from "./paneLabelPrimitive";
+import { ChipProfilePrimitive, type ChipProfileData } from "./chipProfilePrimitive";
+import { readSavedLayerId, saveLayerId } from "@/lib/strategyPref";
+import { calculateChipDistribution } from "@/lib/quant";
 import { listTvStrategies, getTvStrategy, type TvStrategyLayers, type TradePlan } from "@/lib/tvStrategies";
 import { TradeZonesPrimitive, type TradeZonesData, type TradeZoneBand, type TradeZoneLevel } from "./tradeZonesPrimitive";
 import { TradeReasonsPrimitive, type TradeReasonLabel } from "./tradeReasonsPrimitive";
@@ -246,16 +250,24 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [showBoll, setShowBoll] = useState(true);
   // 回归通道（与 /scanner 展开评估同口径）默认开启，可单独关闭。
   const [showChannel, setShowChannel] = useState(true);
+  // 右侧筹码分布（VRVP 风格）：随鼠标悬停日期变化（= 截至该日的筹码分布），默认开启。
+  const [showChips, setShowChips] = useState(true);
+  const chipPrimRef = useRef<ChipProfilePrimitive | null>(null);
   const [showResonance, setShowResonance] = useState(true);
   // 通用形态标记（顶背离/底背离/天量/地量）默认开启，可单独关闭。
   const [showPatterns, setShowPatterns] = useState(true);
   // BS 点旁是否常驻显示触发理由标签（默认开启；点位密集时可关闭以减少遮挡）。
   const [showTradeReasons, setShowTradeReasons] = useState(true);
-  // 策略图层：选中的 TradingView 复刻策略 id（""=关闭）
-  const [tvStrategyId, setTvStrategyId] = useState(initialTvStrategyId);
-  // 从 ?layer= 进入或外部切换标的时，跟随更新选中的策略图层（让「从回测页点进自动叠加」生效）。
+  // 策略图层：选中的 TradingView 复刻策略 id（""=关闭）。
+  // 初值优先级：深链 ?layer=（initialTvStrategyId）> 上次保存（localStorage）> 关闭。
+  const [tvStrategyId, setTvStrategyId] = useState(() => {
+    if (initialTvStrategyId) return initialTvStrategyId;
+    const saved = readSavedLayerId();
+    return saved && listTvStrategies().some((m) => m.id === saved) ? saved : "";
+  });
+  // 仅当带深链 ?layer= 时才跟随覆盖（让「从回测页点进自动叠加」生效）；无深链时保留上次记忆，不清空。
   useEffect(() => {
-    setTvStrategyId(initialTvStrategyId);
+    if (initialTvStrategyId) setTvStrategyId(initialTvStrategyId);
   }, [initialTvStrategyId]);
   const [maOn, setMaOn] = useState<Record<string, boolean>>({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: true, ma250: true });
   const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string; resoColor?: string; st?: string; pat?: string; patColor?: string } | null>(null);
@@ -282,6 +294,24 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const macd = useMemo(() => computeMACD(candles), [candles]);
   const rsi = useMemo(() => computeRSI(candles), [candles]);
   const kdj = useMemo(() => computeKDJ(candles), [candles]);
+  // 筹码分布数据：截至第 uptoIdx 根（含）算 VRVP 直方图；highlightPrice=该区间内成交量最高那天的收盘价（条纹标注）。
+  const buildChipData = useCallback((uptoIdx: number): ChipProfileData => {
+    const end = Math.max(0, Math.min(candles.length - 1, uptoIdx));
+    const slice = candles.slice(0, end + 1);
+    if (slice.length === 0) return { bins: [], maxVolume: 0, highlightPrice: null, currentPrice: null, dateLabel: "" };
+    const ref = slice[slice.length - 1].close;
+    const chip = calculateChipDistribution(slice, ref);
+    let maxVol = 0;
+    for (const b of chip.bins) if (b.volume > maxVol) maxVol = b.volume;
+    let hiVol = -1;
+    let hiPrice: number | null = null;
+    for (const c of slice) { const v = c.volume || 0; if (v > hiVol) { hiVol = v; hiPrice = c.close; } }
+    return { bins: chip.bins, maxVolume: maxVol, highlightPrice: hiPrice, currentPrice: ref, dateLabel: slice[slice.length - 1].date };
+  }, [candles]);
+  // 筹码开关：仅切换 primitive 可见性，不重建图表。
+  useEffect(() => {
+    chipPrimRef.current?.setEnabled(showChips);
+  }, [showChips]);
   const boll = useMemo(() => computeBOLL(candles), [candles]);
   // 回归通道绘制数据：以 technical.trendChannel（最近 60 日收盘价线性回归 + 标准差上下轨）为源，
   // 沿最近 N 根 K 线还原三轨斜线，口径与经典 SVG（QuantChart）/scanner 评估完全一致：
@@ -720,6 +750,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     // BS 触发理由常驻标注层：在每个买卖点旁画策略简称 + 卖点盈亏，横向避让，随平移/缩放重排。
     candleSeries.attachPrimitive(new TradeReasonsPrimitive({ labels: tradeReasonLabels, enabled: showTradeReasons }));
 
+    // 右侧筹码分布：附着到主图序列，初始显示「截至最后一根」的筹码分布（悬停时由 crosshair 改为指定日）。
+    const chipPrim = new ChipProfilePrimitive(buildChipData(candles.length - 1), showChips);
+    chipPrimRef.current = chipPrim;
+    candleSeries.attachPrimitive(chipPrim);
+
     // 副图振荡指标：各占独立窗格（分开显示，量纲互不干扰）
     let paneIdx = 1;
     const lineP = (vals: number[], color: string, pane: number) => {
@@ -730,18 +765,22 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     const guide = (s: ISeriesApi<"Line">, level: number) =>
       s.createPriceLine({ price: level, color: borderColor, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: String(level) });
 
+    // 副图标题色（跟随主题 --faint，读不到时退回浅灰）。
+    const paneLabelColor = borderColor;
     if (indMacd) {
       const p = paneIdx++;
       const hist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, p);
       paintersRef.current.push((vc) => hist.setData(vc.map((c, i) => (Number.isFinite(macd.macd[i]) ? { time: toTime(c.date), value: macd.macd[i], color: (macd.macd[i] >= 0 ? UP : DOWN) + "99" } : null)).filter((q): q is { time: Time; value: number; color: string } => q !== null)));
       lineP(macd.dif, "#eab308", p);
       lineP(macd.dea, "#38bdf8", p);
+      hist.attachPrimitive(new PaneLabelPrimitive("MACD (12,26,9)", paneLabelColor));
     }
     if (indRsi) {
       const p = paneIdx++;
       const s = lineP(rsi, "#eab308", p);
       guide(s, 70);
       guide(s, 30);
+      s.attachPrimitive(new PaneLabelPrimitive("RSI (14)", paneLabelColor));
     }
     if (indKdj) {
       const p = paneIdx++;
@@ -750,6 +789,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       lineP(kdj.j, "#ec4899", p);
       guide(s, 80);
       guide(s, 20);
+      s.attachPrimitive(new PaneLabelPrimitive("KDJ (9,3,3)", paneLabelColor));
     }
     const panes = chart.panes();
     // 副图（MACD/RSI/KDJ）高度在原基础上再缩 1/3（1.05→0.70），释放的高度全部归主 K 线图。
@@ -812,10 +852,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
     void onRange;
 
     const onMove = chart.subscribeCrosshairMove((param) => {
-      if (!param.time) { setSignalTip(null); return; }
+      if (!param.time) { setSignalTip(null); chipPrimRef.current?.setData(buildChipData(candles.length - 1)); return; }
       const cd = param.seriesData.get(candleSeries) as CandlestickData | undefined;
       if (!cd) { setSignalTip(null); return; }
       const matchIdx = candles.findIndex((c) => toTime(c.date) === param.time);
+      if (matchIdx >= 0) chipPrimRef.current?.setData(buildChipData(matchIdx));
       const match = matchIdx >= 0 ? candles[matchIdx] : undefined;
       const dateStr = match?.date ?? String(param.time);
       const r = resoByDate.get(dateStr);
@@ -909,6 +950,10 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             <input type="checkbox" checked={showChannel} disabled={!trendChannel || intraday} onChange={(e) => setShowChannel(e.target.checked)} className="rounded-[1px] accent-[var(--accent)]" />
             回归通道
           </label>
+          <label className="flex items-center gap-1 cursor-pointer hover:text-[var(--text)]" title="筹码分布（VRVP）：右侧按价位显示累积筹码量；随鼠标悬停日期变化为「截至该日」的分布；琥珀条纹=该区间内成交量最高那天的价格">
+            <input type="checkbox" checked={showChips} onChange={(e) => setShowChips(e.target.checked)} className="rounded-[1px] accent-[var(--accent)]" />
+            筹码
+          </label>
         </div>
 
         <div className="flex items-center gap-1" title="周期：分时 5/15/30/60m（日内，按需拉取） · 日/周/月 K">
@@ -975,7 +1020,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           <span className="text-[9px] uppercase tracking-wider text-[var(--faint)]">策略图层</span>
           <select
             value={tvStrategyId}
-            onChange={(e) => setTvStrategyId(e.target.value)}
+            onChange={(e) => { setTvStrategyId(e.target.value); saveLayerId(e.target.value); }}
             className="bg-[var(--inset)] border border-[var(--border)] text-[9.5px] font-semibold px-1.5 py-0.5 rounded-[1px] text-[var(--text)] cursor-pointer max-w-[200px]"
           >
             <option value="">关闭</option>

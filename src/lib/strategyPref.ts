@@ -13,6 +13,28 @@
 export const PREFERRED_PRO_STRATEGY_ID = "tv-cardwell-rsi-navigator-v3";
 /** 持久化键：全站共用同一 key，保证各页面一致。 */
 export const PRO_STRATEGY_LS_KEY = "serenity.chart.proStrategyId";
+/** 策略「图层」（主图叠加的 TV 复刻策略）持久化键：与买卖引擎分开记忆。 */
+export const TV_LAYER_LS_KEY = "serenity.chart.tvLayerId";
+
+/** 读取上次保存的策略图层 id（null=从未设置；""=用户显式关闭）。 */
+export function readSavedLayerId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(TV_LAYER_LS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** 保存当前策略图层 id（含空串：记住「关闭」状态）。 */
+export function saveLayerId(id: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TV_LAYER_LS_KEY, id);
+  } catch {
+    /* localStorage 不可用时静默 */
+  }
+}
 
 /** 读取上次保存的策略 id（仅客户端有效；服务端 / 异常时返回 null）。 */
 export function readSavedStrategyId(): string | null {
