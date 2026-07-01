@@ -551,7 +551,10 @@ export function runRecommendationBacktest(
   };
 
   // 指定了已登记策略 id → 走「策略忠实重放」路径；否则退回内置简化口径。
-  const strategy = full.strategyId ? getStrategy(full.strategyId) : undefined;
+  // 自撮合元策略（Ensemble）是连续仓位、非「买入信号→整仓/分批」的回合式模型，
+  // 不适配本处按信号回合重放的 ClosedTrade 口径，故退回内置简化口径（避免二次撮合失真）。
+  const picked = full.strategyId ? getStrategy(full.strategyId) : undefined;
+  const strategy = picked && !picked.selfMatched ? picked : undefined;
   const simulate = (s: RecommendationSeries) =>
     strategy ? simulateSymbolViaStrategy(s, full, strategy) : simulateSymbol(s, full);
 

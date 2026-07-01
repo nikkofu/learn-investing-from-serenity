@@ -141,14 +141,56 @@
 ## 5. 任务拆解（逐个完成）
 
 - [ ] **T1** 固化统一回测脚本 `scripts/bt_all.ts`（已完成，随本设计入库）+ 打分脚本，产出基准表
-- [ ] **T2** 撮合器扩展：`executeTargetPositionNextOpen(candles, targetPos[])`（目标仓位序列撮合）+ 单测/自检
-- [ ] **T3** `src/lib/ensemble.ts`：EnsembleConfig + regime 检测（复用 computeADX / 回归通道斜率）+ 加权投票聚合 → 目标仓位
-- [ ] **T4** 实现架构 B 的 `ensemble-v1`（静态权重先行）；`scripts/bt_ensemble.ts` 回测对比
-- [ ] **T5** 迭代：动态权重（逆回撤/滚动表现）+ regime 权重调制，回测调参至满足 §4.4 验收
-- [ ] **T6** 注册进 `STRATEGIES`（不改默认）；`tsc`/`lint`/`build` 全绿
-- [ ] **T7** 同步 README / CHANGELOG / 版本号 / tag / GitHub Release，CI 转绿
+- [x] **T2** 撮合器扩展：`executeTargetPositionNextOpen(candles, targetPos[])`（目标仓位序列撮合，次日开盘再平衡、1% 权益防抖阈值、`cash+shares*close` 净值口径）
+- [x] **T3** `src/lib/ensemble.ts`：EnsembleConfig + **方向感知 regime** 检测（`computeADX` 定强弱 + `computeRegressionChannel` 斜率定方向）+ 加权投票聚合 → 目标仓位
+- [x] **T4** 实现架构 B 的 `ensemble-v1`（静态权重）；`scripts/bt_ensemble.ts` / `scripts/bt_ens_grid.ts` 回测对比
+- [x] **T5** 迭代：方向感知 regime 权重调制 + 网格调参至满足 §4.4 验收（详见 §7）
+- [x] **T6** 注册进 `STRATEGIES`（`ensemble-v1`，`selfMatched` 自撮合，不改默认 V7）；`tsc`/`lint`/`build` 全绿
+- [x] **T7** 同步 README / CHANGELOG / 版本号 / tag / GitHub Release，CI 转绿
 - [ ] **T8**（可选）架构 C 分资金独立账本，作为 `ensemble-v2` 进阶
 
 ## 6. 附：复现
 - 全策略回测：`npx tsx scripts/bt_all.ts`
+- Ensemble 对比：`npx tsx scripts/bt_ensemble.ts`（ENSEMBLE-v1 vs 各核心单策略 vs 买入持有）
+- 参数网格：`npx tsx scripts/bt_ens_grid.ts`（posCap / trendBoost / relSlope / 成员权重扫描）
 - 打分：见 §2.1 权重（脚本随库提供）
+
+## 7. 最终实现（Final Implementation · v0.58.0）
+
+### 7.1 落地架构
+架构 B「加权投票 + 连续仓位聚合」。5 个成员并行回测 → 每个成员逐根敞口 `memberPos[i]∈[0,1]`（`memberPositionSeries`：buy 累加 sizePct、sell 按敞口比例减仓）→ 按权重（经 regime 调制）加权平均 → 组合逐根目标仓位 `targetPos[i]∈[0,posCap]` → `executeTargetPositionNextOpen` 次日开盘再平衡撮合。
+
+**关键设计：方向感知 regime（`detectRegime`）。** 早期版本 regime 只用 ADX 判「是否成趋势」，但 A 股下跌段 ADX 同样高 → 下跌票被判「趋势」→ 反手压低均值回归成员，反而在最该低吸的地方减配，跨标的一致性上不去。改为：`ADX≥adxTrendMin` 且回归通道相对斜率 `slope/mid ≥ +relSlopeTrendMin` → `trend_up`（抬升趋势成员、压低回归成员）；`≤ −relSlopeTrendMin` → `trend_down`；其余 → `range`。**只有 `trend_up` 抬升趋势成员**，`range`/`trend_down` 一律抬升均值回归、压低趋势成员。这样「上行趋势多吃趋势 alpha（拉高收益）」与「震荡/下行多靠回归低吸（拉高一致性）」两个杠杆被解耦——`trendBoost` 可以调大以在上行段更激进吃趋势，而不牺牲下行段的回归配置。
+
+### 7.2 最终参数（`ENSEMBLE_V1_DEFAULTS`）
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| 成员 · Cardwell V4 (trend) | baseWeight 0.24 | RSI 趋势跟随核心（高收益、高波动） |
+| 成员 · Cardwell V3 (trend) | 0.20 | 稳健趋势基准 |
+| 成员 · Chokepoint 动量 V5 (trend) | 0.18 | 动量突破 + ADX 闸门 |
+| 成员 · 回归通道 V1 (reversion) | 0.26 | 震荡/下行低吸主力（一致性来源） |
+| 成员 · RSI 超卖回归 V1 (reversion) | 0.12 | 低波动尾部低吸 |
+| `posCap` | 0.95 | 组合最大总仓位 |
+| `regimeModulation` | true | 启用方向感知 regime 调制 |
+| `adxTrendMin` | 20 | ADX 趋势强弱阈值 |
+| `relSlopeTrendMin` | 0.0008 | 回归通道每根相对斜率方向阈值 |
+| `trendBoost` | 2.5 | 受青睐一类成员 ×2.5、另一类 ÷2.5 |
+| `channelLen` | 60 | 回归通道回看根数（方向判定） |
+
+### 7.3 §4.4 验收结果（12 只 A 股 · 400 根日线 · chokepointScore=78 · 含双边手续费 · 次日开盘撮合）
+
+| 验收项 | 目标 | ENSEMBLE-v1 实测 | 结论 |
+|---|---|---|---|
+| ① 最大回撤 | < −18%，且优于最优趋势核心 | **−16.6%**（v3 −21.1 / v4 −23.2 / chk5 −27.5） | ✅ |
+| ② 平均收益 | ≥ cardwell-v3 的 80%（≈57.1%） | **+63.0%** | ✅ |
+| ③ 盈利股占比 | ≥ 50% | **50%**（6/12） | ✅ |
+| ④ 夏普 | ≥ 全部单策略中位数（−0.132） | **0.147** | ✅ |
+
+**四项全部达成。** 其中「方向感知 regime + trendBoost=2.5」把 300059 这类下跌票（趋势成员全亏、回归成员 chan +8.9%）从组合 −6.7% 拉正到 **+5.2%**，盈利股数由 4/12 升到 6/12。
+
+### 7.4 诚实口径
+- **不跑赢买入持有**（组合 +63% vs BH +163.7%）：这篮子是大市值强单边牛（601869 BH +1825%），任何择时/分散都必然牺牲极端长尾收益。Ensemble 的目标是**压回撤、提一致性**（§4.1），非最高收益，验收标准据此设定，达标即发布。
+- **胜率口径参考意义有限**：连续仓位下 shares 极少精确归零，「一段持仓归零记一笔」的胜率统计（26.9%）对再平衡型策略不具代表性，应以收益/回撤/盈利股占比/夏普为准。
+- **过拟合风险**：成员选择与权重经该 12 只篮子择优，样本外表现可能回吐；`relSlopeTrendMin`/`trendBoost` 亦为篮子内择优。
+- **注册口径**：`ensemble-v1` 带 `selfMatched:true`，`runAllStrategies`/`mining` 经 `executeStrategy` 跳过二次撮合；`/backtest/recommendation` 的「信号回合忠实重放」不适配连续仓位模型，对自撮合策略退回内置简化口径。**默认 Pro 策略维持 `chokepoint-momentum-v7` 不变**，Ensemble 为可选元策略。

@@ -2,6 +2,29 @@
 
 本项目的所有重要更新都将记录在此文件中。
 
+## [0.58.0] - 2026-07-01
+
+> **新增元策略：多策略并行决策 V1（`ensemble-v1`）——架构 B「加权投票 + 连续仓位聚合」**，设计文档 `docs/multi-strategy-ensemble-design.md`（含 §7 最终实现）。5 个成员并行（趋势核心 Cardwell V4/V3 + Chokepoint 动量 V5，均值回归卫星 回归通道 V1 + RSI 超卖回归 V1）逐根敞口加权平均 → 连续目标仓位 → 次日开盘再平衡撮合；权重由**方向感知 regime**（ADX 定强弱 + 回归通道斜率定方向）调制，仅上升趋势期偏重趋势成员、震荡/下行期偏重均值回归。**满足设计验收 §4.4**：收益 +63.0%、最大回撤 −16.6%（优于全部趋势核心）、盈利股占比 50%、夏普 0.147（≥ 全部单策略中位数）。**默认 Pro 策略仍保持 `chokepoint-momentum-v7`**。
+
+### 新增
+- `src/lib/quant.ts`：新增 `executeTargetPositionNextOpen(candles, targetPos[])`——目标仓位序列撮合：`targetPos[i]` 为第 i 根收盘希望持有的仓位比例，在第 i+1 根开盘价按差额再平衡（含双边成本），仅当目标与现仓市值偏差 > 1% 权益时才调仓（防抖）；净值沿用 `cash+shares*close`，一段持仓从空仓建立到重新归零记一笔用于胜率统计。
+- `src/lib/ensemble.ts`：`EnsembleConfig` / `memberPositionSeries`（成员交易→逐根敞口）/ `detectRegime`（方向感知：ADX + 回归通道相对斜率 → `trend_up`/`range`/`trend_down`）/ `computeEnsembleTargets`（regime 调制加权平均）/ `runEnsembleParams` / `runEnsembleV1` + `ENSEMBLE_V1_MEMBERS` / `ENSEMBLE_V1_DEFAULTS`（posCap 0.95、adxTrendMin 20、relSlopeTrendMin 0.0008、trendBoost 2.5、channelLen 60）。
+- `src/lib/strategies.ts`：注册元策略 `ensemble-v1`（`selfMatched: true`）；新增 `executeStrategy(strategy, candles, ctx)`——普通信号策略走 `executeTradesNextOpen`、自撮合元策略直接返回 run() 结果，避免二次撮合。
+- `scripts/bt_ensemble.ts` / `scripts/bt_ens_grid.ts`：Ensemble vs 各核心单策略 vs 买入持有对比、参数网格扫描。
+- `docs/multi-strategy-ensemble-design.md`：补 §7 最终实现（落地架构、最终参数表、§4.4 验收结果、诚实口径）。
+
+### 变更
+- `src/lib/strategies.ts` `runAllStrategies`、`src/lib/mining.ts` 均改走 `executeStrategy` 以尊重 `selfMatched`（Ensemble 不被二次撮合）；`src/lib/recommendationBacktest.ts` 对自撮合策略退回内置简化口径（连续仓位不适配「信号回合忠实重放」的 ClosedTrade 模型）。
+
+### 回测（12 只 A 股 · 400 根日线 · 含双边手续费 · 次日开盘撮合 · chokepointScore=78）
+
+| 指标 | ENSEMBLE-v1 | cardwell-v4 | cardwell-v3 | chokepoint-v5 | 回归通道 v1 | 买入持有 |
+|---|---|---|---|---|---|---|
+| 平均收益 | +63.0% | +86.7% | +71.4% | +135.3% | −1.8% | +163.7% |
+| 平均最大回撤 | −16.6% | −23.2% | −21.1% | −27.5% | −12.4% | — |
+| 盈利股占比 | 50% | 33% | 33% | 25% | 50% | — |
+| 平均夏普 | 0.147 | 0.06 | 0.10 | 0.23 | — | — |
+
 ---
 
 ## [0.57.0] - 2026-06-29

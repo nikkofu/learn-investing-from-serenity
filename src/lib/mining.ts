@@ -8,7 +8,7 @@ import {
   type ChipDistributionResult,
   type TechnicalAssessment,
 } from "./quant";
-import { getStrategy } from "./strategies";
+import { getStrategy, executeStrategy } from "./strategies";
 
 /**
  * 智能挖掘（Smart Mining）—— 纯函数信号引擎。
@@ -281,10 +281,11 @@ export function evaluateMiningSignal(
   // 成交价统一走「次日开盘成交（T+1 open）」口径，B 信号点与全站一致。
   // strategyId 命中策略注册表则用所选策略产出 B 信号，否则回退内置瓶颈动量 v1。
   const strat = opts?.strategyId ? getStrategy(opts.strategyId) : undefined;
-  const rawBacktest = strat
-    ? strat.run(candles, { chokepointScore: NEUTRAL_SCORE, code })
-    : runChokepointMomentumBacktest(candles, NEUTRAL_SCORE, { code });
-  const backtest = executeTradesNextOpen(candles, rawBacktest);
+  // 自撮合元策略（Ensemble）已在 run() 内撮合，executeStrategy 会跳过二次撮合；
+  // 其成交点即目标仓位再平衡点，作为 B 信号点与全站口径一致。
+  const backtest = strat
+    ? executeStrategy(strat, candles, { chokepointScore: NEUTRAL_SCORE, code })
+    : executeTradesNextOpen(candles, runChokepointMomentumBacktest(candles, NEUTRAL_SCORE, { code }));
   const projections = generatePriceProjection(candles, NEUTRAL_SCORE);
 
   const bottom = scoreBottom(closes, price);
