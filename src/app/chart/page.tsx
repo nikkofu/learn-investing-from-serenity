@@ -812,9 +812,9 @@ function ChartInner() {
                     </span>
                   </div>
                   {aiLogText ? (
-                    <div ref={terminalRef} className="flex-1 min-h-[350px] overflow-y-auto p-3 bg-[var(--bg)] border border-[var(--border)] rounded-[2px] text-[10px] font-mono text-emerald-500/90 whitespace-pre-wrap leading-relaxed shadow-inner">
+                    <div ref={terminalRef} className="flex-1 min-h-[350px] overflow-y-auto p-3 bg-[var(--bg)] border border-[var(--border)] rounded-[2px] text-[10px] font-mono text-[var(--text)] whitespace-pre-wrap leading-relaxed shadow-inner">
                       {aiLogText}
-                      {aiLoading && <span className="inline-block w-1.5 h-3 bg-emerald-400 animate-ping ml-0.5" />}
+                      {aiLoading && <span className="inline-block w-1.5 h-3 bg-[var(--muted)] animate-ping ml-0.5" />}
                     </div>
                   ) : (
                     <div className="py-8 text-center text-[var(--faint)] font-mono text-[10px]">
