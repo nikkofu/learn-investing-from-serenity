@@ -1,6 +1,6 @@
 import { getKlineFailover } from "../src/lib/sources";
 import { computePerformanceReport } from "../src/lib/performance";
-import { runEnsembleParams, type EnsembleConfig, type EnsembleMember } from "../src/lib/ensemble";
+import { runEnsembleParams, ENSEMBLE_V1_DEFAULTS, type EnsembleConfig, type EnsembleMember } from "../src/lib/ensemble";
 import type { Candle } from "../src/lib/types";
 
 const BASKET = ["300024","601869","300750","600522","002594","600519","000001","600036","002230","300059","601127","000858"];
@@ -36,7 +36,7 @@ async function main() {
   for (const code of BASKET) { const c = await getKlineFailover(code, 400, 101, "qfq"); if (c.length >= 80) cache[code] = c; }
   console.log("config\tret%\tmaxDD%\twin%\tsharpe\tposStocks%");
   for (const cf of CFGS) {
-    const cfg: EnsembleConfig = { members: cf.members, posCap: cf.posCap, regimeModulation: cf.reg, adxTrendMin: 20, relSlopeTrendMin: cf.rel, trendBoost: cf.boost, channelLen: 60 };
+    const cfg: EnsembleConfig = { ...ENSEMBLE_V1_DEFAULTS, members: cf.members, posCap: cf.posCap, regimeModulation: cf.reg, relSlopeTrendMin: cf.rel, trendBoost: cf.boost };
     const rets: number[] = [], dds: number[] = [], wins: number[] = [], shps: number[] = [];
     for (const code of Object.keys(cache)) {
       const candles = cache[code];

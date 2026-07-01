@@ -2,6 +2,34 @@
 
 本项目的所有重要更新都将记录在此文件中。
 
+## [0.59.0] - 2026-07-01
+
+> **新增元策略：多策略并行决策 V2（`ensemble-v2`）——幻方式「正交融合 + 风控闸门」**，在 V1 架构 B 上做两处稳健强化：①配权从手调改为等权（数据驱动，见下）；②新增组合级风控闸门（合成净值回撤软 −12%/硬 −18% 强制降仓/清仓，独立于成员信号）。默认 Pro 策略 `chokepoint-momentum-v7`、`ensemble-v1` 均不变。参考文档 `docs/high-flyer-stragory.md`，设计见 `docs/ensemble-v2-highflyer-inspired-design.md`。
+
+### 新增
+- `src/lib/ensemble.ts`：`EnsembleConfig` 扩展 `weightScheme`（`fixed`/`equal`/`invVolCapped`——带上下限夹逼、走前因果）、`trendClusterCap`（趋势同源簇合计限权，可选旋钮）、组合级风控闸门 `riskGate`/`ddSoft`/`ddHard`/`cooldownBars`/`volLen`/`volCap` + `applyRiskGate`（按合成因果净值回撤 + 已实现波动强制降仓/清仓，口径与次日开盘撮合一致）；新增 `ENSEMBLE_V2_DEFAULTS` / `runEnsembleV2`。`fixed` + 无闸门时行为与 V1 完全一致（回归保护）。
+- `src/lib/strategies.ts`：注册元策略 `ensemble-v2`（`selfMatched: true`）。
+- `scripts/bt_ens_orthon.ts`：成员收益相关矩阵 + 5 种配权方案对比（数据驱动选型）；`scripts/bt_ens_v2.ts` / `scripts/bt_ens_v2_grid.ts`：V1 vs V2 消融、风控闸门参数扫描。
+- `docs/ensemble-v2-highflyer-inspired-design.md`：设计/任务/实施计划 + §5 实施结果。
+
+### 关键发现（数据驱动）
+- 成员收益相关矩阵坐实「趋势核心高度同源」：Cardwell V4↔V3 = **0.92**、二者↔Chokepoint V5 ≈ **0.75~0.78**；两个均值回归成员与趋势近正交（0.00~0.26）→ 手调加权只是放大同一 beta。
+- 等权（`equal`）全面小胜手调 `fixed`（收益 58.0 vs 57.7、回撤 −16.0 vs −16.6、夏普 0.16 vs 0.13、有效成员数 5.00 vs 4.72）。
+- 朴素 `invVol`/ERC 退化（把 68~95% 权重砸进极低波动的 rsi-rev），故 `invVolCapped` 加上下限夹逼；波动闸门在本篮子伤收益、趋势簇限权在等权基底下得不偿失，均默认关闭（保留为可选旋钮）。
+
+### 回测（12 只 A 股 · 400 根日线 · 含双边手续费 · 次日开盘撮合 · chokepointScore=78 · 同口径 `strategyReturn`）
+
+| 指标 | ensemble-v2 | ensemble-v1 | 买入持有 |
+|---|---|---|---|
+| 平均收益 | **+52.3%** | +57.7% | +150.0% |
+| 平均最大回撤 | **−13.3%** | −16.6% | — |
+| 平均夏普 | **0.22** | 0.13 | — |
+| 单位回撤收益(ret/\|DD\|) | **3.94** | 3.48 | — |
+| 盈利股占比 | 50% | 50% | — |
+
+> V2 定位：以约 V1 的 83% 收益换取更低回撤（−3.3pt）、更高夏普（0.13→0.22）与更高单位回撤收益（3.48→3.94），验收 §3 全部达成。诚实口径：纯多头、非预测，不跑赢买入持有；参数经篮子择优有过拟合风险；连续仓位下「胜率」参考意义有限。（注：v0.58 头条 +63.0% 用 performance-report 的 totalReturn 口径，此处 V1/V2 均用 `strategyReturn` 做 apples-to-apples 对比。）
+
+
 ## [0.58.0] - 2026-07-01
 
 > **新增元策略：多策略并行决策 V1（`ensemble-v1`）——架构 B「加权投票 + 连续仓位聚合」**，设计文档 `docs/multi-strategy-ensemble-design.md`（含 §7 最终实现）。5 个成员并行（趋势核心 Cardwell V4/V3 + Chokepoint 动量 V5，均值回归卫星 回归通道 V1 + RSI 超卖回归 V1）逐根敞口加权平均 → 连续目标仓位 → 次日开盘再平衡撮合；权重由**方向感知 regime**（ADX 定强弱 + 回归通道斜率定方向）调制，仅上升趋势期偏重趋势成员、震荡/下行期偏重均值回归。**满足设计验收 §4.4**：收益 +63.0%、最大回撤 −16.6%（优于全部趋势核心）、盈利股占比 50%、夏普 0.147（≥ 全部单策略中位数）。**默认 Pro 策略仍保持 `chokepoint-momentum-v7`**。

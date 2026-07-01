@@ -27,7 +27,7 @@ import {
   runConfluenceV1,
 } from "./indicatorStrategies";
 import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvCardwellRsiNavigatorV4, runTvCardwellRsiNavigatorV5, runTvKamaMomentumV1, runChannelReversion } from "./tvStrategies";
-import { runEnsembleV1 } from "./ensemble";
+import { runEnsembleV1, runEnsembleV2 } from "./ensemble";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -276,6 +276,18 @@ const STRATEGIES: Strategy[] = [
     },
     selfMatched: true,
     run: (candles, ctx) => runEnsembleV1(candles, ctx),
+  },
+  {
+    meta: {
+      id: "ensemble-v2",
+      name: "多策略并行决策 V2（Ensemble · 正交融合+风控闸门）",
+      version: "2.0",
+      description:
+        "架构 B 的稳健强化版（幻方式「正交融合 + 风控闸门」，见 docs/ensemble-v2-highflyer-inspired-design.md）：成员沿用 V1 五员，但改用 ①等权配权（诊断显示等权全面小胜手调 baseWeight）+ 趋势同源簇限权（Cardwell V4/V3 与 Chokepoint V5 收益相关 0.75~0.92，簇内合计权重 ≤50%，避免放大同一 beta 而非真正分散）；②组合级风控闸门——按「合成因果净值回撤」（软 −12% 线性降仓、硬 −18% 清仓）独立于成员信号强制降仓/清仓（对抗监督/硬止损），因果口径与次日开盘撮合一致。12 只篮子回测：收益 +47.7%、最大回撤 −12.7%（较 V1 −16.6% 再压 3.9pt）、夏普 0.22（V1 0.13）、单位回撤收益 3.74（V1 3.48）、盈利股占比 50%。诚实口径：为压回撤 / 提风险调整收益，总收益低于 V1（约 V1 的 83%），更不跑赢买入持有；参数经篮子择优有过拟合风险；连续仓位下「胜率」口径参考意义有限。默认 Pro 策略维持 V7 不变，本策略为可选元策略。",
+      tags: ["ensemble", "multi-strategy", "regime-adaptive", "position-sizing", "risk-gate", "orthogonalization", "complementary", "meta-strategy"],
+    },
+    selfMatched: true,
+    run: (candles, ctx) => runEnsembleV2(candles, ctx),
   },
   {
     meta: {
