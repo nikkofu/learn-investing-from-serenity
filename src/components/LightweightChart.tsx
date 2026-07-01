@@ -47,6 +47,8 @@ interface LightweightChartProps {
   trendChannel?: TechnicalAssessment["trendChannel"] | null;
   /** 初始策略图层 id（如从 ?layer= 进入时自动叠加 TV 复刻策略，""=关闭）。 */
   initialTvStrategyId?: string;
+  /** 当前买卖引擎策略 id（来自父级所选策略）：策略图层随之同步——切到同名 TV 图层，无对应则关闭图层。 */
+  engineStrategyId?: string;
   /** 引擎控件插槽：父级「图表引擎 / 买卖引擎」控件渲染进工具栏首行，与策略图层/回放同处一行，省出一行高度。 */
   engineSlot?: ReactNode;
   /** 单股实时报价（来自 /chart 的 SSE 实时层）：仅用于实时层（顶部报价/现价线/盘中临时今日蜡烛），不参与历史/指标/策略计算。 */
@@ -236,7 +238,7 @@ function buildTradeZones(plan: TradePlan, anchorTime: Time, nowTime: Time): Trad
   return { anchorTime, nowTime, projectBars: PROJECT_BARS, bands, levels };
 }
 
-export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], trendChannel, initialTvStrategyId = "", engineSlot, liveQuote = null }: LightweightChartProps) {
+export default function LightweightChart({ candles: rawCandles, trades, code, fq = "qfq", drawings = [], trendChannel, initialTvStrategyId = "", engineStrategyId, engineSlot, liveQuote = null }: LightweightChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -288,6 +290,20 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   useEffect(() => {
     if (initialTvStrategyId) setTvStrategyId(initialTvStrategyId);
   }, [initialTvStrategyId]);
+  // 策略图层跟随所选买卖引擎同步：引擎策略变化时，切到同名 TV 图层（tv-* / channel-reversion-v1
+  // 两清单重合可直接对上），无对应图层则关闭叠加，避免展示与当前策略错配的指标层。首次挂载若带
+  // 深链 ?layer=（initialTvStrategyId）则尊重深链、不覆盖；手动图层下拉仍可覆盖，后续引擎再变会重新同步。
+  const syncedEngineRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (engineStrategyId === undefined) return;
+    if (syncedEngineRef.current === engineStrategyId) return;
+    const isFirst = syncedEngineRef.current === undefined;
+    syncedEngineRef.current = engineStrategyId;
+    if (isFirst && initialTvStrategyId) return;
+    const matched = listTvStrategies().some((m) => m.id === engineStrategyId) ? engineStrategyId : "";
+    setTvStrategyId(matched);
+    saveLayerId(matched);
+  }, [engineStrategyId, initialTvStrategyId]);
   const [maOn, setMaOn] = useState<Record<string, boolean>>({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: true, ma250: true });
   const [legend, setLegend] = useState<{ date: string; o: number; h: number; l: number; c: number; v: number; chg: number; reso?: string; resoColor?: string; st?: string; pat?: string; patColor?: string; kpat?: string; kpatColor?: string } | null>(null);
 

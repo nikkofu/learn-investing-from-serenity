@@ -732,6 +732,7 @@ function ChartInner() {
                     drawings={drawings}
                     trendChannel={data.quant.technical?.trendChannel ?? null}
                     initialTvStrategyId={layerId}
+                    engineStrategyId={activeProStrategyId}
                     engineSlot={engineControls}
                     liveQuote={liveQuote}
                   />
