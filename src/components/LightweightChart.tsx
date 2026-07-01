@@ -274,6 +274,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const [showKPatterns, setShowKPatterns] = useState(true);
   // 筹码分布指标面板数据（随光标悬停日期/价位刷新）。
   const [chipPanel, setChipPanel] = useState<ChipPanelData | null>(null);
+  const [chipData, setChipData] = useState<ChipProfileData | null>(null);
   const [showResonance, setShowResonance] = useState(true);
   // 通用形态标记（顶背离/底背离/天量/地量）默认开启，可单独关闭。
   const [showPatterns, setShowPatterns] = useState(true);
@@ -379,7 +380,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   }, [candles]);
   // 筹码开关：仅切换 primitive 可见性，不重建图表。
   useEffect(() => {
-    chipPrimRef.current?.setEnabled(showChips);
+    chipPrimRef.current?.setEnabled(false);
   }, [showChips]);
   const boll = useMemo(() => computeBOLL(candles), [candles]);
   // 回归通道绘制数据：以 technical.trendChannel（最近 60 日收盘价线性回归 + 标准差上下轨）为源，
@@ -838,10 +839,11 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
 
     // 右侧筹码分布：附着到主图序列，初始显示「截至最后一根」的筹码分布（悬停时由 crosshair 改为指定日）。
     const initChip = buildChip(candles.length - 1);
-    const chipPrim = new ChipProfilePrimitive(initChip.data, showChips);
+    const chipPrim = new ChipProfilePrimitive(initChip.data, false);
     chipPrimRef.current = chipPrim;
     candleSeries.attachPrimitive(chipPrim);
     setChipPanel(initChip.panel);
+    setChipData(initChip.data);
 
     // 副图振荡指标：各占独立窗格（分开显示，量纲互不干扰）
     let paneIdx = 1;
@@ -957,6 +959,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
         const r0 = buildChip(candles.length - 1);
         chipPrimRef.current?.setData(r0.data);
         setChipPanel(r0.panel);
+        setChipData(r0.data);
         macdLabel?.setText(macdText(lastI));
         rsiLabel?.setText(rsiText(lastI));
         kdjLabel?.setText(kdjText(lastI));
@@ -970,6 +973,7 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
         const r = buildChip(matchIdx, cursorPrice);
         chipPrimRef.current?.setData(r.data);
         setChipPanel(r.panel);
+        setChipData(r.data);
         macdLabel?.setText(macdText(matchIdx));
         rsiLabel?.setText(rsiText(matchIdx));
         kdjLabel?.setText(kdjText(matchIdx));
@@ -1039,6 +1043,14 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
   const stepBack = () => setReplayN((n) => Math.max(2, (n ?? startN) - 1));
   const stepFwd = () => setReplayN((n) => Math.min(candles.length, (n ?? startN) + 1));
   const reset = () => { setReplayN(startN); setPlaying(false); };
+
+  // 右侧筹码列：直方图纵向价格坐标映射（高价在上），随 chipData 刷新。
+  const chipBins = chipData?.bins ?? [];
+  const chipPrices = chipBins.map((b) => b.price);
+  const chipPMax = chipPrices.length > 0 ? Math.max(...chipPrices) : 0;
+  const chipPMin = chipPrices.length > 0 ? Math.min(...chipPrices) : 0;
+  const chipSpan = chipPMax - chipPMin || 1;
+  const chipYPct = (p: number) => ((chipPMax - p) / chipSpan) * 100;
 
   return (
     <div className="flex flex-col h-full min-h-0 gap-2">
@@ -1182,7 +1194,8 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
       </div>
 
       {/* 图表容器 + OHLCV 读数条：填满可用高度（全屏自适应，底部日期不再被裁切），autoSize 让画布跟随容器 */}
-      <div className="relative w-full flex-1 min-h-[320px]">
+      <div className="flex flex-1 min-h-0 gap-1">
+        <div className="relative flex-1 min-h-[320px]">
         {legend && (
           <div className="absolute left-2 top-1 z-10 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono pointer-events-none bg-[var(--surface)]/90 backdrop-blur-sm px-1.5 py-0.5 rounded-[1px] max-w-[70%]">
             <span className="text-[var(--faint)]">{legend.date}</span>
@@ -1197,33 +1210,6 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
             {legend.pat && <span style={{ color: legend.patColor ?? RESO_NEUTRAL }}>◆ {legend.pat}</span>}
             {legend.kpat && <span style={{ color: legend.kpatColor ?? RESO_NEUTRAL }}>▣ {legend.kpat}</span>}
             {legend.st && <span className="text-[var(--accent)]">▣ 策略 {legend.st}</span>}
-          </div>
-        )}
-        {showChips && chipPanel && (
-          <div className="absolute right-2 top-1 z-10 pointer-events-none font-mono text-[9px] bg-[var(--surface)]/90 backdrop-blur-sm border border-[var(--border)] shadow-md rounded-[2px] overflow-hidden w-[154px]">
-            <div className="px-2 py-0.5 bg-[var(--inset)] text-[var(--faint)] tracking-wide border-b border-[var(--border)] flex justify-between">
-              <span>筹码分布</span>
-              <span className="tabular-nums">{chipPanel.date}</span>
-            </div>
-            {([
-              ["收盘获利", `${(chipPanel.closeProfit * 100).toFixed(1)}%`, chipPanel.closeProfit >= 0.5 ? UP : DOWN],
-              ["光标获利", chipPanel.cursorProfit == null ? "--" : `${(chipPanel.cursorProfit * 100).toFixed(1)}%`, chipPanel.cursorProfit == null ? "var(--muted)" : chipPanel.cursorProfit >= 0.5 ? UP : DOWN],
-              ["平均成本", chipPanel.avgCost.toFixed(2), "var(--text)"],
-              ["90%成本", `${chipPanel.low90.toFixed(2)}~${chipPanel.high90.toFixed(2)}`, "var(--muted)"],
-              ["集中度90", `${(chipPanel.conc90 * 100).toFixed(1)}%`, "var(--muted)"],
-              ["70%成本", `${chipPanel.low70.toFixed(2)}~${chipPanel.high70.toFixed(2)}`, "var(--muted)"],
-              ["集中度70", `${(chipPanel.conc70 * 100).toFixed(1)}%`, "var(--muted)"],
-            ] as [string, string, string][]).map(([k, v, color]) => (
-              <div key={k} className="flex justify-between gap-2 px-2 py-0.5">
-                <span className="text-[var(--faint)]">{k}</span>
-                <span style={{ color }} className="font-semibold tabular-nums">{v}</span>
-              </div>
-            ))}
-            <div className="flex items-center gap-2 px-2 py-0.5 border-t border-[var(--border)] text-[8.5px]">
-              <span className="flex items-center gap-0.5"><span style={{ background: "rgba(239,68,68,0.7)" }} className="inline-block w-2 h-2 rounded-[1px]" />盈利</span>
-              <span className="flex items-center gap-0.5"><span style={{ background: "rgba(56,189,248,0.7)" }} className="inline-block w-2 h-2 rounded-[1px]" />亏损</span>
-              <span className="flex items-center gap-0.5"><span style={{ background: "rgba(234,179,8,0.85)" }} className="inline-block w-2 h-2 rounded-[1px]" />相同</span>
-            </div>
           </div>
         )}
         {gbbStats && (
@@ -1300,6 +1286,98 @@ export default function LightweightChart({ candles: rawCandles, trades, code, fq
           );
         })()}
         <div ref={containerRef} className="w-full h-full" />
+      </div>
+        {showChips && chipData && chipData.bins.length > 0 && (
+          <div className="w-[176px] shrink-0 flex flex-col min-h-0 border-l border-[var(--border)] bg-[var(--surface)]">
+            <div className="flex-1 min-h-0 relative overflow-hidden">
+              <div className="flex items-center justify-between px-2 py-1 border-b border-[var(--border)] text-[9px] text-[var(--faint)]">
+                <span>筹码</span>
+                <span className="tabular-nums">{chipData.dateLabel}</span>
+              </div>
+              <div className="absolute inset-y-7 left-[34px] right-0">
+                {chipBins.map((b) => {
+                  if (b.volume <= 0) return null;
+                  const cp = chipData.currentPrice;
+                  const band = cp != null ? Math.max(cp * 0.0075, 0.01) : 0;
+                  const fill = cp != null && Math.abs(b.price - cp) <= band
+                    ? "rgba(234,179,8,0.6)"
+                    : cp != null && b.price < cp
+                      ? "rgba(239,68,68,0.5)"
+                      : "rgba(56,189,248,0.45)";
+                  return (
+                    <div
+                      key={b.price}
+                      className="absolute right-0 h-[2px] rounded-[1px]"
+                      style={{
+                        top: `${chipYPct(b.price)}%`,
+                        width: `${chipData.maxVolume > 0 ? (b.volume / chipData.maxVolume) * 100 * 0.82 : 0}%`,
+                        transform: "translateY(-50%)",
+                        background: fill,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              <div className="absolute inset-y-7 left-0 right-0 pointer-events-none">
+                {Array.from({ length: 5 }, (_, i) => {
+                  const tickPrice = chipPMax - (chipSpan * i) / 4;
+                  return (
+                    <div
+                      key={tickPrice}
+                      className="absolute left-1 text-[8px] tabular-nums text-[var(--faint)]"
+                      style={{ top: `${chipYPct(tickPrice)}%`, transform: "translateY(-50%)" }}
+                    >
+                      {tickPrice.toFixed(2)}
+                    </div>
+                  );
+                })}
+                {chipData.currentPrice != null && (
+                  <div className="absolute left-0 right-0" style={{ top: `${chipYPct(chipData.currentPrice)}%` }}>
+                    <div className="border-t border-dashed border-[rgba(226,232,240,0.85)]" />
+                    <div className="absolute left-[34px] -translate-y-1/2 top-0 rounded-[1px] bg-[var(--surface)] px-1 text-[8px] text-[var(--text)] tabular-nums shadow-sm">
+                      现价 {chipData.currentPrice.toFixed(2)}
+                    </div>
+                  </div>
+                )}
+                {chipData.highlightPrice != null && (
+                  <div className="absolute left-0 right-0" style={{ top: `${chipYPct(chipData.highlightPrice)}%` }}>
+                    <div className="border-t border-dashed border-[#f59e0b]" />
+                    <div className="absolute left-[34px] -translate-y-1/2 top-0 rounded-[1px] bg-[var(--surface)] px-1 text-[8px] text-[#f59e0b] tabular-nums shadow-sm">
+                      高量 {chipData.highlightPrice.toFixed(2)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            {chipPanel && (
+              <div className="border-t border-[var(--border)] font-mono text-[9px]">
+                <div className="px-2 py-0.5 bg-[var(--inset)] text-[var(--faint)] tracking-wide border-b border-[var(--border)] flex justify-between">
+                  <span>筹码分布</span>
+                  <span className="tabular-nums">{chipPanel.date}</span>
+                </div>
+                {([
+                  ["收盘获利", `${(chipPanel.closeProfit * 100).toFixed(1)}%`, chipPanel.closeProfit >= 0.5 ? UP : DOWN],
+                  ["光标获利", chipPanel.cursorProfit == null ? "--" : `${(chipPanel.cursorProfit * 100).toFixed(1)}%`, chipPanel.cursorProfit == null ? "var(--muted)" : chipPanel.cursorProfit >= 0.5 ? UP : DOWN],
+                  ["平均成本", chipPanel.avgCost.toFixed(2), "var(--text)"],
+                  ["90%成本", `${chipPanel.low90.toFixed(2)}~${chipPanel.high90.toFixed(2)}`, "var(--muted)"],
+                  ["集中度90", `${(chipPanel.conc90 * 100).toFixed(1)}%`, "var(--muted)"],
+                  ["70%成本", `${chipPanel.low70.toFixed(2)}~${chipPanel.high70.toFixed(2)}`, "var(--muted)"],
+                  ["集中度70", `${(chipPanel.conc70 * 100).toFixed(1)}%`, "var(--muted)"],
+                ] as [string, string, string][]).map(([k, v, color]) => (
+                  <div key={k} className="flex justify-between gap-2 px-2 py-0.5">
+                    <span className="text-[var(--faint)]">{k}</span>
+                    <span style={{ color }} className="font-semibold tabular-nums">{v}</span>
+                  </div>
+                ))}
+                <div className="flex items-center gap-2 px-2 py-0.5 border-t border-[var(--border)] text-[8.5px]">
+                  <span className="flex items-center gap-0.5"><span style={{ background: "rgba(239,68,68,0.7)" }} className="inline-block w-2 h-2 rounded-[1px]" />盈利</span>
+                  <span className="flex items-center gap-0.5"><span style={{ background: "rgba(56,189,248,0.7)" }} className="inline-block w-2 h-2 rounded-[1px]" />亏损</span>
+                  <span className="flex items-center gap-0.5"><span style={{ background: "rgba(234,179,8,0.85)" }} className="inline-block w-2 h-2 rounded-[1px]" />相同</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
