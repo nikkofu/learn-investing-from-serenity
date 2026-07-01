@@ -442,3 +442,43 @@ export function computeADX(candles: Candle[], period = 14): number[] {
   }
   return adx;
 }
+
+
+export interface RegChannelPoint {
+  mid: number;
+  upper: number;
+  lower: number;
+  slope: number; // 每根位移（收盘单位）
+}
+
+/**
+ * 滚动线性回归通道：与 /chart 粉色回归通道、/scanner 展开评估同口径
+ * （最近 len 根收盘价最小二乘拟合中轨 + k×标准差上下轨；总体标准差 /len）。
+ * 每根 i 用「截至 i 的 len 根」拟合，返回该根的 mid/upper/lower/slope；预热不足处 NaN。
+ */
+export function computeRegressionChannel(candles: Candle[], len = 60, k = 1.5): RegChannelPoint[] {
+  const n = candles.length;
+  const out: RegChannelPoint[] = new Array(n).fill(null).map(() => ({ mid: NaN, upper: NaN, lower: NaN, slope: NaN }));
+  if (n < len) return out;
+  for (let end = len - 1; end < n; end++) {
+    let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
+    for (let j = 0; j < len; j++) {
+      const x = j;
+      const y = candles[end - len + 1 + j].close;
+      sumX += x; sumY += y; sumXX += x * x; sumXY += x * y;
+    }
+    const denom = len * sumXX - sumX * sumX;
+    const slope = denom !== 0 ? (len * sumXY - sumX * sumY) / denom : 0;
+    const intercept = (sumY - slope * sumX) / len;
+    let sq = 0;
+    for (let j = 0; j < len; j++) {
+      const fit = slope * j + intercept;
+      const d = candles[end - len + 1 + j].close - fit;
+      sq += d * d;
+    }
+    const std = Math.sqrt(sq / len) || 0.1;
+    const mid = slope * (len - 1) + intercept;
+    out[end] = { mid, upper: mid + k * std, lower: mid - k * std, slope };
+  }
+  return out;
+}

@@ -17,7 +17,7 @@ import type { Candle } from "./types";
 import { atrWilder, type BacktestResult, type TradeAction } from "./quant";
 import { DEFAULT_COST_MODEL, buyShares, sellProceeds } from "./costs";
 import { runSignalBacktest } from "./indicatorStrategies";
-import { computeRSI, computeKDJ, computeMACD, sma, computeADX } from "./indicators";
+import { computeRSI, computeKDJ, computeMACD, sma, computeADX, computeRegressionChannel, type RegChannelPoint } from "./indicators";
 
 /** 市场状态（自适应带宽用）：趋势 / 震荡 / 转折。 */
 export type Regime = "trend" | "chop" | "transition";
@@ -1667,8 +1667,291 @@ const CARDWELL_RSI_NAVIGATOR_V5: TvStrategy = {
 };
 
 
+
+/* ============================================================================
+ * 回归通道均值回归 V1（Channel Reversion）
+ * 与 V3/V4/V5 的「RSI 趋势跟随」互补：不追突破、专抓「上升/横盘回归通道」里
+ * 价格回踩下轨支撑企稳的低吸机会，中轨/上轨分批止盈，通道破位止损。
+ * 通道口径与 /chart 粉色回归通道、/scanner 展开评估一致（最近 60 根收盘线性
+ * 回归中轨 ± 1.5σ 上下轨）。纯多头、含双边手续费、次日开盘撮合。
+ * ==========================================================================*/
+
+export interface ChannelReversionParams {
+  channelLen: number;   // 回归通道回看根数（默认 60，与图上一致）
+  channelK: number;     // 上下轨标准差倍数（默认 1.5，与图上一致）
+  rsiPeriod: number;    // RSI 周期（默认 14）
+  maxDownSlopeRel: number; // 相对斜率下限：relSlope < -此值 视为明确下降通道、不接刀（默认 0.0008）
+  minSlopeRel: number;  // 相对斜率下限：relSlope < 此值 不入场（默认 0.0003，只做上升通道回踩）
+  requireMaTrend: boolean; // 要求收盘 > MA(channelLen)长期均线（默认 true，避免在长期下降中接刀）
+  touchPct: number;     // 昨日最低价「贴近下轨」的容差（默认 0.01=1%）
+  stopBufferPct: number;// 收盘跌破下轨此比例视为破位止损（默认 0.03=3%）
+  breakevenAfterTP1: boolean; // TP1(中轨)后止损上移到成本（默认 true）
+  maxHold: number;      // 最长持有根数失效离场（默认 40）
+  cooldown: number;     // 离场后冷却根数（默认 3）
+}
+
+export const CHANNEL_REVERSION_DEFAULTS: ChannelReversionParams = {
+  channelLen: 60,
+  channelK: 1.5,
+  rsiPeriod: 14,
+  maxDownSlopeRel: 0.0008,
+  minSlopeRel: 0.0008,
+  requireMaTrend: true,
+  touchPct: 0.01,
+  stopBufferPct: 0.015,
+  breakevenAfterTP1: true,
+  maxHold: 40,
+  cooldown: 3,
+};
+
+interface ChannelCtx {
+  warmup: number;
+  chan: RegChannelPoint[];
+  rsi: number[];
+  canEnter: (i: number) => boolean;
+}
+
+function buildChannelCtx(candles: Candle[], p: ChannelReversionParams): ChannelCtx {
+  const closes = candles.map((c) => c.close);
+  const chan = computeRegressionChannel(candles, p.channelLen, p.channelK);
+  const rsi = computeRSI(candles, p.rsiPeriod);
+  const maTrend = sma(closes, p.channelLen);
+  const warmup = p.channelLen;
+
+  const canEnter = (i: number): boolean => {
+    if (i < 1) return false;
+    const ch = chan[i];
+    const chPrev = chan[i - 1];
+    if (!fin(ch.lower) || !fin(chPrev.lower) || !fin(ch.mid)) return false;
+    const relSlope = ch.slope / (ch.mid || 1);
+    if (relSlope < p.minSlopeRel) return false; // 仅在上升通道回踩低吸，不接下降通道的刀
+    if (p.requireMaTrend && fin(maTrend[i]) && closes[i] < maTrend[i]) return false; // 长期均线之下不低吸
+    if (closes[i] >= ch.mid) return false;           // 只在通道下半区低吸
+    const touched = candles[i - 1].low <= chPrev.lower * (1 + p.touchPct); // 昨日探至/贴近下轨
+    const bounce = closes[i] > ch.lower && closes[i] > closes[i - 1];      // 收回下轨上方且收阳反弹
+    const rsiUp = !fin(rsi[i - 1]) || rsi[i] >= rsi[i - 1];                // RSI 拐头向上
+    return touched && bounce && rsiUp;
+  };
+
+  return { warmup, chan, rsi, canEnter };
+}
+
+/** 纯多头可回测包装（回归通道均值回归 V1）。 */
+export function runChannelReversionParams(
+  candles: Candle[],
+  params: Partial<ChannelReversionParams> = {},
+): BacktestResult {
+  const p = { ...CHANNEL_REVERSION_DEFAULTS, ...params };
+  const n = candles.length;
+  const ctx = buildChannelCtx(candles, p);
+  const EMPTY: BacktestResult = { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+  if (n < ctx.warmup + 5) return EMPTY;
+
+  const closes = candles.map((c) => c.close);
+  const { chan } = ctx;
+
+  const trades: TradeAction[] = [];
+  const history: BacktestResult["history"] = [];
+  let cash = 100000;
+  let shares = 0;
+  let avgCost = 0;
+  let posDeployed = 0;
+  let posProceeds = 0;
+  let winCount = 0;
+  let tradeCount = 0;
+
+  const start = ctx.warmup;
+  const initialStockWorth = closes[start];
+
+  let holding = false;
+  let lastExit = -p.cooldown - 1;
+  let entryPrice = 0;
+  let entryIdx = -1;
+  let stage = 0; // 0=未到中轨；1=已卖中轨 1/2
+
+  const doSell = (i: number, sizePct: number, reason: string) => {
+    const sold = sizePct >= 1 ? shares : shares * sizePct;
+    if (sold <= 1e-12) return;
+    const proceeds = sellProceeds(sold, closes[i], DEFAULT_COST_MODEL);
+    cash += proceeds;
+    shares -= sold;
+    posProceeds += proceeds;
+    trades.push({ type: "sell", date: candles[i].date, price: closes[i], reason, profitPct: avgCost > 0 ? ((closes[i] - avgCost) / avgCost) * 100 : 0, sizePct });
+    if (shares <= 1e-6) {
+      tradeCount++;
+      if (posProceeds > posDeployed) winCount++;
+      holding = false;
+      lastExit = i;
+      shares = 0;
+      avgCost = 0;
+      posDeployed = 0;
+      posProceeds = 0;
+    }
+  };
+
+  for (let i = start; i < n; i++) {
+    if (!holding) {
+      if (i - lastExit >= p.cooldown && ctx.canEnter(i)) {
+        const bought = buyShares(cash, closes[i], DEFAULT_COST_MODEL);
+        if (bought > 0) {
+          const ch = chan[i];
+          avgCost = closes[i];
+          shares = bought;
+          posDeployed = cash;
+          cash = 0;
+          holding = true;
+          entryPrice = closes[i];
+          entryIdx = i;
+          stage = 0;
+          trades.push({
+            type: "buy",
+            date: candles[i].date,
+            price: closes[i],
+            reason: `【通道下轨支撑】价回踩回归通道下轨 ${ch.lower.toFixed(2)} 元企稳收阳（RSI 拐头），在通道下半区 ${closes[i].toFixed(2)} 元低吸；目标中轨 ${ch.mid.toFixed(2)}/上轨 ${ch.upper.toFixed(2)} 元分批止盈，跌破下轨 -${(p.stopBufferPct * 100).toFixed(0)}% 破位止损。`,
+          });
+        }
+      }
+    } else {
+      const ch = chan[i];
+      const lower = fin(ch.lower) ? ch.lower : entryPrice * (1 - p.stopBufferPct);
+      const mid = fin(ch.mid) ? ch.mid : Infinity;
+      const upper = fin(ch.upper) ? ch.upper : Infinity;
+      let stopLevel = lower * (1 - p.stopBufferPct);
+      if (stage >= 1 && p.breakevenAfterTP1) stopLevel = Math.max(stopLevel, entryPrice);
+
+      if (closes[i] <= stopLevel) {
+        const why = stage >= 1 && p.breakevenAfterTP1 && stopLevel >= entryPrice - 1e-9
+          ? `【保本止损】已在中轨落袋 1/2、止损上移至成本 ${entryPrice.toFixed(2)} 元，收盘 ${closes[i].toFixed(2)} 元回踩保本线，剩余仓位无损离场。`
+          : `【通道破位止损】收盘 ${closes[i].toFixed(2)} 元跌破下轨 ${lower.toFixed(2)} 元逾 ${(p.stopBufferPct * 100).toFixed(0)}%，通道支撑失守，离场。`;
+        doSell(i, 1, why);
+      } else if (i - entryIdx >= p.maxHold) {
+        doSell(i, 1, `【超时失效】持有满 ${p.maxHold} 根仍未触中轨/上轨，均值回归未兑现，离场释放资金。`);
+      } else if (stage === 0 && closes[i] >= mid) {
+        stage = 1;
+        doSell(i, 0.5, `【中轨止盈】触及回归通道中轨 ${mid.toFixed(2)} 元（均值回归目标位），卖出 1/2 落袋，止损上移到成本 ${entryPrice.toFixed(2)} 元，本笔立于不败。`);
+      } else if (stage === 1 && closes[i] >= upper) {
+        doSell(i, 1, `【上轨止盈】触及回归通道上轨 ${upper.toFixed(2)} 元（通道超买上沿），剩余仓位全部止盈离场。`);
+      }
+    }
+
+    const worth = cash + shares * closes[i];
+    history.push({
+      date: candles[i].date,
+      strategyWorth: Number(worth.toFixed(0)),
+      stockWorth: Number(((closes[i] / initialStockWorth) * 100000).toFixed(0)),
+    });
+  }
+
+  const finalWorth = cash + shares * closes[n - 1];
+  const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
+  const stockReturn = ((closes[n - 1] - initialStockWorth) / initialStockWorth) * 100;
+  const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
+
+  return {
+    winRate: Number(winRate.toFixed(1)),
+    sharpe: sharpeOfHistory(history),
+    strategyReturn: Number(strategyReturn.toFixed(2)),
+    stockReturn: Number(stockReturn.toFixed(2)),
+    trades,
+    history,
+  };
+}
+
+export function runChannelReversion(candles: Candle[]): BacktestResult {
+  return runChannelReversionParams(candles, {});
+}
+
+/** 计算「回归通道均值回归」图层：低吸方向 + 翻转点 + 通道下轨交易计划。 */
+export function computeChannelReversion(
+  candles: Candle[],
+  params: Partial<ChannelReversionParams> = {},
+): TvStrategyLayers {
+  const p = { ...CHANNEL_REVERSION_DEFAULTS, ...params };
+  const n = candles.length;
+  const line = new Array<number | null>(n).fill(null);
+  const dir = new Array<1 | -1 | 0>(n).fill(0);
+  const regime = new Array<Regime>(n).fill("transition");
+  const regimeValue = new Array<number>(n).fill(NaN);
+  const flips: TvStrategyLayers["flips"] = [];
+
+  const closes = candles.map((c) => c.close);
+  const ctx = buildChannelCtx(candles, p);
+  const { chan } = ctx;
+
+  let holding = false;
+  let lastExit = -p.cooldown - 1;
+  let entryIdx = -1;
+  let stage = 0;
+  let curDir: 1 | -1 | 0 = 0;
+  let tradePlan: TradePlan | null = null;
+
+  for (let i = 0; i < n; i++) {
+    const ch = chan[i];
+    if (fin(ch.mid) && fin(ch.slope)) {
+      const relSlope = ch.slope / (ch.mid || 1);
+      regime[i] = relSlope > 0.0008 ? "trend" : relSlope < -0.0008 ? "trend" : "chop";
+    }
+    line[i] = fin(ch.lower) ? Number(ch.lower.toFixed(2)) : null;
+
+    if (!holding) {
+      if (i - lastExit >= p.cooldown && ctx.canEnter(i)) {
+        holding = true;
+        entryIdx = i;
+        stage = 0;
+        curDir = 1;
+        flips.push({ index: i, dir: "up", price: closes[i] });
+        const entry = closes[i];
+        const stop = ch.lower * (1 - p.stopBufferPct);
+        const risk = entry - stop || 1;
+        tradePlan = {
+          anchorIndex: i,
+          dir: 1,
+          entry,
+          stop,
+          targets: [
+            { label: "中轨", price: Number(ch.mid.toFixed(2)), r: Number(((ch.mid - entry) / risk).toFixed(2)) },
+            { label: "上轨", price: Number(ch.upper.toFixed(2)), r: Number(((ch.upper - entry) / risk).toFixed(2)) },
+          ],
+        };
+      }
+    } else {
+      const lower = fin(ch.lower) ? ch.lower : closes[entryIdx] * (1 - p.stopBufferPct);
+      const mid = fin(ch.mid) ? ch.mid : Infinity;
+      const upper = fin(ch.upper) ? ch.upper : Infinity;
+      const stopLevel = stage >= 1 && p.breakevenAfterTP1 ? Math.max(lower * (1 - p.stopBufferPct), closes[entryIdx]) : lower * (1 - p.stopBufferPct);
+      if (closes[i] <= stopLevel || i - entryIdx >= p.maxHold || (stage === 1 && closes[i] >= upper)) {
+        holding = false;
+        lastExit = i;
+        curDir = -1;
+        flips.push({ index: i, dir: "down", price: closes[i] });
+      } else if (stage === 0 && closes[i] >= mid) {
+        stage = 1;
+      }
+    }
+    dir[i] = curDir;
+  }
+
+  return { line, dir, flips, regime, regimeValue, tradePlan };
+}
+
+const CHANNEL_REVERSION_V1: TvStrategy = {
+  meta: {
+    id: "channel-reversion-v1",
+    name: "回归通道均值回归 V1",
+    version: "1.0",
+    author: "自研（与 Cardwell V3/V4/V5 趋势跟随互补）",
+    source: "",
+    notes:
+      "为回答「V5 为何错过回归通道下轨支撑、空翻多等低吸买点」而新增的互补策略：V3/V4/V5 是 RSI 趋势跟随系统（追突破、ADX≥20 才做），本质排斥震荡低吸，因此结构性地捕捉不到「回踩通道下轨企稳」这类均值回归买点。本策略反其道而行——通道口径与 /chart 粉色回归通道、/scanner 展开评估完全一致（最近 60 根收盘价线性回归中轨 ± 1.5σ 上下轨）。入场：仅在「上升/横盘通道」（相对斜率不明确向下、避免下降通道接刀）中，价回踩下轨支撑（昨日最低贴近/跌破下轨）、今日收回下轨上方且收阳、RSI 拐头，且处通道下半区时低吸。出场（分批）：触中轨卖 1/2 并把止损上移到成本（立于不败）、触上轨剩余全部止盈；收盘跌破下轨逾 3% 判破位止损、超 40 根未兑现均值回归则超时离场。设计意图是与趋势跟随策略在不同市场状态下互补（趋势跟随吃单边、均值回归吃震荡）。诚实口径：纯多头、非预测；「低吸=接刀」风险靠「拒绝下降通道 + 破位止损 + 保本」控制；参数在该篮子择优、有过拟合风险；强单边趋势里会过早止盈、明显跑输趋势跟随。含双边手续费、次日开盘撮合。对应 /chart「策略图层」可叠加下轨交易计划色块 + 买卖翻转标记。",
+    tags: ["mean-reversion", "regression-channel", "support-bounce", "scale-out", "breakeven-stop", "complementary", "reproduction"],
+  },
+  compute: (candles) => computeChannelReversion(candles),
+  backtest: (candles) => runChannelReversion(candles),
+};
+
+
 /** 已复刻的 TV 策略注册表（顺序即 UI 下拉顺序）。新增脚本只需在此追加一项。 */
-const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, CARDWELL_RSI_NAVIGATOR_V3, CARDWELL_RSI_NAVIGATOR_V4, CARDWELL_RSI_NAVIGATOR_V5, KAMA_MOMENTUM_V1];
+const TV_STRATEGIES: TvStrategy[] = [SUPERTREND_ADAPTIVE_V1, CARDWELL_RSI_NAVIGATOR_V1, CARDWELL_RSI_NAVIGATOR_V2, CARDWELL_RSI_NAVIGATOR_V3, CARDWELL_RSI_NAVIGATOR_V4, CARDWELL_RSI_NAVIGATOR_V5, KAMA_MOMENTUM_V1, CHANNEL_REVERSION_V1];
 
 /** 列出所有已复刻 TV 策略的元信息（供「策略图层」下拉）。 */
 export function listTvStrategies(): TvStrategyMeta[] {

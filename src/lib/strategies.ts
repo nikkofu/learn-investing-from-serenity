@@ -26,7 +26,7 @@ import {
   runFibKdjPullbackV1,
   runConfluenceV1,
 } from "./indicatorStrategies";
-import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvCardwellRsiNavigatorV4, runTvCardwellRsiNavigatorV5, runTvKamaMomentumV1 } from "./tvStrategies";
+import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvCardwellRsiNavigatorV4, runTvCardwellRsiNavigatorV5, runTvKamaMomentumV1, runChannelReversion } from "./tvStrategies";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -237,6 +237,17 @@ const STRATEGIES: Strategy[] = [
       tags: ["tradingview", "kama", "kaufman", "adaptive-ma", "momentum", "trend-follow", "stdev-filter", "reproduction"],
     },
     run: (candles) => runTvKamaMomentumV1(candles),
+  },
+  {
+    meta: {
+      id: "channel-reversion-v1",
+      name: "回归通道均值回归 V1",
+      version: "1.0",
+      description:
+        "与 Cardwell V3/V4/V5（RSI 趋势跟随）互补的均值回归策略，专抓趋势系统结构性错过的「回踩回归通道下轨支撑低吸」买点。通道口径与 /chart 粉色回归通道、/scanner 展开评估完全一致（最近 60 根收盘价线性回归中轨 ± 1.5σ 上下轨）。入场：仅在上升/横盘通道（拒绝明确下降通道接刀）中，价回踩下轨支撑企稳收阳、RSI 拐头、处通道下半区时低吸。出场（分批）：触中轨卖 1/2 并保本、触上轨剩余全部止盈；跌破下轨逾 3% 破位止损、超 40 根未兼现则超时离场。诚实口径：纯多头、非预测；“低吸=接刀”风险靠「拒绝下降通道 + 破位止损 + 保本」控制；参数择优有过拟合风险；强单边趋势里会过早止盈、明显跑输趋势跟随。含双边手续费、次日开盘撮合。对应 /chart「策略图层」可叠加下轨交易计划色块 + 买卖翻转标记。",
+      tags: ["mean-reversion", "regression-channel", "support-bounce", "scale-out", "breakeven-stop", "complementary", "reproduction"],
+    },
+    run: (candles) => runChannelReversion(candles),
   },
   {
     meta: {

@@ -4,6 +4,26 @@
 
 ---
 
+## [0.57.0] - 2026-06-29
+
+> **新增策略：回归通道均值回归 V1（`channel-reversion-v1`）**，并写设计文档 `docs/channel-reversion-design.md` 存档。为回答「V5 为何错过回归通道下轨支撑/空翻多等买点」而新增：V3/V4/V5 是 RSI 趋势跟随系统、叠 ADX≥20 趋势闸门，**结构性排斥**“回踩下轨低吸”这类均值回归买点；把低吸硬塞进趋势系统会互撑，故新增一个**独立互补**策略。回测：胜率 ~53%（全场最高）、回撤 −12.4%，但在这篮子强趋势票上平均收益约为零（−1.8%）——其价值是**状态互补**（吃震荡箱体）而非独立跑赢。**默认 Pro 策略仍保持 V3**。
+
+### 新增
+- `src/lib/indicators.ts`：新增 `computeRegressionChannel(candles, len=60, k=1.5)`——滚动线性回归通道（与 /chart 粉色通道、/scanner 展开评估同口径：最近 60 根收盘最小二乘中轨 ± 1.5σ），逐根输出 mid/upper/lower/slope。
+- `src/lib/tvStrategies.ts`：新增 `ChannelReversionParams` / `computeChannelReversion` / `runChannelReversion(Params)`。**入场**：仅在上升通道（relSlope≥minSlopeRel 且 close>MA60）回踩下轨、今日收回下轨上方且收阳、RSI 拐头、处通道下半区时低吸。**出场（分批）**：中轨卖 1/2 并保本、上轨剩余全部止盈；跌破下轨逾 1.5% 破位止损、超 40 根超时离场。复用 `executeTradesNextOpen` 的 `sizePct` 分批平仓。
+- `src/lib/strategies.ts`：注册 `channel-reversion-v1` 策略卡（`compute` + `backtest`），`/chart` 策略图层、`/analyze`、`/backtest/strategy` 均可选。
+- `docs/channel-reversion-design.md`：设计文档（V5 为何错过低吸点的根因、入场/出场规格、回测结论与参数表）。
+
+### 回测（12 只 A 股 · 400 根日线 · 含双边手续费 · 次日开盘撮合）
+
+| 指标 | Channel Reversion | V5 | V3 | 买入持有 |
+|---|---|---|---|---|
+| 平均收益 | −1.8% | +22.1% | +71.4% | +163.7% |
+| 平均最大回撤 | −12.4% | −11.4% | −21.1% | — |
+| 平均胜率 | 52.8%（最高） | 38.8% | 35.0% | — |
+
+---
+
 ## [0.56.0] - 2026-06-30
 
 > **新增策略 Cardwell RSI Trade Navigator 分批止盈版 V5（`tv-cardwell-rsi-navigator-v5`）**，并写设计文档 `docs/cardwell-v5-design.md` 存档。基于 87 笔 V4 交易的逐笔诊断（赢家/输家在入场那一刻几乎不可区分，继续在入场端加指标过滤会连大赢家一起滤掉、降低每笔期望），把优化杠杆全部放到**出场管理 + 趋势判断**：Tier 1 分批止盈 + 保本 + TP1 前紧止损；Tier 2 ADX 趋势闸门 + 再入场质量闸门。**回测达成设计目标——平均最大回撤从 V4 −23% 砍到 −11.5%、胜率升到 38%（最高）**；代价是总收益从 +87% 降到 +22%（分批/紧止损在控制风险的同时封顶了极少数大牛股尾段）。**默认 Pro 策略仍保持 V3**，V5 作为「低回撤/高一致性」可选变体提供。
