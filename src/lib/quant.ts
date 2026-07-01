@@ -195,6 +195,105 @@ export function executeTradesNextOpen(candles: Candle[], base: BacktestResult): 
 }
 
 /**
+ * 目标仓位序列撮合（次日开盘）——多策略并行决策 Ensemble 专用。
+ *
+ * 输入 targetPos[i] = 「第 i 根收盘时」希望持有的仓位比例（0..1，占当前总权益），
+ * 在「第 i+1 根开盘价」按目标再平衡（买卖差额，含双边成本模型）；即第 i 根决策、
+ * 第 i+1 根开盘执行，与 executeTradesNextOpen 的无未来函数口径一致。末根目标无次日
+ * 开盘不执行。为防抖动，仅当目标与现仓市值偏差 > 1% 权益时才调仓。
+ *
+ * 净值口径沿用 cash + shares*close（部分仓位不产生虚假断崖回撤）。一段持仓从空仓
+ * 建立到重新归零记为一笔，用于胜率统计。
+ */
+export function executeTargetPositionNextOpen(
+  candles: Candle[],
+  targetPos: number[],
+): BacktestResult {
+  const n = candles.length;
+  const EMPTY: BacktestResult = { winRate: 0, sharpe: 0, strategyReturn: 0, stockReturn: 0, trades: [], history: [] };
+  if (n < 2 || targetPos.length !== n) return EMPTY;
+
+  let firstSig = -1;
+  for (let i = 0; i < n - 1; i++) {
+    if ((targetPos[i] || 0) > 1e-6) { firstSig = i; break; }
+  }
+  if (firstSig < 0) return EMPTY;
+  const startIdx = firstSig + 1;
+
+  const trades: TradeAction[] = [];
+  const history: BacktestResult["history"] = [];
+  let cash = 100000;
+  let shares = 0;
+  let avgCost = 0;
+  let posDeployed = 0;
+  let posProceeds = 0;
+  let winCount = 0;
+  let tradeCount = 0;
+  const initialStockWorth = candles[startIdx].close;
+  const EPS = 1e-6;
+
+  for (let i = startIdx; i < n; i++) {
+    const c = candles[i];
+    const fill = Number.isFinite(c.open) && c.open > 0 ? c.open : c.close;
+    const tgt = Math.max(0, Math.min(1, targetPos[i - 1] || 0));
+    const equity = cash + shares * fill;
+    const curShareVal = shares * fill;
+    const diff = tgt * equity - curShareVal;
+
+    if (diff > equity * 0.01 && cash > 1) {
+      const spend = Math.min(cash, diff);
+      const bought = buyShares(spend, fill, DEFAULT_COST_MODEL);
+      if (bought > EPS) {
+        avgCost = shares + bought > 0 ? (avgCost * shares + fill * bought) / (shares + bought) : fill;
+        shares += bought;
+        cash -= spend;
+        posDeployed += spend;
+        trades.push({ type: "buy", date: c.date, price: fill, reason: `Ensemble 调仓至 ${(tgt * 100).toFixed(0)}%`, sizePct: equity > 0 ? spend / equity : undefined });
+      }
+    } else if (diff < -equity * 0.01 && shares > EPS) {
+      const sellFrac = curShareVal > 0 ? Math.min(1, -diff / curShareVal) : 0;
+      const sold = shares * sellFrac;
+      if (sold > EPS) {
+        const proceeds = sellProceeds(sold, fill, DEFAULT_COST_MODEL);
+        cash += proceeds;
+        shares -= sold;
+        posProceeds += proceeds;
+        trades.push({ type: "sell", date: c.date, price: fill, reason: `Ensemble 调仓至 ${(tgt * 100).toFixed(0)}%`, profitPct: avgCost > 0 ? ((fill - avgCost) / avgCost) * 100 : 0, sizePct: sellFrac });
+        if (shares <= EPS) {
+          tradeCount++;
+          if (posProceeds > posDeployed) winCount++;
+          shares = 0;
+          avgCost = 0;
+          posDeployed = 0;
+          posProceeds = 0;
+        }
+      }
+    }
+
+    const worth = cash + shares * c.close;
+    history.push({
+      date: c.date,
+      strategyWorth: Number(worth.toFixed(0)),
+      stockWorth: Number(((c.close / initialStockWorth) * 100000).toFixed(0)),
+    });
+  }
+
+  const finalWorth = cash + shares * candles[n - 1].close;
+  const strategyReturn = ((finalWorth - 100000) / 100000) * 100;
+  const stockReturn = ((candles[n - 1].close - initialStockWorth) / initialStockWorth) * 100;
+  const winRate = tradeCount > 0 ? (winCount / tradeCount) * 100 : 0;
+
+  return {
+    winRate: Number(winRate.toFixed(1)),
+    sharpe: annualizedSharpe(history),
+    strategyReturn: Number(strategyReturn.toFixed(2)),
+    stockReturn: Number(stockReturn.toFixed(2)),
+    trades,
+    history,
+  };
+}
+
+/**
  * 估算个股在最新收盘价下的筹码分布。
  * 算法原理：基于 120 天日K线，以每日换手率进行筹码历史衰减。
  * 每日新筹码以当天的收盘价为中心，结合最高/最低价进行三角概率分布沉淀。

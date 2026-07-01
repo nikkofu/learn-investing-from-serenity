@@ -27,6 +27,7 @@ import {
   runConfluenceV1,
 } from "./indicatorStrategies";
 import { runTvSupertrendAdaptiveV1, runTvCardwellRsiNavigatorV1, runTvCardwellRsiNavigatorV2, runTvCardwellRsiNavigatorV3, runTvCardwellRsiNavigatorV4, runTvCardwellRsiNavigatorV5, runTvKamaMomentumV1, runChannelReversion } from "./tvStrategies";
+import { runEnsembleV1 } from "./ensemble";
 
 /** 策略元信息（名称 / 版本 / 简介，供 UI 展示与切换）。 */
 export interface StrategyMeta {
@@ -47,6 +48,21 @@ export interface StrategyContext {
 export interface Strategy {
   meta: StrategyMeta;
   run: (candles: Candle[], ctx: StrategyContext) => BacktestResult;
+  /**
+   * 自撮合标记：run() 已在内部完成「次日开盘」撮合（返回的是执行后的净值/成交），
+   * 调用方不应再套一层 executeTradesNextOpen。多策略并行决策（Ensemble）走目标
+   * 仓位序列撮合 executeTargetPositionNextOpen，故设为 true；普通信号策略缺省 false。
+   */
+  selfMatched?: boolean;
+}
+
+/**
+ * 统一把某策略执行成回测结果：普通信号策略走 executeTradesNextOpen（信号→次日开盘
+ * 撮合）；自撮合策略（Ensemble）已在 run() 内撮合，直接返回其结果，避免二次撮合。
+ */
+export function executeStrategy(strategy: Strategy, candles: Candle[], ctx: StrategyContext): BacktestResult {
+  const raw = strategy.run(candles, ctx);
+  return strategy.selfMatched ? raw : executeTradesNextOpen(candles, raw);
 }
 
 /** 策略回测产物（元信息 + 结果），用于接口返回与前端渲染。 */
@@ -251,6 +267,18 @@ const STRATEGIES: Strategy[] = [
   },
   {
     meta: {
+      id: "ensemble-v1",
+      name: "多策略并行决策 V1（Ensemble）",
+      version: "1.0",
+      description:
+        "架构 B「加权投票 + 连续仓位聚合」的元策略：5 个成员并行——趋势核心 Cardwell V4/V3 + Chokepoint 动量 V5，均值回归卫星 回归通道 V1 + RSI 超卖回归 V1。各成员逐根敞口按权重加权平均，再由「方向感知 regime」（ADX 定趋势强弱 + 回归通道斜率定方向）调制：上升趋势期抬升趋势成员、震荡/下行期抬升均值回归成员，得到 0–95% 的连续目标仓位，走 executeTargetPositionNextOpen 按次日开盘再平衡撮合（防抖阈值 1% 权益）。目的不是最高收益，而是压回撤、提跨标的一致性——12 只篮子回测：收益 +63%、最大回撤 −16.6%（优于全部趋势核心单策略）、盈利股占比 50%、夏普 0.15，满足设计验收 §4.4。诚实口径：纯多头、非预测；不跑赢买入持有（+163.7%，单边强牛里任何择时都牺牲尾部收益）；成员/权重经篮子择优有过拟合风险；连续仓位下「胜率」口径参考意义有限。默认 Pro 策略维持 V7 不变，本策略为可选元策略。",
+      tags: ["ensemble", "multi-strategy", "regime-adaptive", "position-sizing", "risk-parity", "complementary", "meta-strategy"],
+    },
+    selfMatched: true,
+    run: (candles, ctx) => runEnsembleV1(candles, ctx),
+  },
+  {
+    meta: {
       id: "confluence-v1",
       name: "多指标共振（旗舰·指标组合）",
       version: "1.0",
@@ -334,10 +362,11 @@ export function getStrategy(id: string): Strategy | undefined {
 
 /**
  * 跑全部已登记策略，返回 {元信息, 结果} 数组（顺序同 STRATEGIES）。
- * 所有策略统一走「次日开盘成交（T+1 open）」撮合（executeTradesNextOpen），口径全站一致。
+ * 统一「次日开盘成交（T+1 open）」口径：普通信号策略走 executeTradesNextOpen，
+ * 自撮合元策略（Ensemble）已在 run() 内按目标仓位撮合，直接取其结果（见 executeStrategy）。
  */
 export function runAllStrategies(candles: Candle[], ctx: StrategyContext): StrategyBacktest[] {
-  return STRATEGIES.map((s) => ({ meta: s.meta, result: executeTradesNextOpen(candles, s.run(candles, ctx)) }));
+  return STRATEGIES.map((s) => ({ meta: s.meta, result: executeStrategy(s, candles, ctx) }));
 }
 
 /** 从策略产物数组中取默认策略的结果（找不到则取第一个）。 */
